@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Your real profile and personal documents should never be committed.
+profile.yaml
+documents/
+*.pdf
+*.docx

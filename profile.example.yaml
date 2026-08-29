@@ -1,0 +1,58 @@
+# Copy this file to profile.yaml and fill in your real details.
+# profile.yaml is gitignored -- your personal data is never committed.
+
+first_name: "Jane"
+last_name: "Doe"
+email: "jane.doe@example.com"
+phone: "+1 555 123 4567"
+
+address_line1: "123 Main St"
+address_line2: ""
+city: "San Francisco"
+state: "CA"
+postal_code: "94105"
+country: "United States"
+
+linkedin_url: "https://www.linkedin.com/in/janedoe"
+github_url: "https://github.com/janedoe"
+portfolio_url: "https://janedoe.dev"
+
+current_company: "Acme Corp"
+current_title: "Software Engineer"
+years_experience: "5"
+desired_salary: "150000"
+notice_period: "2 weeks"
+how_heard: "LinkedIn"
+
+# yes/no values -- used for common eligibility questions
+work_authorized: yes
+needs_sponsorship: no
+willing_to_relocate: no
+
+# Paths to files on disk, used for file-upload fields whose label
+# mentions "resume"/"CV" or "cover letter".
+resume_path: "documents/resume.pdf"
+cover_letter_path: "documents/cover_letter.pdf"
+
+education:
+  - school: "State University"
+    degree: "B.S."
+    field_of_study: "Computer Science"
+    graduation_year: "2019"
+
+experience:
+  - company: "Acme Corp"
+    title: "Software Engineer"
+    start_date: "2021-06"
+    end_date: "Present"
+    description: "Built and maintained backend services."
+
+# Free-form answers for recurring open-ended questions. The key is matched
+# as a substring against the question's label (case-insensitive); the value
+# is typed into the field verbatim, so tailor it before running a batch.
+custom_answers:
+  "why do you want to work here": "I'm excited about your product and mission."
+
+# Note: questions about race, gender, veteran status, disability, or sexual
+# orientation are intentionally NEVER auto-filled, even if you add answers
+# here -- the tool always flags them so you answer those yourself.
