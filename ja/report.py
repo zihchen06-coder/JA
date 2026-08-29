@@ -38,6 +38,11 @@ def print_report(report: FillReport) -> None:
             print(f"  ✗ {r.label}  -  {reason}")
         print()
 
+    already = [r for r in report.results if r.action == "already_filled"]
+    if already:
+        print(_color(f"Already filled, left untouched ({len(already)}).", DIM))
+        print()
+
     errors = [r for r in report.results if r.action == "error"]
     if errors:
         print(_color(f"Errors while filling ({len(errors)}):", RED))

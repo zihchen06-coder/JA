@@ -1,0 +1,6 @@
+# One job application URL per line. Blank lines and #-comments are ignored.
+# Copy to urls.txt (gitignored) and fill in the postings you're applying to.
+
+https://boards.greenhouse.io/example/jobs/1234567
+https://jobs.lever.co/example/00000000-0000-0000-0000-000000000000/apply
+https://example.wd1.myworkdayjobs.com/en-US/Careers/job/Example-Role/apply

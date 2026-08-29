@@ -84,6 +84,10 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
     required = f.get("required", False)
     ftype = f["type"]
 
+    if f.get("has_value"):
+        report.add(label, None, "already_filled", "Left as-is.", required)
+        return
+
     if ftype == "file":
         _handle_file_field(page, profile, report, f)
         return
@@ -143,6 +147,10 @@ def _handle_checkbox(page: Any, profile: Profile, report: FillReport, f: dict) -
         report.add(label, canonical, "skipped_no_data", "", required)
         return
 
+    if f.get("checked") is value:
+        report.add(label, canonical, "already_filled", "Left as-is.", required)
+        return
+
     try:
         loc = page.locator(_sel(f["ja_id"]))
         if value:
@@ -180,6 +188,10 @@ def _handle_file_field(page: Any, profile: Profile, report: FillReport, f: dict)
 def _handle_radio_group(page: Any, profile: Profile, report: FillReport, options: list[dict]) -> None:
     group_label = next((o.get("group_label") for o in options if o.get("group_label")), "")
     required = any(o.get("required") for o in options)
+
+    if any(o.get("checked") for o in options):
+        report.add(group_label, None, "already_filled", "Left as-is.", required)
+        return
 
     if matcher.is_eeo_label(group_label):
         report.add(group_label, None, "needs_review", "Self-identification question: fill in yourself.", required)

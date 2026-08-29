@@ -6,6 +6,7 @@ venv/
 
 # Your real profile and personal documents should never be committed.
 profile.yaml
+urls.txt
 documents/
 *.pdf
 *.docx

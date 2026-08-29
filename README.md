@@ -29,6 +29,14 @@ cp profile.example.yaml profile.yaml
 
 `profile.yaml` is gitignored — it's never committed.
 
+If `playwright install` isn't an option, point the tool at a Chrome or
+Chromium you already have:
+
+```bash
+python apply.py fill --url "..." --browser-path /usr/bin/google-chrome
+# or: export JA_BROWSER_PATH=/usr/bin/google-chrome
+```
+
 ## Usage
 
 ```bash
@@ -54,9 +62,39 @@ Required fields left blank (1):
   ✗ Why do you want to work here?  -  no matching profile field
 ```
 
-The browser stays open. Review everything, answer the flagged questions,
-fix anything mismatched, and click submit yourself. Press Enter in the
-terminal when you're done to close the browser.
+The browser stays open and the terminal offers:
+
+```
+[r] re-fill this page (use after clicking Next on a multi-page form)
+[n] done with this application
+[q] quit
+```
+
+Review everything, answer the flagged questions, fix anything mismatched,
+and click submit yourself.
+
+### Multi-page forms (Workday)
+
+Workday and similar platforms reveal fields a page at a time. Click **Next**
+in the browser, then press **`r`** in the terminal to re-scan and fill the
+newly revealed fields. Repeat per step.
+
+Re-filling never overwrites a field that already has a value — anything you
+corrected by hand stays as you left it, and those fields are reported as
+"already filled, left untouched".
+
+### Batch mode
+
+Work through a list of postings in one browser session:
+
+```bash
+python apply.py batch --urls urls.txt
+```
+
+`urls.txt` is one application URL per line; blank lines and `#` comments
+are ignored. Each posting is filled and then waits for you — press `n` to
+move to the next one, `q` to stop. A URL that fails to load is reported and
+the batch continues.
 
 Validate your profile file without opening a browser:
 
@@ -101,8 +139,8 @@ behavior.
 
 ## Limitations
 
-- Multi-page forms (common on Workday) need `fill` re-run (or the page
-  re-scanned) per page/step, since new fields only appear after navigating.
+- Multi-page forms need a manual `r` press per step (see above); the tool
+  doesn't click "Next" for you, by design.
 - Highly custom React/JS form widgets that don't use real `<input>`/
   `<select>` elements (e.g. custom dropdowns) may not be detected.
 - This is a heuristic label matcher, not a guarantee — always check the

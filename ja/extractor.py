@@ -86,6 +86,11 @@ _EXTRACT_JS = r"""
     return nearestPrecedingText(el);
   }
 
+  // Clear ids from any previous scan. Elements that have since become
+  // hidden would otherwise keep a stale id and collide with a freshly
+  // assigned one, making the Python-side locator ambiguous.
+  document.querySelectorAll('[data-ja-id]').forEach(el => el.removeAttribute('data-ja-id'));
+
   const SKIP_TYPES = new Set(['hidden', 'submit', 'button', 'image', 'reset']);
   const nodes = Array.from(document.querySelectorAll('input, select, textarea'));
   const results = [];
@@ -111,11 +116,17 @@ _EXTRACT_JS = r"""
     if (type === 'radio' || type === 'checkbox') {
       item.label = labelFor(el);
       item.group_label = groupLabelFor(el);
+      item.checked = !!el.checked;
     } else if (tag === 'select') {
       item.label = labelFor(el);
       item.options = Array.from(el.options).map(o => ({ value: o.value, text: cleanText(o.text) }));
+      item.has_value = !!el.value;
+    } else if (type === 'file') {
+      item.label = labelFor(el);
+      item.has_value = !!(el.files && el.files.length);
     } else {
       item.label = labelFor(el);
+      item.has_value = !!el.value;
     }
 
     results.push(item);
