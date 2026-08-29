@@ -19,15 +19,39 @@ for you to answer by hand, regardless of what's in your profile.
 
 ## Setup
 
+Requires Python 3.10+. On macOS, run `python3 --version` first; if it's
+missing, `xcode-select --install` provides it.
+
+Use a virtual environment — on macOS and most Linux distros a bare
+`pip install` either isn't on PATH or is refused with
+"externally-managed-environment":
+
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 playwright install chromium
-
-cp profile.example.yaml profile.yaml
-# edit profile.yaml with your real details
 ```
 
-`profile.yaml` is gitignored — it's never committed.
+Inside the venv, `pip`, `playwright`, and `python` all work as written
+above. **Each new terminal session needs `source .venv/bin/activate`
+again** before running `apply.py`, otherwise you'll get
+`ModuleNotFoundError: No module named 'playwright'`.
+
+Then set up your profile:
+
+```bash
+cp profile.example.yaml profile.yaml
+mkdir documents                    # put resume.pdf / cover_letter.pdf here
+# edit profile.yaml with your real details, then:
+python apply.py validate
+```
+
+`profile.yaml` and `documents/` are gitignored — your personal data and
+files are never committed.
+
+Note that `validate` fails if `resume_path` or `cover_letter_path` points
+at a file that doesn't exist; either add the file or blank the path out.
 
 If `playwright install` isn't an option, point the tool at a Chrome or
 Chromium you already have:
