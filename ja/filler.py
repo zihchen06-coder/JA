@@ -10,7 +10,7 @@ from typing import Any
 
 from . import matcher
 from .extractor import extract_fields
-from .field_aliases import BOOLEAN_FIELDS
+from .field_aliases import BOOLEAN_FIELDS, EDUCATION_FIELDS
 from .platform_detect import detect_platform
 from .profile import Profile
 
@@ -47,9 +47,34 @@ class FillReport:
             if r.required and r.action in ("skipped_no_match", "skipped_no_data")
         ]
 
+    @property
+    def unmatched(self) -> list[FieldResult]:
+        """Every field left blank, required or not -- what --verbose reports.
+
+        These labels are the raw material for extending FIELD_ALIASES or
+        adding a custom_answers entry.
+        """
+        return [
+            r for r in self.results
+            if r.action in ("skipped_no_match", "skipped_no_data")
+        ]
+
 
 def _sel(ja_id: str) -> str:
     return f'[data-ja-id="{ja_id}"]'
+
+
+def _profile_value(profile: Profile, canonical: str) -> Any:
+    """Resolve a canonical field name to its value on the profile.
+
+    Education fields live on the first `education` entry rather than on the
+    profile itself, since forms usually ask for one flat school/degree.
+    """
+    if canonical in EDUCATION_FIELDS:
+        if not profile.education:
+            return None
+        return getattr(profile.education[0], canonical, None)
+    return getattr(profile, canonical, None)
 
 
 def _match_custom_answer(label: str, profile: Profile) -> str | None:
@@ -113,7 +138,7 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
         report.add(label or f["name"] or f["ja_id"], None, "skipped_no_match", "", required)
         return
 
-    value = getattr(profile, canonical, None)
+    value = _profile_value(profile, canonical)
     if value in (None, ""):
         report.add(label, canonical, "skipped_no_data", "Profile has no value for this field.", required)
         return

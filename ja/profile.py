@@ -91,6 +91,45 @@ def _coerce_bool(value: Any) -> bool | None:
     raise ProfileError(f"Expected a yes/no value, got: {value!r}")
 
 
+def profile_to_dict(profile: Profile) -> dict[str, Any]:
+    """Plain-data view of a profile, for the web UI and for saving."""
+    data: dict[str, Any] = {}
+    for f in fields(Profile):
+        value = getattr(profile, f.name)
+        if f.name in ("education", "experience"):
+            data[f.name] = [vars(entry).copy() for entry in value]
+        else:
+            data[f.name] = value
+    return data
+
+
+def save_profile(path: str, data: dict[str, Any]) -> Profile:
+    """Validate a plain dict, write it to `path` as YAML, and return it.
+
+    Writing goes through load_profile first so an edit that would break the
+    file is rejected before it can overwrite a working profile.
+    """
+    known = {f.name for f in fields(Profile)}
+    cleaned = {k: v for k, v in data.items() if k in known}
+
+    for bool_field in ("work_authorized", "needs_sponsorship", "willing_to_relocate"):
+        if bool_field in cleaned:
+            cleaned[bool_field] = _coerce_bool(cleaned[bool_field])
+
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(cleaned, f, sort_keys=False, allow_unicode=True, default_flow_style=False)
+
+    try:
+        profile = load_profile(tmp_path)
+    except ProfileError:
+        os.unlink(tmp_path)
+        raise
+
+    os.replace(tmp_path, path)
+    return profile
+
+
 def load_profile(path: str) -> Profile:
     if not os.path.isfile(path):
         raise ProfileError(

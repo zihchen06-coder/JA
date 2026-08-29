@@ -15,7 +15,7 @@ def _color(text: str, code: str) -> str:
     return f"{code}{text}{RESET}"
 
 
-def print_report(report: FillReport) -> None:
+def print_report(report: FillReport, verbose: bool = False) -> None:
     print(f"\nDetected platform: {report.platform}\n")
 
     if report.filled:
@@ -37,6 +37,18 @@ def print_report(report: FillReport) -> None:
             reason = r.detail or "no matching profile field"
             print(f"  ✗ {r.label}  -  {reason}")
         print()
+
+    if verbose:
+        optional_blank = [r for r in report.unmatched if not r.required]
+        if optional_blank:
+            print(_color(f"Other fields left blank ({len(optional_blank)}):", DIM))
+            for r in optional_blank:
+                print(f"  · {r.label}  -  {r.detail or 'no matching profile field'}")
+            print(_color(
+                "  (To teach the tool one of these, add its wording to "
+                "ja/field_aliases.py,\n   or add a custom_answers entry to your "
+                "profile for open-ended ones.)", DIM))
+            print()
 
     already = [r for r in report.results if r.action == "already_filled"]
     if already:

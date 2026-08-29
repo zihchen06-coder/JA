@@ -61,6 +61,24 @@ python apply.py fill --url "..." --browser-path /usr/bin/google-chrome
 # or: export JA_BROWSER_PATH=/usr/bin/google-chrome
 ```
 
+## The easy way: double-click, no terminal
+
+**Double-click `JobApply.command`** in Finder. It sets everything up the
+first time (a few minutes), then opens a local page in your browser where
+you can:
+
+- edit your whole profile in a form — no YAML, no text editor
+- paste a job URL and click **Fill this application**
+- see what filled, what needs your answer, and what's still blank
+- click **Re-fill this page** after clicking Next on a multi-page form
+
+The page runs on `127.0.0.1` only. Nothing is sent anywhere.
+
+macOS may warn the first time because the file came from the internet:
+right-click it → **Open** → **Open** to allow it once.
+
+To start it from a terminal instead: `python apply.py ui`
+
 ## Usage
 
 ```bash
@@ -106,6 +124,38 @@ newly revealed fields. Repeat per step.
 Re-filling never overwrites a field that already has a value — anything you
 corrected by hand stays as you left it, and those fields are reported as
 "already filled, left untouched".
+
+### Using your own Chrome
+
+By default the tool drives the Chromium that `playwright install` downloads,
+with no logins or history. To use the Google Chrome already on your machine:
+
+```bash
+python apply.py fill --url "..." --chrome
+```
+
+To keep logins between runs (useful for Workday sites that make you create
+an account per company), give it a profile folder of its own:
+
+```bash
+python apply.py fill --url "..." --chrome --user-data-dir ~/.ja-chrome-profile
+```
+
+The first run signs you in; later runs remember. Use a dedicated folder like
+this rather than your real Chrome profile — Chrome permits only one process
+per profile directory, so pointing at your everyday profile means quitting
+Chrome entirely (Cmd+Q) before every run.
+
+### Seeing what it missed
+
+```bash
+python apply.py fill --url "..." --verbose
+```
+
+Adds a list of every optional field left blank, with the exact label wording
+the page used. That's what you need to extend `ja/field_aliases.py` (for
+fields it should recognize) or add a `custom_answers` entry (for open-ended
+questions).
 
 ### Batch mode
 

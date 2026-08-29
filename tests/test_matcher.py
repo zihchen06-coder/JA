@@ -21,6 +21,23 @@ def test_matches_sponsorship_question():
     assert matcher.match_field("Will you now or in the future require visa sponsorship?") == "needs_sponsorship"
 
 
+def test_matches_education_fields():
+    assert matcher.match_field("School Name *") == "school"
+    assert matcher.match_field("Highest Level of Education") == "degree"
+    assert matcher.match_field("Major") == "field_of_study"
+    assert matcher.match_field("Expected Graduation") == "graduation_year"
+
+
+def test_matches_most_recent_employment():
+    assert matcher.match_field("Most Recent Employer") == "current_company"
+    assert matcher.match_field("Most Recent Job Title") == "current_title"
+
+
+def test_sensitive_questions_are_flagged_not_answered():
+    for label in ["Pronouns", "Are you a US citizen?", "Date of Birth", "National Origin"]:
+        assert matcher.is_eeo_label(label), label
+
+
 def test_no_match_for_unrelated_text():
     assert matcher.match_field("Tell us about a challenging project") is None
 
