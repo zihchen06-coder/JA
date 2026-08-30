@@ -194,6 +194,25 @@ function renderResults(state) {
     html += `<h2 class="r">Errors (${errs.length})</h2><ul class="res">` +
       errs.map(r => `<li>${esc(r.label)} <span class="sm">— ${esc(r.detail)}</span></li>`).join("") + `</ul>`;
   }
+
+  // Everything else the page asked but the profile couldn't answer. Folded
+  // away by default, since it's reference material rather than a to-do list:
+  // these labels are what you'd paste in to have new wordings taught.
+  const optional = rs.filter(r => !r.required &&
+    (r.action === "skipped_no_match" || r.action === "skipped_no_data"));
+  if (optional.length) {
+    html += `<details style="margin-top:20px">
+      <summary class="sm" style="cursor:pointer">Other fields left blank (${optional.length}) —
+        click to see what this form asked for</summary>
+      <ul class="res">` +
+      optional.map(r => `<li>${esc(r.label)} <span class="sm">— ${esc(r.detail || "not recognized")}</span></li>`).join("") +
+      `</ul>
+      <p class="hint">Recognize one that should fill automatically? For an open-ended
+      question, add it under <strong>Saved answers</strong> on the My Profile tab. For a
+      standard field the tool didn't know the wording for, add that wording to
+      <code>ja/field_aliases.py</code>.</p>
+    </details>`;
+  }
   box.innerHTML = html;
 }
 
