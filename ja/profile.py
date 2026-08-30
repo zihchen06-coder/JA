@@ -66,6 +66,17 @@ class Profile:
     employment_type: str = ""
     languages: str = ""
     references: str = ""
+
+    # Voluntary self-identification. Filled on applications only when you
+    # set them yourself here; blank means the question stays flagged for you.
+    gender: str = ""
+    pronouns: str = ""
+    hispanic_latino: str = ""
+    race_ethnicity: str = ""
+    veteran_status: str = ""
+    disability_status: str = ""
+    sexual_orientation: str = ""
+    transgender_status: str = ""
     # Pasted into cover-letter text boxes (as opposed to cover_letter_path,
     # which is uploaded to file inputs).
     cover_letter_text: str = ""

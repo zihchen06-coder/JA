@@ -82,9 +82,19 @@ custom_answers:
   # "additional information": ""
   # "anything else you would like us to know": ""
 
-# Note: these are NEVER auto-filled, even if you add answers above -- the
-# tool always flags them so you answer them yourself:
-#   * race, gender, ethnicity, veteran status, disability, sexual
-#     orientation, pronouns, date of birth, citizenship, national origin
+# Voluntary self-identification (EEO). Filled ONLY from what you put here --
+# never inferred from your name, resume, or anything else. Leave any of them
+# blank and that question stays flagged for you to answer by hand.
+# Use the exact wordings the forms use; the UI offers them as dropdowns.
+gender: ""                 # Male | Female | Non-binary | Decline to self-identify
+pronouns: ""               # e.g. he/him, she/her, they/them
+hispanic_latino: ""        # Yes | No | Decline to self-identify
+race_ethnicity: ""         # e.g. Asian | White | Black or African American | ...
+veteran_status: ""         # I am not a protected veteran | I identify as one or more ... | I don't wish to answer
+disability_status: ""      # Yes, I have a disability ... | No, I do not have a disability ... | I do not want to answer
+sexual_orientation: ""
+transgender_status: ""
+
+# These are NEVER auto-filled, whatever you configure -- always flagged:
 #   * criminal history (what may lawfully be asked varies by state and city)
 #   * salary history (illegal for employers to ask in many states)

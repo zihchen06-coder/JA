@@ -8,130 +8,138 @@ PAGE_HTML = r"""<!doctype html>
 <title>Job Application Autofill</title>
 <style>
   :root {
-    --bg: #f4f5f7;
-    --card: #ffffff;
-    --text: #14161a;
-    --muted: #6b7280;
-    --faint: #9aa1ad;
-    --line: #e4e7ec;
-    --line-soft: #eef0f4;
-    --accent: #4f46e5;
-    --accent-soft: #eef2ff;
-    --ok: #067647;
-    --ok-soft: #ecfdf3;
-    --warn: #b54708;
-    --warn-soft: #fffaeb;
-    --bad: #b42318;
-    --bad-soft: #fef3f2;
-    --shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.06);
-    --radius: 14px;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0d0f13;
-      --card: #16191f;
-      --text: #e8eaed;
-      --muted: #98a0ad;
-      --faint: #6e7681;
-      --line: #262b33;
-      --line-soft: #1e222a;
-      --accent: #818cf8;
-      --accent-soft: #1e1b4b;
-      --ok: #5ee9a4;
-      --ok-soft: #052e1c;
-      --warn: #fdb022;
-      --warn-soft: #2e1e05;
-      --bad: #fda29b;
-      --bad-soft: #2e1210;
-      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
-    }
+    color-scheme: dark;
+    --bg: #07080c;
+    --glass: rgba(255,255,255,.045);
+    --glass-strong: rgba(255,255,255,.075);
+    --stroke: rgba(255,255,255,.10);
+    --stroke-soft: rgba(255,255,255,.055);
+    --text: #eceef4;
+    --muted: #9aa3b5;
+    --faint: #6b7488;
+    --accent: #7c8cff;
+    --accent-2: #4bd6c4;
+    --ok: #4ade9c;
+    --warn: #fbbf5c;
+    --bad: #ff8b7d;
+    --radius: 18px;
   }
   * { box-sizing: border-box; }
   html { -webkit-font-smoothing: antialiased; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
     font: 15px/1.55 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    position: relative; overflow-x: hidden;
   }
-  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px 80px; }
+  /* Ambient colour behind the glass -- without something to refract, a
+     blurred translucent panel just looks grey. */
+  body::before {
+    content: ""; position: fixed; inset: -20% -10% auto -10%; height: 90vh; z-index: -1;
+    background:
+      radial-gradient(48% 46% at 18% 12%, rgba(124,140,255,.30), transparent 70%),
+      radial-gradient(42% 40% at 82% 8%, rgba(75,214,196,.20), transparent 70%),
+      radial-gradient(50% 48% at 55% 42%, rgba(180,110,255,.16), transparent 72%);
+    filter: blur(20px);
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 22px 90px; }
 
-  header { padding: 34px 0 22px; }
-  h1 { margin: 0; font-size: 26px; letter-spacing: -.022em; font-weight: 640; }
-  .tagline { color: var(--muted); font-size: 14px; margin-top: 7px; }
+  header { padding: 44px 0 24px; }
+  h1 {
+    margin: 0; font-size: 30px; letter-spacing: -.028em; font-weight: 650;
+    background: linear-gradient(96deg, #fff 20%, #b9c2ff 62%, #7fe6d8 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .tagline { color: var(--muted); font-size: 14.5px; margin-top: 9px; }
   .tagline strong { color: var(--text); font-weight: 600; }
 
   .tabs {
-    display: inline-flex; gap: 3px; padding: 4px; margin-bottom: 20px;
-    background: var(--line-soft); border-radius: 11px;
+    display: inline-flex; gap: 4px; padding: 5px; margin-bottom: 22px;
+    background: var(--glass); border: 1px solid var(--stroke-soft);
+    border-radius: 14px; backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
   }
   .tabs button {
     border: 0; background: none; font: inherit; font-size: 14px; font-weight: 550;
-    color: var(--muted); padding: 7px 16px; border-radius: 8px; cursor: pointer;
-    transition: background .15s, color .15s;
+    color: var(--muted); padding: 8px 18px; border-radius: 10px; cursor: pointer;
+    transition: background .18s, color .18s;
   }
   .tabs button:hover { color: var(--text); }
-  .tabs button.on { background: var(--card); color: var(--text); box-shadow: var(--shadow); }
+  .tabs button.on {
+    background: var(--glass-strong); color: #fff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 2px 12px rgba(0,0,0,.3);
+  }
 
   .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-    padding: 24px; margin-bottom: 16px; box-shadow: var(--shadow);
+    background: var(--glass); border: 1px solid var(--stroke); border-radius: var(--radius);
+    padding: 26px; margin-bottom: 18px;
+    backdrop-filter: blur(26px) saturate(170%); -webkit-backdrop-filter: blur(26px) saturate(170%);
+    box-shadow: 0 1px 0 rgba(255,255,255,.06) inset, 0 18px 44px rgba(0,0,0,.42);
   }
 
-  label { display: block; font-size: 13px; font-weight: 550; color: var(--muted); margin-bottom: 6px; }
+  label { display: block; font-size: 12.5px; font-weight: 550; color: var(--muted); margin-bottom: 6px; }
   input, select, textarea {
-    width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px;
-    background: var(--bg); color: var(--text); font: inherit; font-size: 14.5px;
-    transition: border-color .15s, box-shadow .15s;
+    width: 100%; padding: 10px 13px; border: 1px solid var(--stroke); border-radius: 11px;
+    background: rgba(0,0,0,.26); color: var(--text); font: inherit; font-size: 14.5px;
+    transition: border-color .18s, box-shadow .18s, background .18s;
   }
+  input::placeholder { color: var(--faint); }
   input:focus, select:focus, textarea:focus {
-    outline: none; border-color: var(--accent);
-    box-shadow: 0 0 0 3.5px color-mix(in srgb, var(--accent) 16%, transparent);
+    outline: none; border-color: var(--accent); background: rgba(0,0,0,.36);
+    box-shadow: 0 0 0 3.5px rgba(124,140,255,.20);
   }
-  textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 15px; }
-  .row { margin-bottom: 15px; }
+  select option { background: #14161d; color: var(--text); }
+  textarea { min-height: 92px; resize: vertical; line-height: 1.5; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(218px, 1fr)); gap: 16px; }
+  .row { margin-bottom: 16px; }
   .row:last-child { margin-bottom: 0; }
 
   button.act {
-    background: var(--accent); color: #fff; border: 0; padding: 11px 20px;
-    border-radius: 9px; font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer;
-    transition: filter .15s, transform .06s;
+    background: linear-gradient(180deg, #8b98ff, #6472f5); color: #fff; border: 0;
+    padding: 12px 22px; border-radius: 11px; font: inherit; font-size: 14.5px;
+    font-weight: 600; cursor: pointer; box-shadow: 0 6px 18px rgba(100,114,245,.35);
+    transition: filter .18s, transform .07s, box-shadow .18s;
   }
-  button.act:hover:not(:disabled) { filter: brightness(1.08); }
+  button.act:hover:not(:disabled) { filter: brightness(1.1); box-shadow: 0 8px 24px rgba(100,114,245,.45); }
   button.act:active:not(:disabled) { transform: translateY(1px); }
-  button.act:disabled { opacity: .45; cursor: default; }
+  button.act:disabled { opacity: .4; cursor: default; box-shadow: none; }
   button.ghost {
-    background: var(--card); border: 1px solid var(--line); color: var(--text);
-    padding: 10px 16px; border-radius: 9px; font: inherit; font-size: 14px;
-    font-weight: 550; cursor: pointer; transition: background .15s, border-color .15s;
+    background: var(--glass-strong); border: 1px solid var(--stroke); color: var(--text);
+    padding: 11px 18px; border-radius: 11px; font: inherit; font-size: 14px;
+    font-weight: 550; cursor: pointer; backdrop-filter: blur(12px);
+    transition: background .18s, border-color .18s;
   }
-  button.ghost:hover { background: var(--line-soft); border-color: var(--faint); }
+  button.ghost:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); }
 
   h2 {
-    font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
-    color: var(--faint); font-weight: 650; margin: 28px 0 13px;
+    font-size: 11.5px; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--faint); font-weight: 660; margin: 32px 0 14px;
   }
   h2:first-child { margin-top: 0; }
-  .hint { color: var(--muted); font-size: 13.5px; margin: 9px 0 0; line-height: 1.5; }
-  code { font-size: 12.5px; background: var(--line-soft); padding: 1.5px 5px; border-radius: 4px; }
-
-  .banner { padding: 12px 15px; border-radius: 10px; margin-top: 14px; font-size: 14px; }
-  .banner.bad { background: var(--bad-soft); color: var(--bad); white-space: pre-wrap;
-                border: 1px solid color-mix(in srgb, var(--bad) 22%, transparent); }
-
-  .group { margin-top: 22px; }
-  .group:first-child { margin-top: 0; }
-  .ghead { display: flex; align-items: center; gap: 9px; margin-bottom: 9px; }
-  .ghead h3 { margin: 0; font-size: 14.5px; font-weight: 620; }
-  .pill {
-    font-size: 12px; font-weight: 650; padding: 2px 9px; border-radius: 20px; line-height: 1.6;
+  .hint { color: var(--muted); font-size: 13.5px; margin: 10px 0 0; line-height: 1.55; }
+  .hint strong { color: #cdd4e4; }
+  code {
+    font-size: 12.5px; background: rgba(255,255,255,.08); padding: 2px 6px;
+    border-radius: 5px; color: var(--accent-2);
   }
-  .pill.g { background: var(--ok-soft); color: var(--ok); }
-  .pill.y { background: var(--warn-soft); color: var(--warn); }
-  .pill.r { background: var(--bad-soft); color: var(--bad); }
+
+  .banner { padding: 13px 16px; border-radius: 12px; margin-top: 15px; font-size: 14px; }
+  .banner.bad {
+    background: rgba(255,139,125,.10); color: var(--bad); white-space: pre-wrap;
+    border: 1px solid rgba(255,139,125,.28);
+  }
+
+  .group { margin-top: 24px; }
+  .group:first-child { margin-top: 0; }
+  .ghead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .ghead h3 { margin: 0; font-size: 14.5px; font-weight: 620; }
+  .pill { font-size: 11.5px; font-weight: 660; padding: 3px 10px; border-radius: 20px; }
+  .pill.g { background: rgba(74,222,156,.14); color: var(--ok); }
+  .pill.y { background: rgba(251,191,92,.14); color: var(--warn); }
+  .pill.r { background: rgba(255,139,125,.14); color: var(--bad); }
 
   ul.res { list-style: none; padding: 0; margin: 0; }
   ul.res li {
-    padding: 9px 0 9px 22px; border-bottom: 1px solid var(--line-soft);
+    padding: 10px 0 10px 24px; border-bottom: 1px solid var(--stroke-soft);
     font-size: 14px; position: relative;
   }
   ul.res li:last-child { border-bottom: 0; }
@@ -141,33 +149,39 @@ PAGE_HTML = r"""<!doctype html>
   ul.res.r li::before { content: "×"; color: var(--bad); }
   ul.res.n li::before { content: "·"; color: var(--faint); }
   .sm { color: var(--muted); font-size: 13px; }
-  .val { color: var(--muted); font-size: 13px; }
+  .val { color: var(--faint); font-size: 13px; }
 
-  details { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 16px; }
+  details { margin-top: 26px; border-top: 1px solid var(--stroke); padding-top: 18px; }
   summary {
     cursor: pointer; font-size: 13.5px; color: var(--muted); font-weight: 550;
     list-style: none; user-select: none;
   }
   summary::-webkit-details-marker { display: none; }
-  summary::before { content: "▸ "; display: inline-block; transition: transform .15s; }
+  summary::before { content: "▸ "; }
   details[open] summary::before { content: "▾ "; }
   summary:hover { color: var(--text); }
 
   .repeat {
-    border: 1px solid var(--line); border-radius: 11px; padding: 16px;
-    margin-bottom: 11px; background: var(--bg);
+    border: 1px solid var(--stroke-soft); border-radius: 13px; padding: 17px;
+    margin-bottom: 12px; background: rgba(0,0,0,.2);
   }
   .del {
     float: right; background: none; border: 0; color: var(--faint); cursor: pointer;
-    font-size: 13px; font-weight: 550; padding: 2px 6px; border-radius: 6px;
+    font-size: 13px; font-weight: 550; padding: 3px 8px; border-radius: 7px;
   }
-  .del:hover { color: var(--bad); background: var(--bad-soft); }
-  .steps { margin: 18px 0 0; padding-left: 20px; color: var(--muted); font-size: 13.5px; }
-  .steps li { margin-bottom: 4px; }
-  .actions { margin-top: 20px; display: flex; gap: 9px; flex-wrap: wrap; }
+  .del:hover { color: var(--bad); background: rgba(255,139,125,.12); }
+  .steps { margin: 20px 0 0; padding-left: 20px; color: var(--muted); font-size: 13.5px; }
+  .steps li { margin-bottom: 5px; }
+  .actions { margin-top: 22px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .spin { color: var(--muted); font-size: 13.5px; }
   .saved { font-size: 13.5px; font-weight: 550; }
   .saved.g { color: var(--ok); } .saved.r { color: var(--bad); }
+
+  .toggle { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+  .toggle input { width: 18px; height: 18px; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+  .toggle div { flex: 1; }
+  .toggle .t { font-size: 14px; font-weight: 550; color: var(--text); }
+  .toggle .d { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -253,6 +267,16 @@ const BOOLS = [
   ["can_perform_essential_functions","Can perform the job's essential functions?"],
   ["previously_employed_here","Previously employed by this company?"],
 ];
+const SELF_ID = [
+  ["gender","Gender"],
+  ["pronouns","Pronouns"],
+  ["hispanic_latino","Hispanic or Latino?"],
+  ["race_ethnicity","Race / ethnicity"],
+  ["veteran_status","Protected veteran status"],
+  ["disability_status","Disability status"],
+  ["sexual_orientation","Sexual orientation"],
+  ["transgender_status","Do you identify as transgender?"],
+];
 const LONG = [
   ["references","References (names and contact info)"],
   ["cover_letter_text","Cover letter text (for forms with a paste box)"],
@@ -260,7 +284,8 @@ const LONG = [
 const EDU = [["school","School"],["degree","Degree"],["field_of_study","Field of study"],["graduation_year","Graduation year"]];
 const EXP = [["company","Company"],["title","Title"],["start_date","Start date"],["end_date","End date"],["description","Description"]];
 
-let profile = null, documents = [], timer = null, lastKey = "", blanksOpen = false;
+let profile = null, documents = [], selfIdChoices = {}, settings = {};
+let timer = null, lastKey = "", blanksOpen = false;
 
 function el(h) { const t = document.createElement("template"); t.innerHTML = h.trim(); return t.content.firstChild; }
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
@@ -395,6 +420,41 @@ function renderProfile() {
     `<div class="row"><label for="f-${n}">${esc(l)}</label>
      <textarea id="f-${n}">${esc(p[n] || "")}</textarea></div>`).join("");
 
+  h += `<h2>Self-identification</h2>
+    <p class="hint" style="margin:0 0 14px">These are the voluntary EEO questions almost every
+    application asks. Answer them once here and they fill automatically from then on.
+    <strong>Anything left unset stays flagged for you to answer by hand</strong> — and nothing here
+    is ever guessed from your name or resume. Employers use these for aggregate reporting;
+    declining is always a valid answer.</p>
+    <div class="grid">` + SELF_ID.map(([n,l]) => {
+      const opts = selfIdChoices[n];
+      if (!opts) return field(n, l, p[n] || "");
+      const cur = p[n] || "";
+      return `<div class="row"><label for="f-${n}">${esc(l)}</label>
+        <select id="f-${n}">
+          <option value="" ${cur===""?"selected":""}>— not set —</option>` +
+          opts.map(o => `<option value="${esc(o)}" ${cur===o?"selected":""}>${esc(o)}</option>`).join("") +
+          (cur && !opts.includes(cur) ? `<option value="${esc(cur)}" selected>${esc(cur)}</option>` : "") +
+        `</select></div>`;
+    }).join("") + `</div>
+    <p class="hint">Criminal-history and salary-history questions are deliberately not here.
+    Those stay flagged every time: what employers may lawfully ask varies by state and city.</p>`;
+
+  h += `<h2>Browser &amp; sign-in</h2>
+    <div class="toggle">
+      <input type="checkbox" id="s-use_chrome" ${settings.use_chrome ? "checked" : ""}>
+      <div><div class="t">Use my Google Chrome</div>
+        <div class="d">Drives the Chrome installed on this Mac instead of the bundled browser.</div></div>
+    </div>
+    <div class="toggle">
+      <input type="checkbox" id="s-stay_signed_in" ${settings.stay_signed_in ? "checked" : ""}>
+      <div><div class="t">Stay signed in between applications</div>
+        <div class="d">Keeps cookies in a browser profile of the tool’s own, so sites you sign into
+        once — Workday accounts especially — stay signed in next time. Sign in inside the window
+        that opens; your password is never stored by this tool or sent anywhere.</div></div>
+    </div>
+    <p class="hint">Takes effect on the next application you open.</p>`;
+
   h += `<h2>Education</h2><div id="eduList"></div>
         <button class="ghost" onclick="addRow('edu')">Add school</button>`;
   h += `<h2>Work history</h2><div id="expList"></div>
@@ -439,6 +499,7 @@ async function saveProfile() {
   const out = {};
   SCALARS.forEach(([n]) => out[n] = document.getElementById("f-"+n).value.trim());
   LONG.forEach(([n]) => out[n] = document.getElementById("f-"+n).value.trim());
+  SELF_ID.forEach(([n]) => out[n] = document.getElementById("f-"+n).value.trim());
   BOOLS.forEach(([n]) => { const v = document.getElementById("f-"+n).value; out[n] = v === "" ? null : v; });
   out.resume_path = document.getElementById("f-resume_path").value.trim();
   out.cover_letter_path = document.getElementById("f-cover_letter_path").value.trim();
@@ -449,6 +510,11 @@ async function saveProfile() {
 
   const msg = document.getElementById("saveMsg");
   msg.textContent = "Saving…"; msg.className = "saved";
+  settings = {
+    use_chrome: document.getElementById("s-use_chrome").checked,
+    stay_signed_in: document.getElementById("s-stay_signed_in").checked,
+  };
+  await post("/api/settings", {settings});
   const res = await post("/api/profile", {profile: out});
   msg.textContent = res.ok ? "Saved." : res.error;
   msg.className = res.ok ? "saved g" : "saved r";
@@ -458,6 +524,8 @@ async function saveProfile() {
 async function loadProfile() {
   const data = await (await fetch("/api/profile")).json();
   documents = data.documents || [];
+  selfIdChoices = data.self_id_choices || {};
+  try { settings = (await (await fetch("/api/settings")).json()).settings || {}; } catch (e) { settings = {}; }
   if (!data.ok) {
     document.getElementById("profileForm").innerHTML = `<div class="banner bad">${esc(data.error)}</div>`;
     return;

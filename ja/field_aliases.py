@@ -91,6 +91,27 @@ FIELD_ALIASES: dict[str, list[str]] = {
         "visa sponsorship", "future sponsorship",
     ],
     "willing_to_relocate": ["willing to relocate", "relocate", "relocation"],
+    # Voluntary self-identification. These only ever fill from an answer the
+    # applicant entered themselves; nothing here is inferred.
+    "gender": ["gender", "sex", "gender identity", "what is your gender"],
+    "pronouns": ["pronouns", "preferred pronouns", "my pronouns"],
+    "hispanic_latino": [
+        "hispanic or latino", "hispanic latino", "are you hispanic",
+        "hispanic or latino ethnicity",
+    ],
+    "race_ethnicity": [
+        "race", "ethnicity", "race ethnicity", "racial", "ethnic background",
+        "race or ethnicity",
+    ],
+    "veteran_status": [
+        "veteran", "veteran status", "protected veteran", "military service",
+        "protected veteran status",
+    ],
+    "disability_status": [
+        "disability", "disabilities", "disability status",
+    ],
+    "sexual_orientation": ["sexual orientation"],
+    "transgender_status": ["transgender", "transgender identity"],
     "over_18": [
         "at least 18", "18 years of age", "18 years old", "over 18",
         "are you 18", "of legal working age",
@@ -130,8 +151,12 @@ FIELD_ALIASES: dict[str, list[str]] = {
 # characteristics where a wrong auto-filled answer is far worse than a blank
 # one the applicant fills in deliberately.
 SENSITIVE_GROUPS: dict[str, tuple[str, list[str]]] = {
+    # Voluntary self-identification. Filled only from an answer you entered
+    # yourself under `self_identification`; never inferred from anything else.
+    # Left blank there, these stay flagged for you to answer by hand.
     "demographic": (
-        "Self-identification question: answer this one yourself.",
+        "Self-identification question: set your answer under "
+        "Self-identification in your profile, or answer it here.",
         [
             "gender", "sex", "race", "ethnicity", "veteran", "disability",
             "disabilities", "sexual orientation", "transgender", "self identif",
@@ -172,6 +197,49 @@ BOOLEAN_FIELDS = {
 # Canonical names that live on the profile's first education entry rather
 # than on the profile itself.
 EDUCATION_FIELDS = {"school", "degree", "field_of_study", "graduation_year"}
+
+# Voluntary self-identification answers. A demographic question is filled
+# ONLY when the matching field here holds an answer the applicant entered
+# themselves -- these values are never derived from a name, a resume, or
+# anything else. Left empty, the question is flagged for manual answering,
+# which stays the default.
+SELF_ID_FIELDS = {
+    "gender", "pronouns", "hispanic_latino", "race_ethnicity",
+    "veteran_status", "disability_status", "sexual_orientation",
+    "transgender_status",
+}
+
+# The standard option wordings used by Greenhouse, Lever, Workday and
+# JazzHR, offered in the UI so a saved answer matches the real dropdowns.
+SELF_ID_CHOICES: dict[str, list[str]] = {
+    "gender": ["Male", "Female", "Non-binary", "Decline to self-identify"],
+    "hispanic_latino": ["Yes", "No", "Decline to self-identify"],
+    "race_ethnicity": [
+        "American Indian or Alaska Native",
+        "Asian",
+        "Black or African American",
+        "Hispanic or Latino",
+        "Native Hawaiian or Other Pacific Islander",
+        "White",
+        "Two or More Races",
+        "Decline to self-identify",
+    ],
+    "veteran_status": [
+        "I am not a protected veteran",
+        "I identify as one or more of the classifications of a protected veteran",
+        "I don't wish to answer",
+    ],
+    "disability_status": [
+        "Yes, I have a disability, or have had one in the past",
+        "No, I do not have a disability and have not had one in the past",
+        "I do not want to answer",
+    ],
+    "sexual_orientation": [
+        "Heterosexual", "Gay", "Lesbian", "Bisexual", "Queer",
+        "Decline to self-identify",
+    ],
+    "transgender_status": ["Yes", "No", "Decline to self-identify"],
+}
 
 TRUE_WORDS = {"yes", "y", "true", "i am", "authorized", "agree", "eligible"}
 FALSE_WORDS = {"no", "n", "false", "i am not", "not authorized", "disagree", "ineligible"}

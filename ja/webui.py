@@ -14,11 +14,13 @@ import webbrowser
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from queue import Queue
-from typing import Any
+from typing import Any, Callable
 
 from .browser import launch_browser, launch_error_message
+from .field_aliases import SELF_ID_CHOICES
 from .filler import fill_form
 from .profile import ProfileError, load_profile, profile_to_dict, save_profile
+from .settings import launch_opts, load_settings, save_settings
 from .webui_page import PAGE_HTML
 
 
@@ -30,9 +32,11 @@ class Session:
     push commands onto its queue and read the state snapshot.
     """
 
-    def __init__(self, profile_path: str, launch_opts: dict[str, Any]) -> None:
+    def __init__(self, profile_path: str, launch_opts: dict[str, Any] | Callable[[], dict[str, Any]]) -> None:
         self.profile_path = profile_path
-        self.launch_opts = launch_opts
+        # A callable is re-read at launch time, so a settings change in the
+        # UI applies to the next application without restarting the server.
+        self._launch_opts = launch_opts
         self._queue: Queue = Queue()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -70,8 +74,9 @@ class Session:
 
         try:
             with sync_playwright() as p:
+                opts = self._launch_opts() if callable(self._launch_opts) else self._launch_opts
                 try:
-                    closeable, page = launch_browser(p, headless=False, **self.launch_opts)
+                    closeable, page = launch_browser(p, headless=False, **opts)
                 except Exception as exc:  # noqa: BLE001
                     self._set(status="error", message=launch_error_message(exc))
                     return
@@ -165,9 +170,13 @@ def make_handler(session: Session, profile_path: str, root: str):
             elif self.path == "/api/profile":
                 try:
                     data = profile_to_dict(load_profile(profile_path))
-                    self._json({"ok": True, "profile": data, "documents": _documents(root)})
+                    self._json({"ok": True, "profile": data, "documents": _documents(root),
+                                "self_id_choices": SELF_ID_CHOICES})
                 except ProfileError as exc:
-                    self._json({"ok": False, "error": str(exc), "documents": _documents(root)})
+                    self._json({"ok": False, "error": str(exc), "documents": _documents(root),
+                                "self_id_choices": SELF_ID_CHOICES})
+            elif self.path == "/api/settings":
+                self._json({"ok": True, "settings": load_settings(root)})
             else:
                 self._send(404, b"Not found", "text/plain")
 
@@ -184,6 +193,8 @@ def make_handler(session: Session, profile_path: str, root: str):
                     self._json({"ok": True})
                 except (ProfileError, ValueError) as exc:
                     self._json({"ok": False, "error": str(exc)})
+            elif self.path == "/api/settings":
+                self._json({"ok": True, "settings": save_settings(root, body.get("settings", {}))})
             elif self.path == "/api/open":
                 url = (body.get("url") or "").strip()
                 if not url.startswith(("http://", "https://")):
@@ -200,9 +211,11 @@ def make_handler(session: Session, profile_path: str, root: str):
     return Handler
 
 
-def serve(profile_path: str, root: str, port: int, launch_opts: dict[str, Any],
+def serve(profile_path: str, root: str, port: int, browser_path: str = "",
           open_browser: bool = True) -> int:
-    session = Session(profile_path, launch_opts)
+    # Re-read on each launch so a settings change in the UI takes effect on
+    # the next application rather than needing a restart.
+    session = Session(profile_path, lambda: launch_opts(root, browser_path))
     handler = make_handler(session, profile_path, root)
 
     try:

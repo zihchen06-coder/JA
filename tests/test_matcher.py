@@ -73,6 +73,38 @@ def test_matches_fields_seen_on_real_forms():
         assert matcher.match_field(label) == expected, label
 
 
+def test_self_identification_labels_map_to_fields():
+    cases = {
+        "Gender": "gender",
+        "Preferred Pronouns": "pronouns",
+        "Are you Hispanic or Latino?": "hispanic_latino",
+        "Race / Ethnicity": "race_ethnicity",
+        "Veteran Status": "veteran_status",
+        "Disability Status": "disability_status",
+        "Sexual Orientation": "sexual_orientation",
+    }
+    for label, expected in cases.items():
+        assert matcher.match_field(label) == expected, label
+
+
+def test_criminal_and_salary_history_are_not_self_id():
+    # These must never become fillable, however the profile is configured.
+    assert matcher.sensitive_group("Have you been convicted of a felony?") == "criminal"
+    assert matcher.sensitive_group("What is your current salary?") == "salary_history"
+    assert matcher.sensitive_group("Gender") == "demographic"
+
+
+def test_best_choice_matches_long_eeo_option_text():
+    options = [
+        "I am not a protected veteran",
+        "I identify as one or more of the classifications of a protected veteran",
+        "I don't wish to answer",
+    ]
+    assert matcher.best_choice("I am not a protected veteran", options) == 0
+    assert matcher.best_choice("I don't wish to answer", options) == 2
+    assert matcher.best_choice("", options) is None
+
+
 def test_sensitive_reasons_are_category_specific():
     assert "Self-identification" in matcher.sensitive_reason("Gender")
     assert "Criminal-history" in matcher.sensitive_reason("Have you been convicted of a felony?")

@@ -15,6 +15,12 @@ from .field_aliases import (
     TRUE_WORDS,
 )
 
+__all__ = [
+    "normalize", "is_eeo_label", "sensitive_group", "sensitive_reason",
+    "is_resume_label", "is_cover_letter_label", "match_field", "best_option",
+    "best_choice", "semantic_bool",
+]
+
 _PUNCT_RE = re.compile(r"[^a-z0-9\s]")
 _WS_RE = re.compile(r"\s+")
 
@@ -31,13 +37,45 @@ def is_eeo_label(label: str) -> bool:
     return any(kw in norm for kw in EEO_KEYWORDS)
 
 
+def sensitive_group(label: str) -> str | None:
+    """Which sensitive category a label belongs to, or None."""
+    norm = normalize(label)
+    for group, (_, keywords) in SENSITIVE_GROUPS.items():
+        if any(kw in norm for kw in keywords):
+            return group
+    return None
+
+
 def sensitive_reason(label: str) -> str | None:
     """Why a label must be left for the applicant, or None if it's fillable."""
-    norm = normalize(label)
-    for reason, keywords in SENSITIVE_GROUPS.values():
-        if any(kw in norm for kw in keywords):
-            return reason
-    return None
+    group = sensitive_group(label)
+    return SENSITIVE_GROUPS[group][0] if group else None
+
+
+def best_choice(target: str, choices: list[str], min_ratio: float = 0.45) -> int | None:
+    """Index of the choice whose text best matches `target`, or None.
+
+    Used for option lists that are whole sentences -- the veteran and
+    disability self-identification questions especially.
+    """
+    norm_target = normalize(target)
+    if not norm_target:
+        return None
+
+    best_idx, best_score = None, 0.0
+    for i, choice in enumerate(choices):
+        text = normalize(choice)
+        if not text:
+            continue
+        if text == norm_target:
+            return i
+        ratio = difflib.SequenceMatcher(None, text, norm_target).ratio()
+        if norm_target in text or text in norm_target:
+            ratio += 0.3
+        if ratio > best_score:
+            best_score, best_idx = ratio, i
+
+    return best_idx if best_score >= min_ratio else None
 
 
 def is_resume_label(label: str) -> bool:

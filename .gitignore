@@ -10,3 +10,4 @@ urls.txt
 documents/
 *.pdf
 *.docx
+settings.json

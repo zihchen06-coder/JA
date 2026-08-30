@@ -129,12 +129,8 @@ def _cmd_ui(args: argparse.Namespace) -> int:
     from .webui import serve
 
     root = os.path.dirname(os.path.abspath(args.profile)) or os.getcwd()
-    launch_opts = {
-        "browser_path": args.browser_path or os.environ.get("JA_BROWSER_PATH") or "",
-        "chrome": args.chrome,
-        "user_data_dir": args.user_data_dir,
-    }
-    return serve(args.profile, root, args.port, launch_opts, open_browser=not args.no_open)
+    browser_path = args.browser_path or os.environ.get("JA_BROWSER_PATH") or ""
+    return serve(args.profile, root, args.port, browser_path, open_browser=not args.no_open)
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:

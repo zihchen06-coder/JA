@@ -10,7 +10,7 @@ from typing import Any
 
 from . import matcher
 from .extractor import extract_fields
-from .field_aliases import BOOLEAN_FIELDS, EDUCATION_FIELDS
+from .field_aliases import BOOLEAN_FIELDS, EDUCATION_FIELDS, SELF_ID_FIELDS
 from .platform_detect import detect_platform
 from .profile import Profile
 
@@ -77,6 +77,22 @@ def _profile_value(profile: Profile, canonical: str) -> Any:
     return getattr(profile, canonical, None)
 
 
+def _self_id_answer(profile: Profile, label: str, group: str | None) -> str | None:
+    """The applicant's own answer to a self-identification question, if set.
+
+    Only the "demographic" group is ever answerable this way, and only from a
+    value the applicant entered under self-identification -- nothing is
+    inferred. Criminal- and salary-history questions are never fillable.
+    """
+    if group != "demographic":
+        return None
+    canonical = matcher.match_field(label)
+    if canonical not in SELF_ID_FIELDS:
+        return None
+    value = getattr(profile, canonical, "")
+    return value or None
+
+
 def _match_custom_answer(label: str, profile: Profile) -> str | None:
     norm_label = matcher.normalize(label)
     if not norm_label:
@@ -117,9 +133,9 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
         _handle_file_field(page, profile, report, f)
         return
 
-    reason = matcher.sensitive_reason(label)
-    if reason:
-        report.add(label, None, "needs_review", reason, required)
+    group = matcher.sensitive_group(label)
+    if group and not _self_id_answer(profile, label, group):
+        report.add(label, None, "needs_review", matcher.sensitive_reason(label), required)
         return
 
     if ftype == "checkbox":
@@ -247,9 +263,24 @@ def _handle_radio_group(page: Any, profile: Profile, report: FillReport, options
         report.add(group_label, None, "already_filled", "Left as-is.", required)
         return
 
-    reason = matcher.sensitive_reason(group_label)
-    if reason:
-        report.add(group_label, None, "needs_review", reason, required)
+    sgroup = matcher.sensitive_group(group_label)
+    if sgroup:
+        answer = _self_id_answer(profile, group_label, sgroup)
+        if not answer:
+            report.add(group_label, None, "needs_review",
+                       matcher.sensitive_reason(group_label), required)
+            return
+        canonical = matcher.match_field(group_label)
+        idx = matcher.best_choice(answer, [o.get("label", "") for o in options])
+        if idx is None:
+            report.add(group_label, canonical, "skipped_no_match",
+                       f"No option matched '{answer}'.", required)
+            return
+        try:
+            page.locator(_sel(options[idx]["ja_id"])).check()
+            report.add(group_label, canonical, "filled", options[idx].get("label", ""), required)
+        except Exception as exc:  # noqa: BLE001
+            report.add(group_label, canonical, "error", str(exc), required)
         return
 
     canonical = matcher.match_field(group_label)

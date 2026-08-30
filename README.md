@@ -13,9 +13,11 @@ This tool optimizes the tedious part (retyping your name, address, work
 history, links, resume upload on every single form) and leaves the judgment
 calls — and the final click — to you.
 
-It also **never** guesses on self-identification questions (race, gender,
-veteran status, disability, sexual orientation). Those are always flagged
-for you to answer by hand, regardless of what's in your profile.
+It never *guesses* on self-identification questions either. The EEO
+questions (gender, race, veteran and disability status) fill only from
+answers you set yourself under Self-identification — nothing is inferred
+from your name or resume, and anything you leave blank stays flagged for
+you to answer by hand.
 
 ## Setup
 
@@ -98,7 +100,8 @@ Filled (8):
   ...
 
 Needs your review (1):
-  ! Gender  -  Self-identification question: fill in yourself.
+  ! Gender  -  Self-identification question: set your answer under
+                Self-identification in your profile, or answer it here.
 
 Required fields left blank (1):
   ✗ Why do you want to work here?  -  no matching profile field
@@ -227,14 +230,41 @@ answer is wrong at any employer you actually have worked for.
 **Open-ended questions** go in `custom_answers`, matched by keyword against
 the question text — `"why do you want to work here"` catches most phrasings.
 
+### Self-identification (EEO)
+
+The voluntary demographic questions almost every application asks: gender,
+pronouns, Hispanic/Latino, race/ethnicity, protected veteran status,
+disability status, sexual orientation, transgender status.
+
+These fill **only** from an answer you set yourself under
+Self-identification, using the standard option wordings that Greenhouse,
+Lever, Workday and JazzHR use. Nothing here is ever inferred from your name,
+your resume, or anything else, and any field left blank keeps its question
+flagged for you to answer by hand — which stays the default.
+
 ### Never auto-filled
 
-Always flagged for you, whatever your profile says:
+Always flagged, whatever the profile says:
 
-- **Demographics** — race, gender, ethnicity, veteran status, disability,
-  sexual orientation, pronouns, date of birth, citizenship, national origin
-- **Criminal history** — what may lawfully be asked varies by state and city
+- **Criminal history** — what employers may lawfully ask varies by state and
+  city, and the consequences of a wrong stored answer are serious
 - **Salary history** — illegal for employers to ask in many states
+
+### Browser and sign-in
+
+On the My Profile tab:
+
+- **Use my Google Chrome** — drive the Chrome installed on your machine
+  rather than the bundled Chromium.
+- **Stay signed in between applications** — keep cookies in a browser
+  profile of the tool's own (`~/.ja-browser-profile`), so sites you sign
+  into once stay signed in. Useful for Workday, which wants an account per
+  company. You sign in inside the window that opens; no password is stored
+  by this tool or sent anywhere.
+
+A dedicated profile folder is used rather than your everyday Chrome profile
+because Chrome permits only one process per profile directory — pointing at
+your real one would mean fully quitting Chrome before every run.
 
 ## Profile fields
 
