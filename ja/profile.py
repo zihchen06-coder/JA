@@ -66,6 +66,9 @@ class Profile:
     employment_type: str = ""
     languages: str = ""
     references: str = ""
+    education_level: str = ""
+    citizenship_status: str = ""
+    referral_name: str = ""
 
     # Voluntary self-identification. Filled on applications only when you
     # set them yourself here; blank means the question stays flagged for you.
@@ -93,6 +96,9 @@ class Profile:
     consent_drug_test: bool | None = None
     can_perform_essential_functions: bool | None = None
     previously_employed_here: bool | None = None
+    willing_overtime_varied_schedule: bool | None = None
+    has_reliable_transportation: bool | None = None
+    bound_by_noncompete: bool | None = None
 
     resume_path: str = ""
     cover_letter_path: str = ""

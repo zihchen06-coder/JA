@@ -23,7 +23,7 @@ def test_matches_sponsorship_question():
 
 def test_matches_education_fields():
     assert matcher.match_field("School Name *") == "school"
-    assert matcher.match_field("Highest Level of Education") == "degree"
+    assert matcher.match_field("Highest Level of Education") == "education_level"
     assert matcher.match_field("Major") == "field_of_study"
     assert matcher.match_field("Expected Graduation") == "graduation_year"
 
@@ -34,8 +34,17 @@ def test_matches_most_recent_employment():
 
 
 def test_sensitive_questions_are_flagged_not_answered():
-    for label in ["Pronouns", "Are you a US citizen?", "Date of Birth", "National Origin"]:
+    for label in ["Pronouns", "Date of Birth", "National Origin"]:
         assert matcher.is_eeo_label(label), label
+
+
+def test_citizenship_eligibility_is_not_gated_as_demographic():
+    # A required I-9 employment-eligibility category (US Citizen / Permanent
+    # Resident / Authorized to work / ...) is not a voluntary EEO
+    # disclosure -- it's handled the same as work_authorized, fillable
+    # directly from the profile rather than flagged for manual entry.
+    assert not matcher.is_eeo_label("What's your citizenship / employment eligibility?")
+    assert matcher.match_field("What's your citizenship / employment eligibility?") == "citizenship_status"
 
 
 def test_matches_common_screening_questions():
@@ -110,6 +119,54 @@ def test_sensitive_reasons_are_category_specific():
     assert "Criminal-history" in matcher.sensitive_reason("Have you been convicted of a felony?")
     assert "Salary-history" in matcher.sensitive_reason("What is your current salary?")
     assert matcher.sensitive_reason("First Name") is None
+
+
+def test_bare_name_and_date_are_never_matched():
+    # Regression: "fname"/"lname" style aliases fuzzy-matched a bare "Name"
+    # label (a signature field) to first_name, because "name" sits inside
+    # "fname" as a literal substring and scores deceptively high under
+    # difflib. A signature name/date must stay unmatched, not get
+    # overwritten with the applicant's first name.
+    assert matcher.match_field("Name") is None
+    assert matcher.match_field("Date") is None
+
+
+def test_select_boolean_options_from_a_real_jazzhr_form():
+    # These wordings and option sets are close to a live JazzHR posting.
+    assert matcher.match_field("What's your citizenship / employment eligibility?") == "citizenship_status"
+    assert matcher.match_field("What's your highest level of education completed?") == "education_level"
+    assert matcher.match_field("Who referred you to this position? Enter their first and last name here.") == "referral_name"
+    assert matcher.match_field("Are you willing to work overtime and/or varied schedules due to workload?") == "willing_overtime_varied_schedule"
+    assert matcher.match_field("Do you have access to adequate transportation for work?") == "has_reliable_transportation"
+    assert matcher.match_field(
+        "Are you currently bound by a Non-Competition, Non-Solicitation Agreement with your current employer?"
+    ) == "bound_by_noncompete"
+    assert matcher.match_field(
+        "I confirm that I am eligible to live and work in the United States."
+    ) == "work_authorized"
+
+
+def test_years_experience_alias_appears_inside_an_unrelated_yes_no_question():
+    # "Do you have 5+ years of experience in the AEC industry?" textually
+    # contains "years of experience", so it matches years_experience -- but
+    # the control is a company-specific Yes/No question, not a request for
+    # a number. filler.py's select handling (not matcher's job) is what
+    # must refuse to write free text into an all-Yes/No dropdown; this just
+    # documents that the alias match itself is the expected, if misleading,
+    # first step.
+    assert matcher.match_field("Do you have 5+ years of experience in the AEC industry?") == "years_experience"
+
+
+def test_best_bool_option_ignores_no_answer_placeholder():
+    options = [
+        {"value": "", "text": "-- No answer --"},
+        {"value": "y", "text": "Yes"},
+        {"value": "n", "text": "No"},
+    ]
+    match = next((o for o in options if matcher.semantic_bool(o["text"]) is True), None)
+    assert match["value"] == "y"
+    match = next((o for o in options if matcher.semantic_bool(o["text"]) is False), None)
+    assert match["value"] == "n"
 
 
 def test_no_match_for_unrelated_text():

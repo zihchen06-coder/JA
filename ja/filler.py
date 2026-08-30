@@ -64,6 +64,34 @@ def _sel(ja_id: str) -> str:
     return f'[data-ja-id="{ja_id}"]'
 
 
+# Outlines drawn directly on the real page after each fill -- the same
+# at-a-glance "see it on the actual form" pattern used by autofill browser
+# extensions like Simplify and LazyApply, rather than only a separate report.
+_MARK_FILLED = "#22c55e"
+_MARK_REVIEW = "#f59e0b"
+_MARK_BLANK = "#ef4444"
+
+_MARK_JS = """(el, color) => {
+    el.style.outline = `2px solid ${color}`;
+    el.style.outlineOffset = '1px';
+    el.style.borderRadius = getComputedStyle(el).borderRadius || '3px';
+}"""
+
+
+def _mark(page: Any, ja_id: str, color: str) -> None:
+    if not ja_id:
+        return
+    try:
+        page.locator(_sel(ja_id)).evaluate(_MARK_JS, color)
+    except Exception:  # noqa: BLE001 - cosmetic only, never fail a fill over it
+        pass
+
+
+def _mark_all(page: Any, options: list[dict], color: str) -> None:
+    for opt in options:
+        _mark(page, opt.get("ja_id", ""), color)
+
+
 def _profile_value(profile: Profile, canonical: str) -> Any:
     """Resolve a canonical field name to its value on the profile.
 
@@ -135,6 +163,7 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
 
     group = matcher.sensitive_group(label)
     if group and not _self_id_answer(profile, label, group):
+        _mark(page, f["ja_id"], _MARK_REVIEW)
         report.add(label, None, "needs_review", matcher.sensitive_reason(label), required)
         return
 
@@ -148,29 +177,68 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
         if custom_answer is not None and ftype != "select":
             try:
                 page.locator(_sel(f["ja_id"])).fill(custom_answer)
+                _mark(page, f["ja_id"], _MARK_FILLED)
                 report.add(label, "custom_answers", "filled", custom_answer, required)
             except Exception as exc:  # noqa: BLE001
                 report.add(label, "custom_answers", "error", str(exc), required)
             return
+        if required:
+            _mark(page, f["ja_id"], _MARK_BLANK)
         report.add(label or f["name"] or f["ja_id"], None, "skipped_no_match", "", required)
         return
 
     value = _profile_value(profile, canonical)
     if value in (None, ""):
+        if required:
+            _mark(page, f["ja_id"], _MARK_BLANK)
         report.add(label, canonical, "skipped_no_data", "Profile has no value for this field.", required)
         return
 
     try:
         loc = page.locator(_sel(f["ja_id"]))
         if f["tag"] == "select":
-            option_value = matcher.best_option(str(value), f.get("options", []))
+            options = f.get("options", [])
+            # A yes/no field rendered as a dropdown (e.g. "Yes" / "No" /
+            # "No answer") needs its Yes/No option located semantically --
+            # matching the literal string "True"/"False" against option text
+            # never finds anything.
+            if canonical in BOOLEAN_FIELDS and isinstance(value, bool):
+                match = next((o for o in options if matcher.semantic_bool(o.get("text", "")) is value), None)
+                option_value = match.get("value") if match else None
+                detail = match.get("text", "") if match else ""
+            elif (real_options := options[1:] if len(options) > 1 else options) and all(
+                matcher.semantic_bool(o.get("text", "")) is not None for o in real_options
+            ):
+                # Option 0 is conventionally an unanswered placeholder
+                # ("-- No answer --", "Select...") and isn't itself a yes/no
+                # choice, so it's excluded rather than breaking this check.
+                # A label can textually contain a real alias (e.g. a
+                # company-specific "...years of experience..." question
+                # matching the generic years_experience field) while the
+                # control itself is really a Yes/No question about something
+                # else entirely. If every option is Yes/No-shaped but the
+                # matched field isn't a boolean one, the match is spurious --
+                # refuse it rather than writing free text into a Yes/No box.
+                if required:
+                    _mark(page, f["ja_id"], _MARK_BLANK)
+                report.add(label, canonical, "skipped_no_match",
+                           "This looks like a yes/no question with no matching saved answer.", required)
+                return
+            else:
+                option_value = matcher.best_option(str(value), options)
+                detail = str(value)
             if option_value is None:
+                if required:
+                    _mark(page, f["ja_id"], _MARK_BLANK)
                 report.add(label, canonical, "skipped_no_match", f"No option matched '{value}'.", required)
                 return
             loc.select_option(value=option_value)
+            _mark(page, f["ja_id"], _MARK_FILLED)
+            report.add(label, canonical, "filled", detail, required)
         else:
             loc.fill(str(value))
-        report.add(label, canonical, "filled", str(value), required)
+            _mark(page, f["ja_id"], _MARK_FILLED)
+            report.add(label, canonical, "filled", str(value), required)
     except Exception as exc:  # noqa: BLE001 - report and move on, never crash the run
         report.add(label, canonical, "error", str(exc), required)
 
@@ -203,6 +271,7 @@ def _handle_checkbox(page: Any, profile: Profile, report: FillReport, f: dict) -
                 loc = page.locator(_sel(f["ja_id"]))
                 loc.check() if want_checked else loc.uncheck()
                 if want_checked:
+                    _mark(page, f["ja_id"], _MARK_FILLED)
                     report.add(group_label, group_canonical, "filled", label, required)
             except Exception as exc:  # noqa: BLE001
                 report.add(group_label, group_canonical, "error", str(exc), required)
@@ -227,6 +296,7 @@ def _handle_checkbox(page: Any, profile: Profile, report: FillReport, f: dict) -
             loc.check()
         else:
             loc.uncheck()
+        _mark(page, f["ja_id"], _MARK_FILLED)
         report.add(label, canonical, "filled", "checked" if value else "unchecked", required)
     except Exception as exc:  # noqa: BLE001
         report.add(label, canonical, "error", str(exc), required)
@@ -250,6 +320,7 @@ def _handle_file_field(page: Any, profile: Profile, report: FillReport, f: dict)
 
     try:
         page.locator(_sel(f["ja_id"])).set_input_files(path)
+        _mark(page, f["ja_id"], _MARK_FILLED)
         report.add(label, canonical, "filled", path, required)
     except Exception as exc:  # noqa: BLE001
         report.add(label, canonical, "error", str(exc), required)
@@ -267,17 +338,21 @@ def _handle_radio_group(page: Any, profile: Profile, report: FillReport, options
     if sgroup:
         answer = _self_id_answer(profile, group_label, sgroup)
         if not answer:
+            _mark_all(page, options, _MARK_REVIEW)
             report.add(group_label, None, "needs_review",
                        matcher.sensitive_reason(group_label), required)
             return
         canonical = matcher.match_field(group_label)
         idx = matcher.best_choice(answer, [o.get("label", "") for o in options])
         if idx is None:
+            if required:
+                _mark_all(page, options, _MARK_BLANK)
             report.add(group_label, canonical, "skipped_no_match",
                        f"No option matched '{answer}'.", required)
             return
         try:
             page.locator(_sel(options[idx]["ja_id"])).check()
+            _mark(page, options[idx]["ja_id"], _MARK_FILLED)
             report.add(group_label, canonical, "filled", options[idx].get("label", ""), required)
         except Exception as exc:  # noqa: BLE001
             report.add(group_label, canonical, "error", str(exc), required)
@@ -285,11 +360,15 @@ def _handle_radio_group(page: Any, profile: Profile, report: FillReport, options
 
     canonical = matcher.match_field(group_label)
     if canonical not in BOOLEAN_FIELDS:
+        if required:
+            _mark_all(page, options, _MARK_BLANK)
         report.add(group_label or options[0].get("name", ""), canonical, "skipped_no_match", "", required)
         return
 
     target = getattr(profile, canonical, None)
     if target is None:
+        if required:
+            _mark_all(page, options, _MARK_BLANK)
         report.add(group_label, canonical, "skipped_no_data", "", required)
         return
 
@@ -298,10 +377,13 @@ def _handle_radio_group(page: Any, profile: Profile, report: FillReport, options
         if choice_bool is target:
             try:
                 page.locator(_sel(opt["ja_id"])).check()
+                _mark(page, opt["ja_id"], _MARK_FILLED)
                 report.add(group_label, canonical, "filled", opt.get("label", ""), required)
                 return
             except Exception as exc:  # noqa: BLE001
                 report.add(group_label, canonical, "error", str(exc), required)
                 return
 
+    if required:
+        _mark_all(page, options, _MARK_BLANK)
     report.add(group_label, canonical, "skipped_no_match", "No matching Yes/No option found.", required)

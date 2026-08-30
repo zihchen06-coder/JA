@@ -17,7 +17,7 @@ from queue import Queue
 from typing import Any, Callable
 
 from .browser import launch_browser, launch_error_message
-from .field_aliases import SELF_ID_CHOICES
+from .field_aliases import OPTION_CHOICES, SELF_ID_CHOICES
 from .filler import fill_form
 from .profile import ProfileError, load_profile, profile_to_dict, save_profile
 from .settings import launch_opts, load_settings, save_settings
@@ -171,10 +171,10 @@ def make_handler(session: Session, profile_path: str, root: str):
                 try:
                     data = profile_to_dict(load_profile(profile_path))
                     self._json({"ok": True, "profile": data, "documents": _documents(root),
-                                "self_id_choices": SELF_ID_CHOICES})
+                                "self_id_choices": SELF_ID_CHOICES, "option_choices": OPTION_CHOICES})
                 except ProfileError as exc:
                     self._json({"ok": False, "error": str(exc), "documents": _documents(root),
-                                "self_id_choices": SELF_ID_CHOICES})
+                                "self_id_choices": SELF_ID_CHOICES, "option_choices": OPTION_CHOICES})
             elif self.path == "/api/settings":
                 self._json({"ok": True, "settings": load_settings(root)})
             else:

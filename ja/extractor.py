@@ -158,7 +158,12 @@ _EXTRACT_JS = r"""
     } else if (tag === 'select') {
       item.label = labelFor(el);
       item.options = Array.from(el.options).map(o => ({ value: o.value, text: cleanText(o.text) }));
-      item.has_value = !!el.value;
+      // A <select> with no explicit value="" on its first <option> defaults
+      // el.value to that option's own TEXT ("-- No answer --", "Select...")
+      // -- so !!el.value is true before the user ever touches it. The first
+      // option being a not-yet-chosen placeholder is close to universal
+      // convention, so selectedIndex > 0 is what actually means "answered".
+      item.has_value = el.selectedIndex > 0;
     } else if (type === 'file') {
       item.label = labelFor(el);
       item.has_value = !!(el.files && el.files.length);

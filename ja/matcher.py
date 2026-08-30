@@ -119,6 +119,14 @@ def match_field(label: str, min_ratio: float = 0.72) -> str | None:
     if best_field:
         return best_field
 
+    # Fuzzy matching on a short, generic label (e.g. a bare "Name" or "Date"
+    # on a signature line) is how an abbreviation-style alias ends up
+    # over-matching -- "name" sits inside "fname" as a literal substring, so
+    # difflib scores that pair deceptively high. A label needs enough of its
+    # own text before a near-miss is trustworthy.
+    if len(norm) < 8:
+        return None
+
     best_score = 0.0
     for canonical, aliases in FIELD_ALIASES.items():
         for alias in aliases:

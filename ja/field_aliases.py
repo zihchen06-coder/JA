@@ -2,8 +2,8 @@
 
 # canonical field name -> label phrases that should match it (lowercase, normalized)
 FIELD_ALIASES: dict[str, list[str]] = {
-    "first_name": ["first name", "given name", "legal first name", "fname"],
-    "last_name": ["last name", "surname", "family name", "legal last name", "lname"],
+    "first_name": ["first name", "given name", "legal first name"],
+    "last_name": ["last name", "surname", "family name", "legal last name"],
     "full_name": ["full name", "your name", "applicant name", "legal name"],
     "middle_name": ["middle name", "middle initial"],
     "preferred_name": ["preferred name", "nickname", "preferred first name", "goes by"],
@@ -32,9 +32,13 @@ FIELD_ALIASES: dict[str, list[str]] = {
         "school", "school name", "university", "college", "institution",
         "most recent school",
     ],
-    "degree": [
-        "degree", "degree earned", "highest degree", "degree type",
-        "level of education", "highest level of education", "education level",
+    "degree": ["degree", "degree earned", "degree type"],
+    # Distinct from `degree` (e.g. "B.S.") because forms asking "highest
+    # level of education" want a category ("Bachelor's Degree"), not the
+    # applicant's own abbreviation for it.
+    "education_level": [
+        "highest level of education", "level of education", "education level",
+        "highest degree completed", "highest degree",
     ],
     "field_of_study": [
         "field of study", "major", "discipline", "concentration", "area of study",
@@ -84,7 +88,27 @@ FIELD_ALIASES: dict[str, list[str]] = {
     ],
     "work_authorized": [
         "authorized to work", "legally authorized", "work authorization",
-        "eligible to work",
+        "eligible to work", "eligible to live and work", "authorized to live and work",
+    ],
+    "citizenship_status": [
+        "citizenship employment eligibility", "citizenship status",
+        "employment eligibility",
+    ],
+    "referral_name": [
+        "who referred you", "referred you to this position", "referral name",
+        "employee referral",
+    ],
+    "willing_overtime_varied_schedule": [
+        "willing to work overtime", "varied schedules", "overtime and or varied schedules",
+        "work overtime",
+    ],
+    "has_reliable_transportation": [
+        "adequate transportation", "reliable transportation",
+        "access to transportation", "own transportation",
+    ],
+    "bound_by_noncompete": [
+        "non competition", "non solicitation", "non compete",
+        "restrictive covenant", "bound by a non competition",
     ],
     "needs_sponsorship": [
         "require sponsorship", "need sponsorship", "will you require sponsorship",
@@ -161,7 +185,11 @@ SENSITIVE_GROUPS: dict[str, tuple[str, list[str]]] = {
             "gender", "sex", "race", "ethnicity", "veteran", "disability",
             "disabilities", "sexual orientation", "transgender", "self identif",
             "pronoun", "hispanic", "latino", "military service", "protected",
-            "date of birth", "citizen", "national origin",
+            "date of birth", "national origin",
+            # NOT "citizen": citizenship/work-authorization category is a
+            # required I-9 eligibility question on nearly every US
+            # application, not a voluntary EEO disclosure -- it's handled
+            # the same way as work_authorized, ungated.
         ],
     ),
     # What may lawfully be asked varies by state and city, and a wrong answer
@@ -192,6 +220,8 @@ BOOLEAN_FIELDS = {
     "over_18", "has_drivers_license", "willing_to_travel",
     "consent_background_check", "consent_drug_test",
     "can_perform_essential_functions", "previously_employed_here",
+    "willing_overtime_varied_schedule", "has_reliable_transportation",
+    "bound_by_noncompete",
 }
 
 # Canonical names that live on the profile's first education entry rather
@@ -239,6 +269,23 @@ SELF_ID_CHOICES: dict[str, list[str]] = {
         "Decline to self-identify",
     ],
     "transgender_status": ["Yes", "No", "Decline to self-identify"],
+}
+
+# Common option wordings for non-sensitive fields whose answer is one of a
+# small set of categories, offered in the UI as a starting point -- unlike
+# SELF_ID_CHOICES these are just typical phrasings, not a fixed legal set,
+# so the fuzzy matcher still does the real work against whatever a given
+# form's own dropdown says.
+OPTION_CHOICES: dict[str, list[str]] = {
+    "education_level": [
+        "High School Diploma / GED", "Associate's Degree", "Bachelor's Degree",
+        "Master's Degree", "Doctorate (PhD)", "Professional Degree (MD, JD, etc.)", "Other",
+    ],
+    "citizenship_status": [
+        "U.S. Citizen", "Permanent Resident / Green Card Holder",
+        "Authorized to work in the U.S. without sponsorship",
+        "Will require visa sponsorship", "Not authorized to work in the U.S.",
+    ],
 }
 
 TRUE_WORDS = {"yes", "y", "true", "i am", "authorized", "agree", "eligible"}

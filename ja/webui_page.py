@@ -274,6 +274,7 @@ const BACKGROUND = [
   ["security_clearance","Security clearance (if any)"],
   ["languages","Languages you speak"],
   ["how_heard","How you heard about the role"],
+  ["referral_name","Referred by (name)"],
 ];
 const SCALARS = CONTACT.concat(BACKGROUND);
 const BOOLS = [
@@ -282,11 +283,18 @@ const BOOLS = [
   ["willing_to_relocate","Willing to relocate?"],
   ["over_18","At least 18 years old?"],
   ["has_drivers_license","Valid driver's license?"],
+  ["has_reliable_transportation","Reliable transportation to work?"],
   ["willing_to_travel","Willing to travel?"],
+  ["willing_overtime_varied_schedule","Willing to work overtime / varied schedules?"],
   ["consent_background_check","Consent to a background check?"],
   ["consent_drug_test","Consent to a drug screening?"],
   ["can_perform_essential_functions","Can perform the job's essential functions?"],
+  ["bound_by_noncompete","Currently bound by a non-compete / non-solicitation agreement?"],
   ["previously_employed_here","Previously employed by this company?"],
+];
+const CATEGORY_FIELDS = [
+  ["education_level","Highest level of education"],
+  ["citizenship_status","Citizenship / employment eligibility"],
 ];
 const SELF_ID = [
   ["gender","Gender"],
@@ -306,7 +314,7 @@ const EDU = [["school","School"],["degree","Degree"],["field_of_study","Field of
 const EXP = [["company","Company"],["title","Title"],["start_date","Start date"],["end_date","End date"],["description","Description"]];
 const PTABS = ["contact","background","eligibility","selfid","eduwork","docs","browser"];
 
-let profile = null, documents = [], selfIdChoices = {}, settings = {};
+let profile = null, documents = [], selfIdChoices = {}, optionChoices = {}, settings = {};
 let timer = null, lastKey = "", blanksOpen = false;
 
 function el(h) { const t = document.createElement("template"); t.innerHTML = h.trim(); return t.content.firstChild; }
@@ -424,6 +432,17 @@ function boolField(n, l, p) {
     </select></div>`;
 }
 
+function choiceField(n, l, p, opts) {
+  const cur = p[n] || "";
+  if (!opts) return field(n, l, cur);
+  return `<div class="row"><label for="f-${n}">${esc(l)}</label>
+    <select id="f-${n}">
+      <option value="" ${cur===""?"selected":""}>— not set —</option>` +
+      opts.map(o => `<option value="${esc(o)}" ${cur===o?"selected":""}>${esc(o)}</option>`).join("") +
+      (cur && !opts.includes(cur) ? `<option value="${esc(cur)}" selected>${esc(cur)}</option>` : "") +
+    `</select></div>`;
+}
+
 function renderProfile() {
   const p = profile;
 
@@ -431,7 +450,11 @@ function renderProfile() {
     `<div class="grid">` + CONTACT.map(([n,l]) => field(n, l, p[n])).join("") + `</div>`;
 
   document.getElementById("pt-background").innerHTML =
-    `<div class="grid">` + BACKGROUND.map(([n,l]) => field(n, l, p[n])).join("") + `</div>`;
+    `<div class="grid">` + BACKGROUND.map(([n,l]) => field(n, l, p[n])).join("") +
+    CATEGORY_FIELDS.map(([n,l]) => choiceField(n, l, p, optionChoices[n])).join("") + `</div>
+    <p class="hint">“Highest level of education” and “Citizenship / employment eligibility” are
+    typical wordings offered as a starting point — pick the closest match to what a given form
+    asks, or type your own; the tool fuzzy-matches it against that form’s real options either way.</p>`;
 
   document.getElementById("pt-eligibility").innerHTML =
     `<div class="grid">` + BOOLS.map(([n,l]) => boolField(n, l, p)).join("") + `</div>
@@ -445,17 +468,7 @@ function renderProfile() {
      <strong>Anything left unset stays flagged for you to answer by hand</strong> — and nothing here
      is ever guessed from your name or resume. Employers use these for aggregate reporting;
      declining is always a valid answer.</p>
-     <div class="grid">` + SELF_ID.map(([n,l]) => {
-      const opts = selfIdChoices[n];
-      if (!opts) return field(n, l, p[n] || "");
-      const cur = p[n] || "";
-      return `<div class="row"><label for="f-${n}">${esc(l)}</label>
-        <select id="f-${n}">
-          <option value="" ${cur===""?"selected":""}>— not set —</option>` +
-          opts.map(o => `<option value="${esc(o)}" ${cur===o?"selected":""}>${esc(o)}</option>`).join("") +
-          (cur && !opts.includes(cur) ? `<option value="${esc(cur)}" selected>${esc(cur)}</option>` : "") +
-        `</select></div>`;
-    }).join("") + `</div>
+     <div class="grid">` + SELF_ID.map(([n,l]) => choiceField(n, l, p, selfIdChoices[n])).join("") + `</div>
     <p class="hint">Criminal-history and salary-history questions are deliberately not here.
     Those stay flagged every time: what employers may lawfully ask varies by state and city.</p>`;
 
@@ -532,6 +545,7 @@ async function saveProfile() {
   SCALARS.forEach(([n]) => out[n] = document.getElementById("f-"+n).value.trim());
   LONG.forEach(([n]) => out[n] = document.getElementById("f-"+n).value.trim());
   SELF_ID.forEach(([n]) => out[n] = document.getElementById("f-"+n).value.trim());
+  CATEGORY_FIELDS.forEach(([n]) => out[n] = document.getElementById("f-"+n).value.trim());
   BOOLS.forEach(([n]) => { const v = document.getElementById("f-"+n).value; out[n] = v === "" ? null : v; });
   out.resume_path = document.getElementById("f-resume_path").value.trim();
   out.cover_letter_path = document.getElementById("f-cover_letter_path").value.trim();
@@ -557,6 +571,7 @@ async function loadProfile() {
   const data = await (await fetch("/api/profile")).json();
   documents = data.documents || [];
   selfIdChoices = data.self_id_choices || {};
+  optionChoices = data.option_choices || {};
   try { settings = (await (await fetch("/api/settings")).json()).settings || {}; } catch (e) { settings = {}; }
   if (!data.ok) {
     document.getElementById("pt-contact").innerHTML = `<div class="banner bad">${esc(data.error)}</div>`;
