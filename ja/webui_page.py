@@ -52,16 +52,22 @@ PAGE_HTML = r"""<!doctype html>
   .tagline { color: var(--muted); font-size: 14.5px; margin-top: 9px; }
   .tagline strong { color: var(--text); font-weight: 600; }
 
+  .section-label {
+    font-size: 11.5px; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--faint); font-weight: 660; margin: 34px 0 12px;
+  }
+  .section-label:first-of-type { margin-top: 8px; }
+
   .tabs {
-    display: inline-flex; gap: 4px; padding: 5px; margin-bottom: 22px;
+    display: flex; flex-wrap: wrap; gap: 4px; padding: 5px; margin-bottom: 18px;
     background: var(--glass); border: 1px solid var(--stroke-soft);
     border-radius: 14px; backdrop-filter: blur(18px) saturate(160%);
     -webkit-backdrop-filter: blur(18px) saturate(160%);
   }
   .tabs button {
-    border: 0; background: none; font: inherit; font-size: 14px; font-weight: 550;
-    color: var(--muted); padding: 8px 18px; border-radius: 10px; cursor: pointer;
-    transition: background .18s, color .18s;
+    border: 0; background: none; font: inherit; font-size: 13.5px; font-weight: 550;
+    color: var(--muted); padding: 8px 15px; border-radius: 10px; cursor: pointer;
+    transition: background .18s, color .18s; white-space: nowrap;
   }
   .tabs button:hover { color: var(--text); }
   .tabs button.on {
@@ -182,6 +188,8 @@ PAGE_HTML = r"""<!doctype html>
   .toggle div { flex: 1; }
   .toggle .t { font-size: 14px; font-weight: 550; color: var(--text); }
   .toggle .d { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+
+  .ptab[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -192,60 +200,72 @@ PAGE_HTML = r"""<!doctype html>
     <strong>It never submits</strong> — you always click that yourself.</div>
 </header>
 
-<div class="tabs">
-  <button id="tab-apply" class="on" onclick="showTab('apply')">Apply</button>
-  <button id="tab-profile" onclick="showTab('profile')">My Profile</button>
+<div class="card">
+  <div class="row">
+    <label for="url">Job application URL</label>
+    <input id="url" placeholder="https://job-boards.greenhouse.io/company/jobs/1234567"
+           onkeydown="if(event.key==='Enter')openUrl()">
+    <p class="hint">Paste the page with the <em>blank boxes</em> on it — click “Apply” on the
+      listing first, then copy that URL. LinkedIn and Indeed listing pages won’t work.</p>
+  </div>
+  <div class="actions" style="margin-top:16px">
+    <button class="act" id="go" onclick="openUrl()">Fill this application</button>
+    <span id="status" class="spin"></span>
+  </div>
+  <div id="err" class="banner bad" hidden></div>
 </div>
 
-<section id="pane-apply">
-  <div class="card">
-    <div class="row">
-      <label for="url">Job application URL</label>
-      <input id="url" placeholder="https://job-boards.greenhouse.io/company/jobs/1234567"
-             onkeydown="if(event.key==='Enter')openUrl()">
-      <p class="hint">Paste the page with the <em>blank boxes</em> on it — click “Apply” on the
-        listing first, then copy that URL. LinkedIn and Indeed listing pages won’t work.</p>
-    </div>
-    <div class="actions" style="margin-top:16px">
-      <button class="act" id="go" onclick="openUrl()">Fill this application</button>
-      <span id="status" class="spin"></span>
-    </div>
-    <div id="err" class="banner bad" hidden></div>
+<div class="card" id="resultCard" hidden>
+  <div id="results"></div>
+  <div class="actions">
+    <button class="ghost" onclick="post('/api/refill')">Re-fill this page</button>
+    <button class="ghost" onclick="post('/api/close')">Done — close browser</button>
   </div>
+  <ol class="steps">
+    <li>Check every filled field in the browser window that opened.</li>
+    <li>Answer anything flagged above.</li>
+    <li>Click Submit in that window yourself.</li>
+    <li>Multi-page form? Click Next there, then “Re-fill this page” here.</li>
+  </ol>
+</div>
 
-  <div class="card" id="resultCard" hidden>
-    <div id="results"></div>
-    <div class="actions">
-      <button class="ghost" onclick="post('/api/refill')">Re-fill this page</button>
-      <button class="ghost" onclick="post('/api/close')">Done — close browser</button>
-    </div>
-    <ol class="steps">
-      <li>Check every filled field in the browser window that opened.</li>
-      <li>Answer anything flagged above.</li>
-      <li>Click Submit in that window yourself.</li>
-      <li>Multi-page form? Click Next there, then “Re-fill this page” here.</li>
-    </ol>
-  </div>
-</section>
+<div class="section-label">Your profile</div>
+<div class="tabs" id="ptabs">
+  <button data-pt="contact" class="on" onclick="showPTab('contact')">Contact</button>
+  <button data-pt="background" onclick="showPTab('background')">Background</button>
+  <button data-pt="eligibility" onclick="showPTab('eligibility')">Eligibility</button>
+  <button data-pt="selfid" onclick="showPTab('selfid')">Self-ID</button>
+  <button data-pt="eduwork" onclick="showPTab('eduwork')">Education &amp; Work</button>
+  <button data-pt="docs" onclick="showPTab('docs')">Documents &amp; Answers</button>
+  <button data-pt="browser" onclick="showPTab('browser')">Browser &amp; Sign-in</button>
+</div>
 
-<section id="pane-profile" hidden>
-  <div class="card">
-    <div id="profileForm"></div>
-    <div class="actions">
-      <button class="act" onclick="saveProfile()">Save profile</button>
-      <span id="saveMsg" class="saved"></span>
-    </div>
+<div class="card">
+  <div id="profileForm">
+    <div class="ptab" id="pt-contact"></div>
+    <div class="ptab" id="pt-background" hidden></div>
+    <div class="ptab" id="pt-eligibility" hidden></div>
+    <div class="ptab" id="pt-selfid" hidden></div>
+    <div class="ptab" id="pt-eduwork" hidden></div>
+    <div class="ptab" id="pt-docs" hidden></div>
+    <div class="ptab" id="pt-browser" hidden></div>
   </div>
-</section>
+  <div class="actions">
+    <button class="act" onclick="saveProfile()">Save profile</button>
+    <span id="saveMsg" class="saved"></span>
+  </div>
+</div>
 </div>
 
 <script>
-const SCALARS = [
+const CONTACT = [
   ["first_name","First name"],["middle_name","Middle name / initial"],["last_name","Last name"],
   ["preferred_name","Preferred name / nickname"],["email","Email"],["phone","Phone"],
   ["address_line1","Street address"],["address_line2","Apt / unit"],["city","City"],
   ["state","State"],["postal_code","ZIP code"],["country","Country"],
   ["linkedin_url","LinkedIn URL"],["github_url","GitHub URL"],["portfolio_url","Portfolio / website"],
+];
+const BACKGROUND = [
   ["current_company","Current employer"],["current_title","Current job title"],
   ["years_experience","Years of experience"],["gpa","GPA"],
   ["desired_salary","Desired salary"],["notice_period","Earliest start date"],
@@ -255,6 +275,7 @@ const SCALARS = [
   ["languages","Languages you speak"],
   ["how_heard","How you heard about the role"],
 ];
+const SCALARS = CONTACT.concat(BACKGROUND);
 const BOOLS = [
   ["work_authorized","Legally authorized to work in the US?"],
   ["needs_sponsorship","Will you need visa sponsorship (now or later)?"],
@@ -283,6 +304,7 @@ const LONG = [
 ];
 const EDU = [["school","School"],["degree","Degree"],["field_of_study","Field of study"],["graduation_year","Graduation year"]];
 const EXP = [["company","Company"],["title","Title"],["start_date","Start date"],["end_date","End date"],["description","Description"]];
+const PTABS = ["contact","background","eligibility","selfid","eduwork","docs","browser"];
 
 let profile = null, documents = [], selfIdChoices = {}, settings = {};
 let timer = null, lastKey = "", blanksOpen = false;
@@ -290,11 +312,12 @@ let timer = null, lastKey = "", blanksOpen = false;
 function el(h) { const t = document.createElement("template"); t.innerHTML = h.trim(); return t.content.firstChild; }
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
-function showTab(name) {
-  for (const t of ["apply","profile"]) {
-    document.getElementById("pane-"+t).hidden = (t !== name);
-    document.getElementById("tab-"+t).className = (t === name) ? "on" : "";
+function showPTab(name) {
+  for (const t of PTABS) {
+    document.getElementById("pt-"+t).hidden = (t !== name);
+    document.querySelector(`#ptabs button[data-pt="${t}"]`).className = (t === name) ? "on" : "";
   }
+  try { localStorage.setItem("ja-ptab", name); } catch (e) {}
 }
 
 async function post(path, body) {
@@ -352,8 +375,8 @@ function renderResults(state) {
       optional.map(r => `<li>${esc(r.label)} <span class="val">— ${esc(r.detail || "not recognized")}</span></li>`).join("") +
       `</ul>
       <p class="hint">Something here that should fill automatically? Add an open-ended one under
-      <strong>Saved answers</strong> on the My Profile tab. For a standard field the tool didn’t
-      know the wording for, add that wording to <code>ja/field_aliases.py</code>.</p>
+      <strong>Documents &amp; Answers</strong> below. For a standard field the tool didn’t know the
+      wording for, add that wording to <code>ja/field_aliases.py</code>.</p>
     </details>`;
   }
   box.innerHTML = h;
@@ -391,42 +414,38 @@ function field(name, label, value, list) {
     <input id="f-${name}" value="${esc(value)}" ${list ? `list="${list}"` : ""}></div>`;
 }
 
+function boolField(n, l, p) {
+  const v = p[n] === true ? "yes" : p[n] === false ? "no" : "";
+  return `<div class="row"><label for="f-${n}">${esc(l)}</label>
+    <select id="f-${n}">
+      <option value="" ${v===""?"selected":""}>— not set —</option>
+      <option value="yes" ${v==="yes"?"selected":""}>Yes</option>
+      <option value="no" ${v==="no"?"selected":""}>No</option>
+    </select></div>`;
+}
+
 function renderProfile() {
   const p = profile;
-  let h = `<h2>About you</h2><div class="grid">` +
-    SCALARS.map(([n,l]) => field(n, l, p[n])).join("") + `</div>`;
 
-  h += `<h2>Eligibility</h2><div class="grid">` + BOOLS.map(([n,l]) => {
-    const v = p[n] === true ? "yes" : p[n] === false ? "no" : "";
-    return `<div class="row"><label for="f-${n}">${esc(l)}</label>
-      <select id="f-${n}">
-        <option value="" ${v===""?"selected":""}>— not set —</option>
-        <option value="yes" ${v==="yes"?"selected":""}>Yes</option>
-        <option value="no" ${v==="no"?"selected":""}>No</option>
-      </select></div>`;
-  }).join("") + `</div>
-  <p class="hint">Anything left unset is skipped and reported, never guessed.
-  Leave <strong>“Previously employed by this company”</strong> unset — it’s company-specific,
-  so one saved answer would be wrong at any employer you actually worked for. Questions about
-  demographics, criminal history, and salary history are never auto-filled at all.</p>`;
+  document.getElementById("pt-contact").innerHTML =
+    `<div class="grid">` + CONTACT.map(([n,l]) => field(n, l, p[n])).join("") + `</div>`;
 
-  const docs = `<datalist id="docs">` + documents.map(d => `<option value="${esc(d)}">`).join("") + `</datalist>`;
-  h += `<h2>Documents</h2>${docs}<div class="grid">` +
-    field("resume_path", "Resume file", p.resume_path, "docs") +
-    field("cover_letter_path", "Cover letter file (optional)", p.cover_letter_path, "docs") +
-    `</div><p class="hint">Put files in the <code>documents</code> folder inside JA, then pick them here.</p>`;
+  document.getElementById("pt-background").innerHTML =
+    `<div class="grid">` + BACKGROUND.map(([n,l]) => field(n, l, p[n])).join("") + `</div>`;
 
-  h += `<h2>Longer answers</h2>` + LONG.map(([n,l]) =>
-    `<div class="row"><label for="f-${n}">${esc(l)}</label>
-     <textarea id="f-${n}">${esc(p[n] || "")}</textarea></div>`).join("");
+  document.getElementById("pt-eligibility").innerHTML =
+    `<div class="grid">` + BOOLS.map(([n,l]) => boolField(n, l, p)).join("") + `</div>
+     <p class="hint">Anything left unset is skipped and reported, never guessed.
+     Leave <strong>“Previously employed by this company”</strong> unset — it’s company-specific,
+     so one saved answer would be wrong at any employer you actually worked for.</p>`;
 
-  h += `<h2>Self-identification</h2>
-    <p class="hint" style="margin:0 0 14px">These are the voluntary EEO questions almost every
-    application asks. Answer them once here and they fill automatically from then on.
-    <strong>Anything left unset stays flagged for you to answer by hand</strong> — and nothing here
-    is ever guessed from your name or resume. Employers use these for aggregate reporting;
-    declining is always a valid answer.</p>
-    <div class="grid">` + SELF_ID.map(([n,l]) => {
+  document.getElementById("pt-selfid").innerHTML =
+    `<p class="hint" style="margin:0 0 14px">These are the voluntary EEO questions almost every
+     application asks. Answer them once here and they fill automatically from then on.
+     <strong>Anything left unset stays flagged for you to answer by hand</strong> — and nothing here
+     is ever guessed from your name or resume. Employers use these for aggregate reporting;
+     declining is always a valid answer.</p>
+     <div class="grid">` + SELF_ID.map(([n,l]) => {
       const opts = selfIdChoices[n];
       if (!opts) return field(n, l, p[n] || "");
       const cur = p[n] || "";
@@ -440,8 +459,33 @@ function renderProfile() {
     <p class="hint">Criminal-history and salary-history questions are deliberately not here.
     Those stay flagged every time: what employers may lawfully ask varies by state and city.</p>`;
 
-  h += `<h2>Browser &amp; sign-in</h2>
-    <div class="toggle">
+  document.getElementById("pt-eduwork").innerHTML =
+    `<h2>Education</h2><div id="eduList"></div>
+     <button class="ghost" onclick="addRow('edu')">Add school</button>
+     <h2>Work history</h2><div id="expList"></div>
+     <button class="ghost" onclick="addRow('exp')">Add job</button>`;
+  (p.education || []).forEach(e => addRow("edu", e));
+  (p.experience || []).forEach(e => addRow("exp", e));
+
+  const docsList = `<datalist id="docs">` + documents.map(d => `<option value="${esc(d)}">`).join("") + `</datalist>`;
+  document.getElementById("pt-docs").innerHTML =
+    `<h2>Documents</h2>${docsList}<div class="grid">` +
+    field("resume_path", "Resume file", p.resume_path, "docs") +
+    field("cover_letter_path", "Cover letter file (optional)", p.cover_letter_path, "docs") +
+    `</div><p class="hint">Put files in the <code>documents</code> folder inside JA, then pick them here.</p>
+     <h2>Longer answers</h2>` + LONG.map(([n,l]) =>
+      `<div class="row"><label for="f-${n}">${esc(l)}</label>
+       <textarea id="f-${n}">${esc(p[n] || "")}</textarea></div>`).join("") +
+    `<h2>Saved answers</h2>
+     <p class="hint" style="margin-bottom:12px">For questions that keep coming up. The keyword is
+     matched against the question text, so “why do you want to work here” catches most phrasings.
+     Best for factual repeats — a canned answer to “why this company” reads exactly as canned as it is.</p>
+     <div id="ansList"></div>
+     <button class="ghost" onclick="addRow('ans')">Add answer</button>`;
+  Object.entries(p.custom_answers || {}).forEach(([k,v]) => addRow("ans", {keyword:k, answer:v}));
+
+  document.getElementById("pt-browser").innerHTML =
+    `<div class="toggle">
       <input type="checkbox" id="s-use_chrome" ${settings.use_chrome ? "checked" : ""}>
       <div><div class="t">Use my Google Chrome</div>
         <div class="d">Drives the Chrome installed on this Mac instead of the bundled browser.</div></div>
@@ -455,21 +499,9 @@ function renderProfile() {
     </div>
     <p class="hint">Takes effect on the next application you open.</p>`;
 
-  h += `<h2>Education</h2><div id="eduList"></div>
-        <button class="ghost" onclick="addRow('edu')">Add school</button>`;
-  h += `<h2>Work history</h2><div id="expList"></div>
-        <button class="ghost" onclick="addRow('exp')">Add job</button>`;
-  h += `<h2>Saved answers</h2>
-        <p class="hint" style="margin-bottom:12px">For questions that keep coming up. The keyword is
-        matched against the question text, so “why do you want to work here” catches most phrasings.
-        Best for factual repeats — a canned answer to “why this company” reads exactly as canned as it is.</p>
-        <div id="ansList"></div>
-        <button class="ghost" onclick="addRow('ans')">Add answer</button>`;
-
-  document.getElementById("profileForm").innerHTML = h;
-  (p.education || []).forEach(e => addRow("edu", e));
-  (p.experience || []).forEach(e => addRow("exp", e));
-  Object.entries(p.custom_answers || {}).forEach(([k,v]) => addRow("ans", {keyword:k, answer:v}));
+  let saved = "contact";
+  try { saved = localStorage.getItem("ja-ptab") || "contact"; } catch (e) {}
+  showPTab(PTABS.includes(saved) ? saved : "contact");
 }
 
 function addRow(kind, data) {
@@ -527,7 +559,7 @@ async function loadProfile() {
   selfIdChoices = data.self_id_choices || {};
   try { settings = (await (await fetch("/api/settings")).json()).settings || {}; } catch (e) { settings = {}; }
   if (!data.ok) {
-    document.getElementById("profileForm").innerHTML = `<div class="banner bad">${esc(data.error)}</div>`;
+    document.getElementById("pt-contact").innerHTML = `<div class="banner bad">${esc(data.error)}</div>`;
     return;
   }
   profile = data.profile;
