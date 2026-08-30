@@ -48,12 +48,24 @@ _EXTRACT_JS = r"""
     if (!id) return '';
     return cleanText(id.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' '));
   }
+  function hasControl(node) {
+    return ['INPUT', 'SELECT', 'TEXTAREA'].includes(node.tagName) ||
+           !!node.querySelector('input, select, textarea');
+  }
+
   function nearestPrecedingText(el) {
     let node = el.previousElementSibling;
     let hops = 0;
     while (node && hops < 4) {
-      const t = cleanText(node.innerText || '');
-      if (t && t.length < 200) return t;
+      // A sibling that IS or CONTAINS a form control is another question
+      // (or the same one), not descriptive heading text -- a <select>'s
+      // own rendered innerText is its option list, and a radio group's
+      // wrapper is its own answer choices. Neither is a caption worth
+      // reading, so skip over it entirely rather than mistaking it for one.
+      if (!hasControl(node)) {
+        const t = cleanText(node.innerText || '');
+        if (t && t.length < 200) return t;
+      }
       node = node.previousElementSibling;
       hops++;
     }
@@ -123,10 +135,23 @@ _EXTRACT_JS = r"""
   // started with, since that means it has crossed into unrelated
   // questions rather than found a wrapper around just this one.
   function wideContext(el) {
+    // Many ATS platforms give the element itself a telling id/name even
+    // when its visible label is distant or absent -- JazzHR names every
+    // EEO field "resumator-eeo_race-value", "resumator-eeo_disability-
+    // value", and so on, consistently, across every company on the
+    // platform. This is safe to always include: unlike climbing ancestors,
+    // an element's own id/name can never accidentally pull in a
+    // *different* question's text.
+    const idWords = cleanText(
+      ((el.id || '') + ' ' + (el.getAttribute('name') || ''))
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/[-_]/g, ' ')
+    );
+
     let node = el.closest('fieldset') || el.parentElement;
-    if (!node) return '';
+    if (!node) return idWords;
     const ownCount = controlCount(node);
-    if (ownCount > 2) return ''; // already broader than a single question
+    if (ownCount > 2) return idWords; // already broader than a single question
     for (let depth = 0; depth < 6; depth++) {
       const parent = node.parentElement;
       if (!parent || parent.tagName === 'FORM' || parent.tagName === 'BODY') break;
@@ -139,7 +164,8 @@ _EXTRACT_JS = r"""
       (wrap || n).remove();
     });
     clone.querySelectorAll('label[for]').forEach(l => l.remove());
-    return cleanText(clone.textContent || '').slice(0, 4000);
+    const climbed = cleanText(clone.textContent || '');
+    return (idWords + ' ' + climbed).trim().slice(0, 4000);
   }
 
   function groupLabelFor(el, ownLabel) {

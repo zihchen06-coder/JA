@@ -106,10 +106,18 @@ def _profile_value(profile: Profile, canonical: str) -> Any:
 
 
 def _display_label(label: str, canonical: str | None) -> str:
-    """Fall back to a friendly self-ID name when the real label is empty."""
-    if label.strip():
-        return label
-    return SELF_ID_DISPLAY_NAMES.get(canonical or "", label)
+    """Prefer a friendly self-ID name over the raw scraped label.
+
+    This path only runs once a self-ID match was already resolved via the
+    wider context fallback -- meaning the plain label alone wasn't already
+    self-explanatory. In that situation the raw text scraped from the page
+    (which can land on a neighboring question's own content, not just come
+    back empty) is never a better display choice than the category name we
+    already know we matched.
+    """
+    if canonical in SELF_ID_DISPLAY_NAMES:
+        return SELF_ID_DISPLAY_NAMES[canonical]
+    return label.strip() or (canonical or label)
 
 
 def _self_id_answer(profile: Profile, label: str, group: str | None) -> str | None:
