@@ -94,6 +94,54 @@ _EXTRACT_JS = r"""
     return t;
   }
 
+  // How many distinct question-controls a node contains -- selects count
+  // individually, radios are grouped by name (three same-name radios are
+  // one question), checkboxes and text-ish inputs count individually. Used
+  // to tell "still inside this one question's wrapper" apart from "climbed
+  // into a sibling question (or the whole form)".
+  function controlCount(node) {
+    const radioNames = new Set();
+    node.querySelectorAll('input[type="radio"]').forEach(r => radioNames.add(r.name || Math.random()));
+    const other = node.querySelectorAll(
+      'select, input:not([type="radio"]):not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]):not([type="reset"]), textarea'
+    ).length;
+    return radioNames.size + other;
+  }
+
+  // A much wider net than groupLabelFor/containerQuestion, used only as a
+  // fallback for detecting EEO/self-identification questions. The federal
+  // CC-305 disability form and similar boilerplate can run to thousands of
+  // characters between the section heading and the actual radio buttons --
+  // the 300-char cap that keeps groupLabelFor's short display label sane
+  // means that heading is often out of reach entirely. This climbs further
+  // and keeps whatever it finds, since it is only ever substring-matched
+  // against known keywords, never shown to the user or used as a display
+  // label -- but climbing is bounded by CONTENT, not just depth: many real
+  // forms put every field as a flat sibling with no per-question wrapper,
+  // so the very first ancestor can already be the whole form. Widening
+  // stops the moment an ancestor holds more controls than the field
+  // started with, since that means it has crossed into unrelated
+  // questions rather than found a wrapper around just this one.
+  function wideContext(el) {
+    let node = el.closest('fieldset') || el.parentElement;
+    if (!node) return '';
+    const ownCount = controlCount(node);
+    if (ownCount > 2) return ''; // already broader than a single question
+    for (let depth = 0; depth < 6; depth++) {
+      const parent = node.parentElement;
+      if (!parent || parent.tagName === 'FORM' || parent.tagName === 'BODY') break;
+      if (controlCount(parent) > ownCount) break;
+      node = parent;
+    }
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll('input, select, textarea').forEach(n => {
+      const wrap = n.closest('label');
+      (wrap || n).remove();
+    });
+    clone.querySelectorAll('label[for]').forEach(l => l.remove());
+    return cleanText(clone.textContent || '').slice(0, 4000);
+  }
+
   function groupLabelFor(el, ownLabel) {
     const fieldset = el.closest('fieldset');
     if (fieldset) {
@@ -154,9 +202,11 @@ _EXTRACT_JS = r"""
     if (type === 'radio' || type === 'checkbox') {
       item.label = labelFor(el);
       item.group_label = groupLabelFor(el, item.label);
+      item.context = wideContext(el);
       item.checked = !!el.checked;
     } else if (tag === 'select') {
       item.label = labelFor(el);
+      item.context = wideContext(el);
       item.options = Array.from(el.options).map(o => ({ value: o.value, text: cleanText(o.text) }));
       // A <select> with no explicit value="" on its first <option> defaults
       // el.value to that option's own TEXT ("-- No answer --", "Select...")

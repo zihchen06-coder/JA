@@ -157,6 +157,15 @@ def test_years_experience_alias_appears_inside_an_unrelated_yes_no_question():
     assert matcher.match_field("Do you have 5+ years of experience in the AEC industry?") == "years_experience"
 
 
+def test_normalize_date_for_native_date_inputs():
+    # <input type=date> rejects anything but YYYY-MM-DD outright.
+    assert matcher.normalize_date("05/11/2027") == "2027-05-11"
+    assert matcher.normalize_date("May 11, 2027") == "2027-05-11"
+    assert matcher.normalize_date("2027-05-11") == "2027-05-11"
+    # Unparseable text is returned unchanged rather than dropped.
+    assert matcher.normalize_date("ASAP") == "ASAP"
+
+
 def test_best_bool_option_ignores_no_answer_placeholder():
     options = [
         {"value": "", "text": "-- No answer --"},

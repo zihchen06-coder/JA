@@ -239,6 +239,22 @@ SELF_ID_FIELDS = {
     "transgender_status",
 }
 
+# Human-readable fallback names for the report/UI when a self-ID question's
+# own label comes back empty -- which happens on forms (the federal CC-305
+# disability form especially) where thousands of characters of legal
+# boilerplate sit between the section heading and the actual control, well
+# past where any text-proximity search would look.
+SELF_ID_DISPLAY_NAMES: dict[str, str] = {
+    "gender": "Gender",
+    "pronouns": "Pronouns",
+    "hispanic_latino": "Hispanic or Latino?",
+    "race_ethnicity": "Race / Ethnicity",
+    "veteran_status": "Veteran Status",
+    "disability_status": "Disability Status",
+    "sexual_orientation": "Sexual Orientation",
+    "transgender_status": "Transgender Status",
+}
+
 # The standard option wordings used by Greenhouse, Lever, Workday and
 # JazzHR, offered in the UI so a saved answer matches the real dropdowns.
 SELF_ID_CHOICES: dict[str, list[str]] = {

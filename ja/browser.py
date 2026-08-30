@@ -29,15 +29,27 @@ def launch_browser(
         # Playwright locates the installed Google Chrome itself.
         kwargs["channel"] = "chrome"
 
+    # Without this, Playwright forces every page into a fixed 1280x720 CSS
+    # viewport regardless of the actual window size -- the window opens at
+    # full size but the page content is held to that smaller box, which is
+    # exactly what makes native controls like <select> dropdowns look
+    # oversized against the page and leaves blank space around it.
+    # no_viewport lets the page fill the real window instead; --start-
+    # maximized makes that window as large as the screen allows.
+    page_kwargs: dict[str, Any] = {}
+    if not headless:
+        kwargs.setdefault("args", []).append("--start-maximized")
+        page_kwargs["no_viewport"] = True
+
     if user_data_dir:
         context = playwright.chromium.launch_persistent_context(
-            os.path.expanduser(user_data_dir), **kwargs
+            os.path.expanduser(user_data_dir), **kwargs, **page_kwargs
         )
         page = context.pages[0] if context.pages else context.new_page()
         return context, page
 
     browser = playwright.chromium.launch(**kwargs)
-    return browser, browser.new_page()
+    return browser, browser.new_page(**page_kwargs)
 
 
 def launch_error_message(exc: Exception) -> str:

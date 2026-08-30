@@ -10,7 +10,7 @@ from typing import Any
 
 from . import matcher
 from .extractor import extract_fields
-from .field_aliases import BOOLEAN_FIELDS, EDUCATION_FIELDS, SELF_ID_FIELDS
+from .field_aliases import BOOLEAN_FIELDS, EDUCATION_FIELDS, SELF_ID_DISPLAY_NAMES, SELF_ID_FIELDS
 from .platform_detect import detect_platform
 from .profile import Profile
 
@@ -105,6 +105,13 @@ def _profile_value(profile: Profile, canonical: str) -> Any:
     return getattr(profile, canonical, None)
 
 
+def _display_label(label: str, canonical: str | None) -> str:
+    """Fall back to a friendly self-ID name when the real label is empty."""
+    if label.strip():
+        return label
+    return SELF_ID_DISPLAY_NAMES.get(canonical or "", label)
+
+
 def _self_id_answer(profile: Profile, label: str, group: str | None) -> str | None:
     """The applicant's own answer to a self-identification question, if set.
 
@@ -161,33 +168,49 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
         _handle_file_field(page, profile, report, f)
         return
 
-    group = matcher.sensitive_group(label)
-    if group and not _self_id_answer(profile, label, group):
-        _mark(page, f["ja_id"], _MARK_REVIEW)
-        report.add(label, None, "needs_review", matcher.sensitive_reason(label), required)
-        return
+    # Long EEO boilerplate (the federal CC-305 disability form especially)
+    # can put thousands of characters between a section's real heading and
+    # its control, well past reach of the short display label -- wide_text
+    # is a superset that still finds it. It's only ever used for detecting
+    # and resolving a sensitive question, never for ordinary field matching
+    # or for what's shown in the report.
+    context = f.get("context", "")
+    wide_text = f"{label} {context}".strip() if context else label
 
-    if ftype == "checkbox":
-        _handle_checkbox(page, profile, report, f)
-        return
-
-    canonical = matcher.match_field(label)
-    if canonical is None:
-        custom_answer = _match_custom_answer(label, profile)
-        if custom_answer is not None and ftype != "select":
-            try:
-                page.locator(_sel(f["ja_id"])).fill(custom_answer)
-                _mark(page, f["ja_id"], _MARK_FILLED)
-                report.add(label, "custom_answers", "filled", custom_answer, required)
-            except Exception as exc:  # noqa: BLE001
-                report.add(label, "custom_answers", "error", str(exc), required)
+    group = matcher.sensitive_group(wide_text)
+    if group:
+        answer = _self_id_answer(profile, wide_text, group)
+        if not answer:
+            guess = matcher.match_field(wide_text)
+            _mark(page, f["ja_id"], _MARK_REVIEW)
+            report.add(_display_label(label, guess), None, "needs_review",
+                       matcher.sensitive_reason(wide_text), required)
             return
-        if required:
-            _mark(page, f["ja_id"], _MARK_BLANK)
-        report.add(label or f["name"] or f["ja_id"], None, "skipped_no_match", "", required)
-        return
+        canonical = matcher.match_field(wide_text)
+        label = _display_label(label, canonical)
+        value = answer
+    else:
+        if ftype == "checkbox":
+            _handle_checkbox(page, profile, report, f)
+            return
 
-    value = _profile_value(profile, canonical)
+        canonical = matcher.match_field(label)
+        if canonical is None:
+            custom_answer = _match_custom_answer(label, profile)
+            if custom_answer is not None and ftype != "select":
+                try:
+                    page.locator(_sel(f["ja_id"])).fill(custom_answer)
+                    _mark(page, f["ja_id"], _MARK_FILLED)
+                    report.add(label, "custom_answers", "filled", custom_answer, required)
+                except Exception as exc:  # noqa: BLE001
+                    report.add(label, "custom_answers", "error", str(exc), required)
+                return
+            if required:
+                _mark(page, f["ja_id"], _MARK_BLANK)
+            report.add(label or f["name"] or f["ja_id"], None, "skipped_no_match", "", required)
+            return
+        value = _profile_value(profile, canonical)
+
     if value in (None, ""):
         if required:
             _mark(page, f["ja_id"], _MARK_BLANK)
@@ -236,9 +259,13 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
             _mark(page, f["ja_id"], _MARK_FILLED)
             report.add(label, canonical, "filled", detail, required)
         else:
-            loc.fill(str(value))
+            # Native <input type=date> rejects anything but YYYY-MM-DD --
+            # a value typed as "05/11/2027" or "May 11, 2027" would
+            # silently fail to set.
+            fill_value = matcher.normalize_date(str(value)) if ftype == "date" else str(value)
+            loc.fill(fill_value)
             _mark(page, f["ja_id"], _MARK_FILLED)
-            report.add(label, canonical, "filled", str(value), required)
+            report.add(label, canonical, "filled", fill_value, required)
     except Exception as exc:  # noqa: BLE001 - report and move on, never crash the run
         report.add(label, canonical, "error", str(exc), required)
 
@@ -334,28 +361,38 @@ def _handle_radio_group(page: Any, profile: Profile, report: FillReport, options
         report.add(group_label, None, "already_filled", "Left as-is.", required)
         return
 
-    sgroup = matcher.sensitive_group(group_label)
+    # Same rationale as in _handle_simple_field: long EEO boilerplate can
+    # separate a section's real heading from its radios by more than
+    # group_label's short-range search reaches. wide_text only ever
+    # widens detection of a sensitive question -- never used for the
+    # ordinary boolean-question matching below, and never shown to the user.
+    context = next((o.get("context") for o in options if o.get("context")), "")
+    wide_text = f"{group_label} {context}".strip() if context else group_label
+
+    sgroup = matcher.sensitive_group(wide_text)
     if sgroup:
-        answer = _self_id_answer(profile, group_label, sgroup)
+        answer = _self_id_answer(profile, wide_text, sgroup)
         if not answer:
+            guess = matcher.match_field(wide_text)
             _mark_all(page, options, _MARK_REVIEW)
-            report.add(group_label, None, "needs_review",
-                       matcher.sensitive_reason(group_label), required)
+            report.add(_display_label(group_label, guess), None, "needs_review",
+                       matcher.sensitive_reason(wide_text), required)
             return
-        canonical = matcher.match_field(group_label)
+        canonical = matcher.match_field(wide_text)
+        display = _display_label(group_label, canonical)
         idx = matcher.best_choice(answer, [o.get("label", "") for o in options])
         if idx is None:
             if required:
                 _mark_all(page, options, _MARK_BLANK)
-            report.add(group_label, canonical, "skipped_no_match",
+            report.add(display, canonical, "skipped_no_match",
                        f"No option matched '{answer}'.", required)
             return
         try:
             page.locator(_sel(options[idx]["ja_id"])).check()
             _mark(page, options[idx]["ja_id"], _MARK_FILLED)
-            report.add(group_label, canonical, "filled", options[idx].get("label", ""), required)
+            report.add(display, canonical, "filled", options[idx].get("label", ""), required)
         except Exception as exc:  # noqa: BLE001
-            report.add(group_label, canonical, "error", str(exc), required)
+            report.add(display, canonical, "error", str(exc), required)
         return
 
     canonical = matcher.match_field(group_label)

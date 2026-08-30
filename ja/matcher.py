@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import re
+from datetime import datetime
 
 from .field_aliases import (
     COVER_LETTER_KEYWORDS,
@@ -18,7 +19,7 @@ from .field_aliases import (
 __all__ = [
     "normalize", "is_eeo_label", "sensitive_group", "sensitive_reason",
     "is_resume_label", "is_cover_letter_label", "match_field", "best_option",
-    "best_choice", "semantic_bool",
+    "best_choice", "semantic_bool", "normalize_date",
 ]
 
 _PUNCT_RE = re.compile(r"[^a-z0-9\s]")
@@ -157,6 +158,24 @@ def best_option(target_value: str, options: list[dict], min_ratio: float = 0.5) 
             best_score, best_value = ratio, opt.get("value")
 
     return best_value if best_score >= min_ratio else None
+
+
+_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%B %d, %Y", "%b %d, %Y", "%B %d %Y")
+
+
+def normalize_date(value: str) -> str:
+    """Convert a human-entered date to YYYY-MM-DD for native <input type=date>
+    fields, which reject any other format outright. Returns `value`
+    unchanged if it doesn't match a recognized format, so a value already
+    in some other free-text shape still gets attempted as typed.
+    """
+    text = value.strip()
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return value
 
 
 def semantic_bool(choice_text: str) -> bool | None:
