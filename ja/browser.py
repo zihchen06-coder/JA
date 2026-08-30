@@ -52,6 +52,29 @@ def launch_browser(
     return browser, browser.new_page(**page_kwargs)
 
 
+def goto_and_settle(page: Any, url: str, timeout_ms: int) -> None:
+    """Navigate, then give the page a real chance to finish rendering.
+
+    Some ATS postings decide which page variant to render via an async A/B
+    testing call (visible in the page's own source as GTM/experiment
+    scaffolding) that can still be in flight moments after
+    domcontentloaded -- a form section built by that call can be entirely
+    absent from the DOM during a scan that runs too soon, which looks
+    exactly like the tool failing to recognize a field it was never given
+    the chance to see. wait_for_load_state("networkidle") gives genuinely
+    dynamic content a real window to finish; many pages have some
+    always-on background request (ads, analytics polling) that keeps
+    "networkidle" from ever firing at all, so this is capped and never
+    allowed to block filling outright.
+    """
+    page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+    try:
+        page.wait_for_load_state("networkidle", timeout=5000)
+    except Exception:  # noqa: BLE001 - best-effort; fall through to the fixed pause
+        pass
+    page.wait_for_timeout(1500)
+
+
 def launch_error_message(exc: Exception) -> str:
     text = str(exc)
     hint = (

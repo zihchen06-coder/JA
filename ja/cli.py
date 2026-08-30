@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 
-from .browser import launch_browser, launch_error_message
+from .browser import goto_and_settle, launch_browser, launch_error_message
 from .filler import fill_form
 from .profile import ProfileError, load_profile
 from .report import print_report
@@ -36,8 +36,7 @@ def _apply_to_url(page, profile, url: str, timeout: int, interactive: bool,
                   verbose: bool = False) -> str:
     """Fill one application. Returns 'next' or 'quit'."""
     print(f"\n{'=' * 70}\nOpening {url}\n{'=' * 70}")
-    page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
-    page.wait_for_timeout(1000)
+    goto_and_settle(page, url, timeout * 1000)
 
     print_report(fill_form(page, profile), verbose=verbose)
 

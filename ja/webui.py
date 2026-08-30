@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from queue import Queue
 from typing import Any, Callable
 
-from .browser import launch_browser, launch_error_message
+from .browser import goto_and_settle, launch_browser, launch_error_message
 from .field_aliases import OPTION_CHOICES, SELF_ID_CHOICES
 from .filler import fill_form
 from .profile import ProfileError, load_profile, profile_to_dict, save_profile
@@ -102,8 +102,7 @@ class Session:
     def _navigate_and_fill(self, page: Any, url: str) -> None:
         self._set(status="working", message=f"Opening {url}", url=url)
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            page.wait_for_timeout(1000)
+            goto_and_settle(page, url, 45000)
         except Exception as exc:  # noqa: BLE001
             self._set(status="open", message=f"Could not load that page: {exc}", report=None)
             return
