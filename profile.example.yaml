@@ -3,6 +3,8 @@
 
 first_name: "Jane"
 last_name: "Doe"
+middle_name: ""
+preferred_name: ""
 email: "jane.doe@example.com"
 phone: "+1 555 123 4567"
 
@@ -23,11 +25,26 @@ years_experience: "5"
 desired_salary: "150000"
 notice_period: "2 weeks"
 how_heard: "LinkedIn"
+gpa: "3.8"
+preferred_location: "New York, NY"
+employment_type: "Full-time"
+security_clearance: ""
 
-# yes/no values -- used for common eligibility questions
+# yes/no values -- used for the screening questions most applications ask.
+# Anything left blank is skipped and reported, never guessed.
 work_authorized: yes
 needs_sponsorship: no
 willing_to_relocate: no
+over_18: yes
+has_drivers_license: yes
+willing_to_travel: yes
+consent_background_check: yes
+consent_drug_test: yes
+can_perform_essential_functions: yes
+
+# Deliberately blank: this one is company-specific, so a saved answer would
+# be wrong at any employer you HAVE worked for. Fill it per application.
+previously_employed_here:
 
 # Paths to files on disk, used for file-upload fields whose label
 # mentions "resume"/"CV" or "cover letter".
@@ -52,7 +69,16 @@ experience:
 # is typed into the field verbatim, so tailor it before running a batch.
 custom_answers:
   "why do you want to work here": "I'm excited about your product and mission."
+  # Other phrasings worth having an answer ready for. Fill in and uncomment:
+  # "why are you interested": ""
+  # "what makes you a good fit": ""
+  # "tell us about yourself": ""
+  # "additional information": ""
+  # "anything else you would like us to know": ""
 
-# Note: questions about race, gender, veteran status, disability, or sexual
-# orientation are intentionally NEVER auto-filled, even if you add answers
-# here -- the tool always flags them so you answer those yourself.
+# Note: these are NEVER auto-filled, even if you add answers above -- the
+# tool always flags them so you answer them yourself:
+#   * race, gender, ethnicity, veteran status, disability, sexual
+#     orientation, pronouns, date of birth, citizenship, national origin
+#   * criminal history (what may lawfully be asked varies by state and city)
+#   * salary history (illegal for employers to ask in many states)

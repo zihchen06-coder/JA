@@ -112,18 +112,30 @@ PAGE_HTML = r"""<!doctype html>
 
 <script>
 const SCALARS = [
-  ["first_name","First name"],["last_name","Last name"],["email","Email"],["phone","Phone"],
+  ["first_name","First name"],["middle_name","Middle name / initial"],["last_name","Last name"],
+  ["preferred_name","Preferred name / nickname"],["email","Email"],["phone","Phone"],
   ["address_line1","Street address"],["address_line2","Apt / unit"],["city","City"],
   ["state","State"],["postal_code","ZIP code"],["country","Country"],
   ["linkedin_url","LinkedIn URL"],["github_url","GitHub URL"],["portfolio_url","Portfolio / website"],
   ["current_company","Current employer"],["current_title","Current job title"],
-  ["years_experience","Years of experience"],["desired_salary","Desired salary"],
-  ["notice_period","Earliest start date"],["how_heard","How you heard about the role"],
+  ["years_experience","Years of experience"],["gpa","GPA"],
+  ["desired_salary","Desired salary"],["notice_period","Earliest start date"],
+  ["preferred_location","Preferred work location"],
+  ["employment_type","Employment type (full-time / intern / co-op)"],
+  ["security_clearance","Security clearance (if any)"],
+  ["how_heard","How you heard about the role"],
 ];
 const BOOLS = [
   ["work_authorized","Legally authorized to work in the US?"],
   ["needs_sponsorship","Will you need visa sponsorship (now or later)?"],
   ["willing_to_relocate","Willing to relocate?"],
+  ["over_18","Are you at least 18 years old?"],
+  ["has_drivers_license","Do you have a valid driver's license?"],
+  ["willing_to_travel","Willing to travel?"],
+  ["consent_background_check","Consent to a background check?"],
+  ["consent_drug_test","Consent to a drug screening?"],
+  ["can_perform_essential_functions","Can perform the job's essential functions (with or without accommodation)?"],
+  ["previously_employed_here","Previously employed by this company?"],
 ];
 const EDU = [["school","School"],["degree","Degree"],["field_of_study","Field of study"],["graduation_year","Graduation year"]];
 const EXP = [["company","Company"],["title","Title"],["start_date","Start date"],["end_date","End date"],["description","Description"]];
@@ -220,7 +232,11 @@ function renderProfile() {
         <option value="no" ${v==="no"?"selected":""}>No</option>
       </select></div>`;
   }).join("") + `</div>
-  <p class="hint">Left unset, these are simply skipped and you answer them by hand each time.</p>`;
+  <p class="hint">Left unset, these are simply skipped and you answer them by hand each time.
+  <strong>“Previously employed by this company”</strong> is worth leaving unset — it is
+  company-specific, so one saved answer will be wrong at any employer you have actually
+  worked for. Questions about criminal history, salary history, and demographics are never
+  auto-filled at all.</p>`;
 
   const opts = `<datalist id="docs">` + documents.map(d => `<option value="${esc(d)}">`).join("") + `</datalist>`;
   h += `<h2>Documents</h2>${opts}<div class="grid">` +

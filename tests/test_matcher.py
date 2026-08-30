@@ -38,6 +38,33 @@ def test_sensitive_questions_are_flagged_not_answered():
         assert matcher.is_eeo_label(label), label
 
 
+def test_matches_common_screening_questions():
+    cases = {
+        "Are you at least 18 years of age?": "over_18",
+        "Do you have a valid driver's license?": "has_drivers_license",
+        "Are you willing to travel?": "willing_to_travel",
+        "Are you willing to submit to a background check?": "consent_background_check",
+        "Are you willing to take a drug screen?": "consent_drug_test",
+        "Can you perform the essential functions of this job?": "can_perform_essential_functions",
+        "Have you ever worked for this company before?": "previously_employed_here",
+        "Cumulative GPA": "gpa",
+        "Preferred Name": "preferred_name",
+        "Middle Initial": "middle_name",
+        "Preferred Work Location": "preferred_location",
+        "Employment Type": "employment_type",
+        "Security Clearance": "security_clearance",
+    }
+    for label, expected in cases.items():
+        assert matcher.match_field(label) == expected, label
+
+
+def test_sensitive_reasons_are_category_specific():
+    assert "Self-identification" in matcher.sensitive_reason("Gender")
+    assert "Criminal-history" in matcher.sensitive_reason("Have you been convicted of a felony?")
+    assert "Salary-history" in matcher.sensitive_reason("What is your current salary?")
+    assert matcher.sensitive_reason("First Name") is None
+
+
 def test_no_match_for_unrelated_text():
     assert matcher.match_field("Tell us about a challenging project") is None
 

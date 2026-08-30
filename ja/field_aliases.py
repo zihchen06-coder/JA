@@ -4,7 +4,9 @@
 FIELD_ALIASES: dict[str, list[str]] = {
     "first_name": ["first name", "given name", "legal first name", "fname"],
     "last_name": ["last name", "surname", "family name", "legal last name", "lname"],
-    "full_name": ["full name", "your name", "applicant name"],
+    "full_name": ["full name", "your name", "applicant name", "legal name"],
+    "middle_name": ["middle name", "middle initial"],
+    "preferred_name": ["preferred name", "nickname", "preferred first name", "goes by"],
     "email": ["email", "e mail", "email address"],
     "phone": ["phone", "phone number", "mobile", "mobile number", "telephone", "cell phone", "cell number"],
     "address_line1": ["address", "street address", "address line 1", "home address"],
@@ -41,6 +43,18 @@ FIELD_ALIASES: dict[str, list[str]] = {
         "graduation year", "year of graduation", "expected graduation",
         "graduation date", "grad year",
     ],
+    "gpa": ["gpa", "grade point average", "cumulative gpa"],
+    "security_clearance": [
+        "security clearance", "clearance level", "active clearance",
+    ],
+    "preferred_location": [
+        "preferred location", "preferred work location", "desired location",
+        "location preference", "work location",
+    ],
+    "employment_type": [
+        "employment type", "position type", "desired employment type",
+        "full time or part time", "type of employment",
+    ],
     "years_experience": ["years of experience", "years experience", "total years of experience"],
     "desired_salary": [
         "desired salary", "salary expectation", "salary expectations",
@@ -63,6 +77,35 @@ FIELD_ALIASES: dict[str, list[str]] = {
         "visa sponsorship", "future sponsorship",
     ],
     "willing_to_relocate": ["willing to relocate", "relocate", "relocation"],
+    "over_18": [
+        "at least 18", "18 years of age", "18 years old", "over 18",
+        "are you 18", "of legal working age",
+    ],
+    "has_drivers_license": [
+        "driver s license", "drivers license", "valid driver s license",
+        "valid drivers license", "driving license",
+    ],
+    "willing_to_travel": [
+        "willing to travel", "able to travel", "travel requirement",
+        "open to travel",
+    ],
+    "consent_background_check": [
+        "background check", "background screening", "consent to a background check",
+        "submit to a background check",
+    ],
+    "consent_drug_test": [
+        "drug test", "drug screen", "drug screening", "substance screening",
+    ],
+    "can_perform_essential_functions": [
+        "essential functions", "perform the essential functions",
+        "with or without reasonable accommodation",
+    ],
+    # Company-specific: a blanket "no" is wrong at any employer you HAVE
+    # worked for, so leave it unset unless you're sure it applies.
+    "previously_employed_here": [
+        "previously employed", "ever worked for", "former employee",
+        "worked here before", "previously worked for",
+    ],
 }
 
 # Question labels containing any of these phrases are demographic/EEO questions.
@@ -72,11 +115,32 @@ FIELD_ALIASES: dict[str, list[str]] = {
 # Also covers age, citizenship, and national origin: all protected
 # characteristics where a wrong auto-filled answer is far worse than a blank
 # one the applicant fills in deliberately.
+SENSITIVE_GROUPS: dict[str, tuple[str, list[str]]] = {
+    "demographic": (
+        "Self-identification question: answer this one yourself.",
+        [
+            "gender", "sex", "race", "ethnicity", "veteran", "disability",
+            "disabilities", "sexual orientation", "transgender", "self identif",
+            "pronoun", "hispanic", "latino", "military service", "protected",
+            "date of birth", "citizen", "national origin",
+        ],
+    ),
+    # What may lawfully be asked varies by state and city, and a wrong answer
+    # here is serious.
+    "criminal": (
+        "Criminal-history question: answer this one yourself.",
+        ["convicted", "conviction", "felony", "misdemeanor", "criminal", "arrest"],
+    ),
+    # Illegal for employers to ask in many states.
+    "salary_history": (
+        "Salary-history question: answer this one yourself (many states bar "
+        "employers from asking).",
+        ["salary history", "current salary", "previous salary", "last salary"],
+    ),
+}
+
 EEO_KEYWORDS: list[str] = [
-    "gender", "sex", "race", "ethnicity", "veteran", "disability",
-    "disabilities", "sexual orientation", "transgender", "self identif",
-    "pronoun", "hispanic", "latino", "military service", "protected",
-    "date of birth", "citizen", "national origin",
+    kw for _, keywords in SENSITIVE_GROUPS.values() for kw in keywords
 ]
 
 RESUME_KEYWORDS = ["resume", "resume cv", "cv"]
@@ -84,7 +148,12 @@ COVER_LETTER_KEYWORDS = ["cover letter", "covering letter", "letter of interest"
 
 # Fields whose values are booleans and typically presented as Yes/No radios
 # or a single checkbox.
-BOOLEAN_FIELDS = {"work_authorized", "needs_sponsorship", "willing_to_relocate"}
+BOOLEAN_FIELDS = {
+    "work_authorized", "needs_sponsorship", "willing_to_relocate",
+    "over_18", "has_drivers_license", "willing_to_travel",
+    "consent_background_check", "consent_drug_test",
+    "can_perform_essential_functions", "previously_employed_here",
+}
 
 # Canonical names that live on the profile's first education entry rather
 # than on the profile itself.

@@ -191,6 +191,51 @@ works the same way across ATS platforms:
 Run `python apply.py fill` on an unrecognized site and it still tries; you
 just get more "no matching profile field" entries to fill in by hand.
 
+## What it can answer
+
+**Identity & contact** — first/middle/last name, preferred name, email,
+phone, full address, LinkedIn, GitHub, portfolio.
+
+**Education** — school, degree, field of study, graduation year, GPA (taken
+from the first `education` entry, for forms that ask for one flat school).
+
+**Employment** — current/most-recent employer and title, years of
+experience, desired salary, earliest start date, preferred location,
+employment type, security clearance, how you heard about the role.
+
+**Yes/no screening questions** — the set nearly every application asks:
+
+| Question | Profile field |
+|---|---|
+| Legally authorized to work? | `work_authorized` |
+| Need visa sponsorship? | `needs_sponsorship` |
+| Willing to relocate? | `willing_to_relocate` |
+| At least 18 years old? | `over_18` |
+| Valid driver's license? | `has_drivers_license` |
+| Willing to travel? | `willing_to_travel` |
+| Consent to a background check? | `consent_background_check` |
+| Consent to a drug screening? | `consent_drug_test` |
+| Can perform essential functions? | `can_perform_essential_functions` |
+| Previously employed here? | `previously_employed_here` |
+
+Each works against Yes/No radio groups and single checkboxes. Any field left
+unset is skipped and reported — never guessed.
+
+Leave `previously_employed_here` unset: it's company-specific, so one saved
+answer is wrong at any employer you actually have worked for.
+
+**Open-ended questions** go in `custom_answers`, matched by keyword against
+the question text — `"why do you want to work here"` catches most phrasings.
+
+### Never auto-filled
+
+Always flagged for you, whatever your profile says:
+
+- **Demographics** — race, gender, ethnicity, veteran status, disability,
+  sexual orientation, pronouns, date of birth, citizenship, national origin
+- **Criminal history** — what may lawfully be asked varies by state and city
+- **Salary history** — illegal for employers to ask in many states
+
 ## Profile fields
 
 See `profile.example.yaml` for the full list with comments. Highlights:

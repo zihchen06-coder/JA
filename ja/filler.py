@@ -117,8 +117,9 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
         _handle_file_field(page, profile, report, f)
         return
 
-    if matcher.is_eeo_label(label):
-        report.add(label, None, "needs_review", "Self-identification question: fill in yourself.", required)
+    reason = matcher.sensitive_reason(label)
+    if reason:
+        report.add(label, None, "needs_review", reason, required)
         return
 
     if ftype == "checkbox":
@@ -218,8 +219,9 @@ def _handle_radio_group(page: Any, profile: Profile, report: FillReport, options
         report.add(group_label, None, "already_filled", "Left as-is.", required)
         return
 
-    if matcher.is_eeo_label(group_label):
-        report.add(group_label, None, "needs_review", "Self-identification question: fill in yourself.", required)
+    reason = matcher.sensitive_reason(group_label)
+    if reason:
+        report.add(group_label, None, "needs_review", reason, required)
         return
 
     canonical = matcher.match_field(group_label)

@@ -11,6 +11,7 @@ from .field_aliases import (
     FALSE_WORDS,
     FIELD_ALIASES,
     RESUME_KEYWORDS,
+    SENSITIVE_GROUPS,
     TRUE_WORDS,
 )
 
@@ -28,6 +29,15 @@ def normalize(text: str) -> str:
 def is_eeo_label(label: str) -> bool:
     norm = normalize(label)
     return any(kw in norm for kw in EEO_KEYWORDS)
+
+
+def sensitive_reason(label: str) -> str | None:
+    """Why a label must be left for the applicant, or None if it's fillable."""
+    norm = normalize(label)
+    for reason, keywords in SENSITIVE_GROUPS.values():
+        if any(kw in norm for kw in keywords):
+            return reason
+    return None
 
 
 def is_resume_label(label: str) -> bool:

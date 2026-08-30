@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from .field_aliases import BOOLEAN_FIELDS
+
 REQUIRED_FIELDS = ["first_name", "last_name", "email", "phone"]
 
 
@@ -36,6 +38,8 @@ class WorkExperience:
 class Profile:
     first_name: str = ""
     last_name: str = ""
+    middle_name: str = ""
+    preferred_name: str = ""
     email: str = ""
     phone: str = ""
 
@@ -56,10 +60,23 @@ class Profile:
     desired_salary: str = ""
     notice_period: str = ""
     how_heard: str = ""
+    gpa: str = ""
+    security_clearance: str = ""
+    preferred_location: str = ""
+    employment_type: str = ""
 
+    # Yes/no screening questions. Any left as None is simply skipped and
+    # reported, so an unanswered one is never guessed at.
     work_authorized: bool | None = None
     needs_sponsorship: bool | None = None
     willing_to_relocate: bool | None = None
+    over_18: bool | None = None
+    has_drivers_license: bool | None = None
+    willing_to_travel: bool | None = None
+    consent_background_check: bool | None = None
+    consent_drug_test: bool | None = None
+    can_perform_essential_functions: bool | None = None
+    previously_employed_here: bool | None = None
 
     resume_path: str = ""
     cover_letter_path: str = ""
@@ -112,7 +129,7 @@ def save_profile(path: str, data: dict[str, Any]) -> Profile:
     known = {f.name for f in fields(Profile)}
     cleaned = {k: v for k, v in data.items() if k in known}
 
-    for bool_field in ("work_authorized", "needs_sponsorship", "willing_to_relocate"):
+    for bool_field in BOOLEAN_FIELDS:
         if bool_field in cleaned:
             cleaned[bool_field] = _coerce_bool(cleaned[bool_field])
 
@@ -151,7 +168,7 @@ def load_profile(path: str) -> Profile:
             f"Check spelling against profile.example.yaml."
         )
 
-    for bool_field in ("work_authorized", "needs_sponsorship", "willing_to_relocate"):
+    for bool_field in BOOLEAN_FIELDS:
         if bool_field in raw:
             raw[bool_field] = _coerce_bool(raw[bool_field])
 
