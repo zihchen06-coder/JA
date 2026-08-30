@@ -5,6 +5,7 @@ profile, and apply it via Playwright -- never touching submit controls.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from itertools import groupby
 from typing import Any
 
@@ -120,6 +121,24 @@ def _display_label(label: str, canonical: str | None) -> str:
     return label.strip() or (canonical or label)
 
 
+_SIGNATURE_CONTEXT_KEYWORDS = ("disability", "veteran", "signature")
+
+
+def _is_signature_context(wide_text: str) -> bool:
+    norm = matcher.normalize(wide_text)
+    return any(kw in norm for kw in _SIGNATURE_CONTEXT_KEYWORDS)
+
+
+def _fill_text(page: Any, report: FillReport, f: dict, canonical: str, value: str, required: bool) -> None:
+    label = f.get("label", "")
+    try:
+        page.locator(_sel(f["ja_id"])).fill(value)
+        _mark(page, f["ja_id"], _MARK_FILLED)
+        report.add(label, canonical, "filled", value, required)
+    except Exception as exc:  # noqa: BLE001
+        report.add(label, canonical, "error", str(exc), required)
+
+
 def _self_id_answer(profile: Profile, label: str, group: str | None) -> str | None:
     """The applicant's own answer to a self-identification question, if set.
 
@@ -184,6 +203,25 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
     # or for what's shown in the report.
     context = f.get("context", "")
     wide_text = f"{label} {context}".strip() if context else label
+
+    # A bare "Name"/"Date" pair next to a disability/veteran self-ID
+    # section is that section's own signature block (the CC-305 disability
+    # form always ends with one). Handled explicitly, ahead of the generic
+    # self-ID path below: "Name" and "Date" aren't self-ID fields
+    # themselves, so without this a demographic keyword in the surrounding
+    # id/context (there for the real question, not this field) would
+    # otherwise resolve to something like disability_status and fill the
+    # wrong text into a plain name box. A signature date is always today,
+    # regardless of any other date stored in the profile.
+    if _is_signature_context(wide_text):
+        norm_label = matcher.normalize(label)
+        if norm_label == "name" and profile.full_name:
+            _fill_text(page, report, f, "full_name", profile.full_name, required)
+            return
+        if norm_label == "date":
+            today = date.today().strftime("%Y-%m-%d" if ftype == "date" else "%m/%d/%Y")
+            _fill_text(page, report, f, "signature_date", today, required)
+            return
 
     group = matcher.sensitive_group(wide_text)
     if group:
@@ -267,10 +305,20 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
             _mark(page, f["ja_id"], _MARK_FILLED)
             report.add(label, canonical, "filled", detail, required)
         else:
-            # Native <input type=date> rejects anything but YYYY-MM-DD --
-            # a value typed as "05/11/2027" or "May 11, 2027" would
-            # silently fail to set.
-            fill_value = matcher.normalize_date(str(value)) if ftype == "date" else str(value)
+            # Native <input type=date> hard-requires YYYY-MM-DD and rejects
+            # anything else outright. A plain text field driven by a JS
+            # datepicker widget (jQuery UI's own default, and the most
+            # common convention on US-facing forms) usually expects
+            # MM/DD/YYYY instead -- either way, whatever the profile has
+            # stored ("2027-05-11", "05/11/2027", "May 11, 2027", ...) gets
+            # converted to what the actual field wants, not just typed in
+            # verbatim.
+            if ftype == "date":
+                fill_value = matcher.normalize_date(str(value), "%Y-%m-%d")
+            elif f.get("is_datepicker") or canonical == "notice_period":
+                fill_value = matcher.normalize_date(str(value), "%m/%d/%Y")
+            else:
+                fill_value = str(value)
             loc.fill(fill_value)
             _mark(page, f["ja_id"], _MARK_FILLED)
             report.add(label, canonical, "filled", fill_value, required)

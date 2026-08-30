@@ -184,6 +184,14 @@ def test_normalize_date_for_native_date_inputs():
     assert matcher.normalize_date("ASAP") == "ASAP"
 
 
+def test_normalize_date_targets_any_requested_format():
+    # A plain text field behind a JS datepicker widget usually wants
+    # MM/DD/YYYY, not the native <input type=date> ISO format.
+    assert matcher.normalize_date("May 11, 2027", "%m/%d/%Y") == "05/11/2027"
+    assert matcher.normalize_date("2027-05-11", "%m/%d/%Y") == "05/11/2027"
+    assert matcher.normalize_date("05/11/2027", "%B %d, %Y") == "May 11, 2027"
+
+
 def test_best_bool_option_ignores_no_answer_placeholder():
     options = [
         {"value": "", "text": "-- No answer --"},

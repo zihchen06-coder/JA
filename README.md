@@ -133,6 +133,24 @@ toggle is one) keep the actual file input hidden until you click a link
 to reveal it — click that link once in the browser, then hit "Re-fill this
 page" (or `r`) so the tool can see and use the now-visible field.
 
+### Dates
+
+Store `notice_period` in your profile in whatever format is easiest —
+`2027-05-11`, `05/11/2027`, and `May 11, 2027` are all understood. At fill
+time it's converted to whatever the actual field needs: `YYYY-MM-DD` for a
+native date picker, `MM/DD/YYYY` (the standard US convention) for a plain
+text field driven by a JS datepicker widget.
+
+### Disability/veteran self-ID signature blocks
+
+The federal CC-305 disability form (and the standard veteran
+self-identification section) ends with a plain "Name" and "Date" pair —
+your signature on that specific self-certification. These are filled with
+your full name and today's date, but **only** when "Name"/"Date" sit next
+to a disability, veteran, or signature question specifically — an
+unrelated "Name" or "Date" field elsewhere on a form (a reference's name, a
+document date) is never touched by this.
+
 ### Using your own Chrome
 
 By default the tool drives the Chromium that `playwright install` downloads,

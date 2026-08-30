@@ -275,6 +275,8 @@ _EXTRACT_JS = r"""
       item.has_value = !!(el.files && el.files.length);
     } else {
       item.label = labelFor(el);
+      item.context = wideContext(el);
+      item.is_datepicker = /datepicker/i.test(el.className || '');
       item.has_value = !!el.value;
     }
 

@@ -163,16 +163,22 @@ def best_option(target_value: str, options: list[dict], min_ratio: float = 0.5) 
 _DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%B %d, %Y", "%b %d, %Y", "%B %d %Y")
 
 
-def normalize_date(value: str) -> str:
-    """Convert a human-entered date to YYYY-MM-DD for native <input type=date>
-    fields, which reject any other format outright. Returns `value`
-    unchanged if it doesn't match a recognized format, so a value already
-    in some other free-text shape still gets attempted as typed.
+def normalize_date(value: str, target_format: str = "%Y-%m-%d") -> str:
+    """Convert a human-entered date into whatever format the target field
+    actually needs. Native <input type=date> hard-requires YYYY-MM-DD and
+    rejects anything else outright (the default here); a plain text field
+    driven by a JS datepicker widget (jQuery UI's default, and the most
+    common convention on US-facing forms) usually expects MM/DD/YYYY
+    instead -- callers pass that as `target_format` when the field looks
+    datepicker-flavored rather than being a true native date input.
+    Returns `value` unchanged if it doesn't match a recognized format, so a
+    value already in some other free-text shape still gets attempted as
+    typed rather than dropped.
     """
     text = value.strip()
     for fmt in _DATE_FORMATS:
         try:
-            return datetime.strptime(text, fmt).strftime("%Y-%m-%d")
+            return datetime.strptime(text, fmt).strftime(target_format)
         except ValueError:
             continue
     return value
