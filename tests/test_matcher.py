@@ -157,6 +157,24 @@ def test_years_experience_alias_appears_inside_an_unrelated_yes_no_question():
     assert matcher.match_field("Do you have 5+ years of experience in the AEC industry?") == "years_experience"
 
 
+def test_race_ethnicity_label_resolves_correctly():
+    # Regression context: a <select> nested inside its own <label
+    # for="its-own-id"> made labelForById read the label's raw innerText,
+    # which for a SELECT includes every option's rendered text glued onto
+    # the real label. The race dropdown's own option list ("Hispanic or
+    # Latino", "...not Hispanic or Latino" repeated per option) then
+    # outscored the field's actual "Race/Ethnicity" label and resolved to
+    # hispanic_latino instead. That contamination is inherently
+    # unrecoverable once it reaches match_field -- there is no textual way
+    # to tell "the label mentions Hispanic" from "one of the options is
+    # named Hispanic" -- so the fix lives in the extractor (stripping a
+    # label's own nested/pointed-to controls before reading its text, see
+    # stripControlsText/stripOptionControls), not here. This just locks in
+    # that an uncontaminated label keeps resolving correctly.
+    assert matcher.match_field("Race/Ethnicity") == "race_ethnicity"
+    assert matcher.match_field("Race / Ethnicity") == "race_ethnicity"
+
+
 def test_normalize_date_for_native_date_inputs():
     # <input type=date> rejects anything but YYYY-MM-DD outright.
     assert matcher.normalize_date("05/11/2027") == "2027-05-11"

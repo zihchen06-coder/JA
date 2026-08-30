@@ -128,6 +128,11 @@ Re-filling never overwrites a field that already has a value — anything you
 corrected by hand stays as you left it, and those fields are reported as
 "already filled, left untouched".
 
+Some resume-upload widgets (JazzHR's "Attach resume" / "Paste resume"
+toggle is one) keep the actual file input hidden until you click a link
+to reveal it — click that link once in the browser, then hit "Re-fill this
+page" (or `r`) so the tool can see and use the now-visible field.
+
 ### Using your own Chrome
 
 By default the tool drives the Chromium that `playwright install` downloads,

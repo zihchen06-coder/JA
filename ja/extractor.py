@@ -21,11 +21,26 @@ _EXTRACT_JS = r"""
     const rect = el.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
   }
+  // A <label for="X"> is allowed to also visually WRAP the very control it
+  // references (redundant but valid markup) -- when it does, its raw
+  // innerText includes that control's own rendered content too. For a
+  // <select> this means every option's text glued onto the real label, and
+  // an EEO race dropdown's own option list ("Hispanic or Latino", "...not
+  // Hispanic or Latino" repeated for every option) is exactly the kind of
+  // text that can outscore the field's real label in later matching.
+  // Cloning and stripping nested controls first, as closestLabelWrap
+  // already does below, avoids reading a control's own content as its label.
+  function stripControlsText(node) {
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll('input, select, textarea').forEach(n => n.remove());
+    return cleanText(clone.innerText || clone.textContent || '');
+  }
+
   function labelForById(id) {
     if (!id) return '';
     try {
       const el = document.querySelector(`label[for="${CSS.escape(id)}"]`);
-      return el ? cleanText(el.innerText) : '';
+      return el ? stripControlsText(el) : '';
     } catch (e) { return ''; }
   }
   function ariaLabelledBy(el) {
@@ -38,10 +53,7 @@ _EXTRACT_JS = r"""
   }
   function closestLabelWrap(el) {
     const l = el.closest('label');
-    if (!l) return '';
-    const clone = l.cloneNode(true);
-    clone.querySelectorAll('input,select,textarea').forEach(n => n.remove());
-    return cleanText(clone.innerText);
+    return l ? stripControlsText(l) : '';
   }
   function automationIdWords(el) {
     const id = el.getAttribute('data-automation-id') || '';
@@ -90,15 +102,38 @@ _EXTRACT_JS = r"""
     return /^(yes|no|y|n|n\/a|true|false|other)$/i.test((t || '').trim());
   }
 
-  function containerQuestion(node, ownLabel) {
-    if (!node || node.tagName === 'LABEL') return '';
-    if (!node.querySelector('input, select, textarea')) return '';
-    const clone = node.cloneNode(true);
-    clone.querySelectorAll('input, select, textarea').forEach(n => {
+  // Removes each option control (radio/checkbox/select/textarea) -- its
+  // wrapping <label> if it has one, otherwise the bare control -- then
+  // removes any label[for] pointing at one of THOSE controls specifically.
+  // Not label[for] in general: the real question heading can itself carry
+  // a for="" attribute (pointing at a hidden tracking input, in one ATS
+  // seen in practice), and removing every label[for] indiscriminately
+  // deletes that heading right along with the "Yes"/"No" option labels,
+  // leaving nothing behind.
+  function stripOptionControls(clone) {
+    const ids = new Set();
+    // A hidden tracking input matches the generic input selector too, and
+    // one ATS gives the real question heading a for="" pointing at exactly
+    // such a hidden field -- collecting its id here would still catch that
+    // heading in the label[for] pass below. Only real answer controls
+    // (radio/checkbox/select/textarea/visible text-ish inputs) count.
+    clone.querySelectorAll(
+      'select, textarea, input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="image"]):not([type="reset"])'
+    ).forEach(n => {
+      if (n.id) ids.add(n.id);
       const wrap = n.closest('label');
       (wrap || n).remove();
     });
-    clone.querySelectorAll('label[for]').forEach(l => l.remove());
+    clone.querySelectorAll('label[for]').forEach(l => {
+      if (ids.has(l.getAttribute('for'))) l.remove();
+    });
+    return clone;
+  }
+
+  function containerQuestion(node, ownLabel) {
+    if (!node || node.tagName === 'LABEL') return '';
+    if (!node.querySelector('input, select, textarea')) return '';
+    const clone = stripOptionControls(node.cloneNode(true));
     const t = cleanText(clone.textContent || '');
     if (t.length < 3 || t.length > 300) return '';
     // The control's own "Yes"/"No" text is not the question it answers.
@@ -158,12 +193,7 @@ _EXTRACT_JS = r"""
       if (controlCount(parent) > ownCount) break;
       node = parent;
     }
-    const clone = node.cloneNode(true);
-    clone.querySelectorAll('input, select, textarea').forEach(n => {
-      const wrap = n.closest('label');
-      (wrap || n).remove();
-    });
-    clone.querySelectorAll('label[for]').forEach(l => l.remove());
+    const clone = stripOptionControls(node.cloneNode(true));
     const climbed = cleanText(clone.textContent || '');
     return (idWords + ' ' + climbed).trim().slice(0, 4000);
   }
