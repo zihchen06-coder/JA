@@ -13,7 +13,7 @@ FIELD_ALIASES: dict[str, list[str]] = {
     "address_line2": ["address line 2", "apt suite", "apartment unit", "unit number"],
     "city": ["city", "town"],
     "state": ["state", "province", "state province", "region"],
-    "postal_code": ["zip", "zip code", "postal code", "postcode"],
+    "postal_code": ["zip", "zip code", "postal", "postal code", "postcode"],
     "country": ["country"],
     "linkedin_url": ["linkedin", "linkedin url", "linkedin profile"],
     "github_url": ["github", "github url", "github profile"],
@@ -44,6 +44,20 @@ FIELD_ALIASES: dict[str, list[str]] = {
         "graduation date", "grad year",
     ],
     "gpa": ["gpa", "grade point average", "cumulative gpa"],
+    "languages": [
+        "languages", "languages you speak", "language proficiency",
+        "what languages do you speak", "languages spoken", "fluent languages",
+    ],
+    "references": [
+        "references", "professional references", "reference contact",
+        "names and contact information",
+    ],
+    # For forms that want the cover letter pasted into a box rather than
+    # uploaded as a file.
+    "cover_letter_text": [
+        "cover letter", "covering letter", "letter of interest",
+        "why should we hire you",
+    ],
     "security_clearance": [
         "security clearance", "clearance level", "active clearance",
     ],

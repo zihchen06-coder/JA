@@ -161,11 +161,39 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
 
 def _handle_checkbox(page: Any, profile: Profile, report: FillReport, f: dict) -> None:
     label = f.get("label", "")
+    group_label = f.get("group_label", "")
     required = f.get("required", False)
     canonical = matcher.match_field(label)
 
+    # Some forms present a yes/no question as a pair of checkboxes labelled
+    # only "Yes" and "No". The question itself is the group label, and the
+    # checkbox's own label says which answer it represents.
+    option_bool = matcher.semantic_bool(label)
+    if canonical not in BOOLEAN_FIELDS and option_bool is not None:
+        group_canonical = matcher.match_field(group_label)
+        if group_canonical in BOOLEAN_FIELDS:
+            target = getattr(profile, group_canonical, None)
+            if target is None:
+                report.add(group_label, group_canonical, "skipped_no_data", "", required)
+                return
+            want_checked = (option_bool is target)
+            if f.get("checked") is want_checked:
+                # The affirmative box carries the answer in the report; an
+                # already-correct negative box is nothing worth mentioning.
+                if want_checked:
+                    report.add(group_label, group_canonical, "already_filled", "Left as-is.", required)
+                return
+            try:
+                loc = page.locator(_sel(f["ja_id"]))
+                loc.check() if want_checked else loc.uncheck()
+                if want_checked:
+                    report.add(group_label, group_canonical, "filled", label, required)
+            except Exception as exc:  # noqa: BLE001
+                report.add(group_label, group_canonical, "error", str(exc), required)
+            return
+
     if canonical not in BOOLEAN_FIELDS:
-        report.add(label or f["name"], canonical, "skipped_no_match", "", required)
+        report.add(label or group_label or f["name"], canonical, "skipped_no_match", "", required)
         return
 
     value = getattr(profile, canonical, None)

@@ -70,7 +70,31 @@ _EXTRACT_JS = r"""
       nearestPrecedingText(el)
     );
   }
-  function groupLabelFor(el) {
+  // The text of a container with the option controls (and their own
+  // "Yes"/"No" labels) stripped out -- i.e. the question those options
+  // answer. Many forms wrap a question and its radios in a plain <div>
+  // with no <fieldset>, so this is the only way to recover the question.
+  function isOptionWord(t) {
+    return /^(yes|no|y|n|n\/a|true|false|other)$/i.test((t || '').trim());
+  }
+
+  function containerQuestion(node, ownLabel) {
+    if (!node || node.tagName === 'LABEL') return '';
+    if (!node.querySelector('input, select, textarea')) return '';
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll('input, select, textarea').forEach(n => {
+      const wrap = n.closest('label');
+      (wrap || n).remove();
+    });
+    clone.querySelectorAll('label[for]').forEach(l => l.remove());
+    const t = cleanText(clone.textContent || '');
+    if (t.length < 3 || t.length > 300) return '';
+    // The control's own "Yes"/"No" text is not the question it answers.
+    if (ownLabel && t.toLowerCase() === ownLabel.toLowerCase()) return '';
+    return t;
+  }
+
+  function groupLabelFor(el, ownLabel) {
     const fieldset = el.closest('fieldset');
     if (fieldset) {
       const legend = fieldset.querySelector('legend');
@@ -83,7 +107,21 @@ _EXTRACT_JS = r"""
       const heading = groupRoot.querySelector('legend, [class*="label" i], [class*="question" i]');
       if (heading && !heading.contains(el)) return cleanText(heading.innerText);
     }
-    return nearestPrecedingText(el);
+    // Widen out from the control until a wrapper carries question text.
+    // A <label> is never the question -- it is one option's own text -- and
+    // text preceding one is a sibling option ("Yes" before "No"), not the
+    // question either, so keep climbing past both.
+    let node = el.parentElement;
+    for (let depth = 0; node && depth < 5; depth++, node = node.parentElement) {
+      const own = containerQuestion(node, ownLabel);
+      if (own) return own;
+      if (node.tagName === 'LABEL') continue;
+      const prev = nearestPrecedingText(node);
+      if (prev && !isOptionWord(prev) && prev.toLowerCase() !== (ownLabel || '').toLowerCase()) {
+        return prev;
+      }
+    }
+    return '';
   }
 
   // Clear ids from any previous scan. Elements that have since become
@@ -115,7 +153,7 @@ _EXTRACT_JS = r"""
 
     if (type === 'radio' || type === 'checkbox') {
       item.label = labelFor(el);
-      item.group_label = groupLabelFor(el);
+      item.group_label = groupLabelFor(el, item.label);
       item.checked = !!el.checked;
     } else if (tag === 'select') {
       item.label = labelFor(el);

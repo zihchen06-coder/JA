@@ -29,6 +29,12 @@ gpa: "3.8"
 preferred_location: "New York, NY"
 employment_type: "Full-time"
 security_clearance: ""
+languages: "English, Spanish"
+references: "Available upon request."
+
+# Pasted into cover-letter text boxes. (cover_letter_path below is for forms
+# with a file upload instead.)
+cover_letter_text: ""
 
 # yes/no values -- used for the screening questions most applications ask.
 # Anything left blank is skipped and reported, never guessed.

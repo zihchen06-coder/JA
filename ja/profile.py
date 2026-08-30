@@ -64,6 +64,11 @@ class Profile:
     security_clearance: str = ""
     preferred_location: str = ""
     employment_type: str = ""
+    languages: str = ""
+    references: str = ""
+    # Pasted into cover-letter text boxes (as opposed to cover_letter_path,
+    # which is uploaded to file inputs).
+    cover_letter_text: str = ""
 
     # Yes/no screening questions. Any left as None is simply skipped and
     # reported, so an unanswered one is never guessed at.

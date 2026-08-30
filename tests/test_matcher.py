@@ -58,6 +58,21 @@ def test_matches_common_screening_questions():
         assert matcher.match_field(label) == expected, label
 
 
+def test_matches_fields_seen_on_real_forms():
+    # Wordings taken from a live JazzHR application form.
+    cases = {
+        "Postal": "postal_code",
+        "Website, blog or portfolio:": "portfolio_url",
+        "What languages do you speak fluently?": "languages",
+        "References: Please enter names and contact information:": "references",
+        "Cover Letter": "cover_letter_text",
+        "What is your desired salary?": "desired_salary",
+        "Earliest start date?": "notice_period",
+    }
+    for label, expected in cases.items():
+        assert matcher.match_field(label) == expected, label
+
+
 def test_sensitive_reasons_are_category_specific():
     assert "Self-identification" in matcher.sensitive_reason("Gender")
     assert "Criminal-history" in matcher.sensitive_reason("Have you been convicted of a felony?")
