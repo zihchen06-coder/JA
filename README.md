@@ -287,7 +287,28 @@ On the My Profile tab:
 
 A dedicated profile folder is used rather than your everyday Chrome profile
 because Chrome permits only one process per profile directory — pointing at
-your real one would mean fully quitting Chrome before every run.
+your real one would mean fully quitting Chrome before every run. If you'd
+rather use your actual everyday Chrome profile anyway, the CLI supports it
+via `--chrome --user-data-dir ~/path/to/your/profile` (fully quit Chrome
+first); the web UI always uses the dedicated profile.
+
+- **Automatically create accounts** — some ATS platforms (iCIMS
+  especially) put a "create a candidate account" gate — a Login and
+  Password field — in front of the real application form. When this is
+  on, the tool generates a strong random password the first time it sees
+  a site, fills the Login field with your email, fills every password
+  field on the page with the generated password, and saves the pair so
+  the same site reuses it next time instead of creating a new account
+  each visit. Saved logins are stored in `credentials.json` next to your
+  profile (gitignored, plaintext, never transmitted anywhere but the site
+  itself) and keyed by the exact site hostname, since several unrelated
+  companies can share the same underlying ATS domain (e.g. many different
+  employers each run their own careers site on `*.icims.com`) but keep
+  separate candidate databases. `credentials.json` is a convenience store
+  for your own machine, not a hardened password manager — if you want
+  extra protection, keep it on an encrypted disk (FileVault on macOS is
+  on by default on modern Macs). View or forget saved site logins under
+  Browser & Sign-in in the web UI.
 
 ## Profile fields
 

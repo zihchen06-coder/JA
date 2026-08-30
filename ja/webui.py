@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from queue import Queue
 from typing import Any, Callable
 
+from . import credentials
 from .browser import goto_and_settle, launch_browser, launch_error_message
 from .field_aliases import OPTION_CHOICES, SELF_ID_CHOICES
 from .filler import fill_form
@@ -32,8 +33,10 @@ class Session:
     push commands onto its queue and read the state snapshot.
     """
 
-    def __init__(self, profile_path: str, launch_opts: dict[str, Any] | Callable[[], dict[str, Any]]) -> None:
+    def __init__(self, profile_path: str, root: str,
+                 launch_opts: dict[str, Any] | Callable[[], dict[str, Any]]) -> None:
         self.profile_path = profile_path
+        self.root = root
         # A callable is re-read at launch time, so a settings change in the
         # UI applies to the next application without restarting the server.
         self._launch_opts = launch_opts
@@ -116,7 +119,8 @@ class Session:
             self._set(status="open", message=f"Profile error: {exc}")
             return
         try:
-            report = fill_form(page, profile)
+            auto_accounts = load_settings(self.root)["auto_create_accounts"]
+            report = fill_form(page, profile, self.root, auto_accounts)
         except Exception as exc:  # noqa: BLE001
             self._set(status="open", message=f"Could not fill this page: {exc}")
             return
@@ -176,6 +180,8 @@ def make_handler(session: Session, profile_path: str, root: str):
                                 "self_id_choices": SELF_ID_CHOICES, "option_choices": OPTION_CHOICES})
             elif self.path == "/api/settings":
                 self._json({"ok": True, "settings": load_settings(root)})
+            elif self.path == "/api/credentials":
+                self._json({"ok": True, "credentials": credentials.load_credentials(root)})
             else:
                 self._send(404, b"Not found", "text/plain")
 
@@ -204,6 +210,12 @@ def make_handler(session: Session, profile_path: str, root: str):
             elif self.path in ("/api/refill", "/api/close"):
                 session.command("refill" if self.path.endswith("refill") else "close")
                 self._json({"ok": True})
+            elif self.path == "/api/credentials/forget":
+                hostname = (body.get("hostname") or "").strip()
+                creds = credentials.load_credentials(root)
+                creds.pop(hostname, None)
+                credentials.save_credentials(root, creds)
+                self._json({"ok": True, "credentials": creds})
             else:
                 self._send(404, b"Not found", "text/plain")
 
@@ -214,7 +226,7 @@ def serve(profile_path: str, root: str, port: int, browser_path: str = "",
           open_browser: bool = True) -> int:
     # Re-read on each launch so a settings change in the UI takes effect on
     # the next application rather than needing a restart.
-    session = Session(profile_path, lambda: launch_opts(root, browser_path))
+    session = Session(profile_path, root, lambda: launch_opts(root, browser_path))
     handler = make_handler(session, profile_path, root)
 
     try:

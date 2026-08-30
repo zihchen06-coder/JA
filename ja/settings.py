@@ -19,6 +19,12 @@ DEFAULTS: dict[str, Any] = {
     # Keep cookies and logins between runs in a profile folder of the tool's
     # own, so sites you signed into once stay signed in.
     "stay_signed_in": False,
+    # Some ATS platforms (iCIMS especially) require creating a candidate
+    # account -- a Login and Password -- before showing the real
+    # application form. When on, a strong password is generated and saved
+    # locally per site (see ja/credentials.py) instead of leaving those
+    # fields for you to fill by hand every time.
+    "auto_create_accounts": False,
 }
 
 # Deliberately not the real Chrome profile: Chrome permits one process per

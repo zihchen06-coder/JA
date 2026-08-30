@@ -11,3 +11,4 @@ documents/
 *.pdf
 *.docx
 settings.json
+credentials.json

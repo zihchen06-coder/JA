@@ -9,7 +9,7 @@ from datetime import date
 from itertools import groupby
 from typing import Any
 
-from . import matcher
+from . import credentials, matcher
 from .extractor import extract_fields
 from .field_aliases import BOOLEAN_FIELDS, EDUCATION_FIELDS, SELF_ID_DISPLAY_NAMES, SELF_ID_FIELDS
 from .platform_detect import detect_platform
@@ -165,15 +165,20 @@ def _match_custom_answer(label: str, profile: Profile) -> str | None:
     return None
 
 
-def fill_form(page: Any, profile: Profile) -> FillReport:
+def fill_form(page: Any, profile: Profile, root: str = "", auto_create_accounts: bool = False) -> FillReport:
     report = FillReport(platform=detect_platform(page.url))
     fields_data = extract_fields(page)
+
+    creds: tuple[str, str] | None = None
+    if auto_create_accounts and root and any(f["type"] == "password" for f in fields_data):
+        hostname = credentials.hostname_for(page.url)
+        creds = credentials.get_or_create(root, hostname, profile.email)
 
     simple_fields = [f for f in fields_data if f["type"] not in ("radio",)]
     radios = [f for f in fields_data if f["type"] == "radio"]
 
     for f in simple_fields:
-        _handle_simple_field(page, profile, report, f)
+        _handle_simple_field(page, profile, report, f, creds)
 
     radios_sorted = sorted(radios, key=lambda f: f["name"])
     for name, group_iter in groupby(radios_sorted, key=lambda f: f["name"]):
@@ -182,7 +187,8 @@ def fill_form(page: Any, profile: Profile) -> FillReport:
     return report
 
 
-def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dict) -> None:
+def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dict,
+                         creds: tuple[str, str] | None = None) -> None:
     label = f.get("label", "")
     required = f.get("required", False)
     ftype = f["type"]
@@ -194,6 +200,19 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
     if ftype == "file":
         _handle_file_field(page, profile, report, f)
         return
+
+    # A candidate-account signup gate (iCIMS is the most common example) --
+    # only touched when the "auto-create accounts" setting is on, in which
+    # case creds is the (login, password) already generated-or-reused for
+    # this site's hostname. type="password" is an unambiguous signal on its
+    # own; "Login"/"Username" needs the label, since it's a plain text input.
+    if creds:
+        if ftype == "password":
+            _fill_text(page, report, f, "account_password", creds[1], required)
+            return
+        if matcher.normalize(label) in ("login", "username"):
+            _fill_text(page, report, f, "account_login", creds[0], required)
+            return
 
     # Long EEO boilerplate (the federal CC-305 disability form especially)
     # can put thousands of characters between a section's real heading and

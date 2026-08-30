@@ -8,6 +8,7 @@ from .browser import goto_and_settle, launch_browser, launch_error_message
 from .filler import fill_form
 from .profile import ProfileError, load_profile
 from .report import print_report
+from .settings import load_settings
 
 
 PROMPT = (
@@ -33,12 +34,13 @@ def _load_playwright():
 
 
 def _apply_to_url(page, profile, url: str, timeout: int, interactive: bool,
-                  verbose: bool = False) -> str:
+                  verbose: bool = False, root: str = "") -> str:
     """Fill one application. Returns 'next' or 'quit'."""
     print(f"\n{'=' * 70}\nOpening {url}\n{'=' * 70}")
     goto_and_settle(page, url, timeout * 1000)
 
-    print_report(fill_form(page, profile), verbose=verbose)
+    auto_accounts = load_settings(root)["auto_create_accounts"] if root else False
+    print_report(fill_form(page, profile, root, auto_accounts), verbose=verbose)
 
     if not interactive:
         return "next"
@@ -47,7 +49,7 @@ def _apply_to_url(page, profile, url: str, timeout: int, interactive: bool,
         choice = input(PROMPT).strip().lower()
         if choice == "r":
             page.wait_for_timeout(500)
-            print_report(fill_form(page, profile), verbose=verbose)
+            print_report(fill_form(page, profile, root, auto_accounts), verbose=verbose)
         elif choice == "n":
             return "next"
         elif choice == "q":
@@ -69,6 +71,7 @@ def _run(urls: list[str], args: argparse.Namespace) -> int:
 
     interactive = not args.headless
     browser_path = args.browser_path or os.environ.get("JA_BROWSER_PATH") or None
+    root = os.path.dirname(os.path.abspath(args.profile)) or os.getcwd()
 
     with sync_playwright() as p:
         try:
@@ -88,7 +91,7 @@ def _run(urls: list[str], args: argparse.Namespace) -> int:
                     print(f"\n### Application {i} of {len(urls)}")
                 try:
                     if _apply_to_url(page, profile, url, args.timeout, interactive,
-                                     getattr(args, "verbose", False)) == "quit":
+                                     getattr(args, "verbose", False), root) == "quit":
                         print("Stopping. Remaining applications were not opened.")
                         break
                 except Exception as exc:  # noqa: BLE001 - one bad URL shouldn't kill a batch

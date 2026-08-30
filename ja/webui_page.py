@@ -510,7 +510,26 @@ function renderProfile() {
         once — Workday accounts especially — stay signed in next time. Sign in inside the window
         that opens; your password is never stored by this tool or sent anywhere.</div></div>
     </div>
-    <p class="hint">Takes effect on the next application you open.</p>`;
+    <div class="toggle">
+      <input type="checkbox" id="s-auto_create_accounts" ${settings.auto_create_accounts ? "checked" : ""}>
+      <div><div class="t">Automatically create accounts on sites that require sign-up</div>
+        <div class="d">Some ATS platforms (iCIMS especially) make you create a candidate account
+        before showing the real application. When this is on, a strong password is generated the
+        first time you hit one of these and filled into Login/Password for you; the same one is
+        reused every time you come back to that same company's site, so it never creates a
+        duplicate account. Saved logins appear below — you'll want them again to check your
+        application status later.</div></div>
+    </div>
+    <p class="hint">Both take effect on the next application you open.</p>
+
+    <h2>Saved site logins</h2>
+    <p class="hint" style="margin-bottom:12px">Stored only on this computer, in a plain file next
+    to your profile — never sent anywhere by this tool. Not a hardened password manager: if you
+    want stronger protection, keep this folder on an encrypted disk (FileVault, on by default on
+    most Macs).</p>
+    <div id="credList"><p class="sm">Loading…</p></div>`;
+
+  loadCredentials();
 
   let saved = "contact";
   try { saved = localStorage.getItem("ja-ptab") || "contact"; } catch (e) {}
@@ -559,12 +578,47 @@ async function saveProfile() {
   settings = {
     use_chrome: document.getElementById("s-use_chrome").checked,
     stay_signed_in: document.getElementById("s-stay_signed_in").checked,
+    auto_create_accounts: document.getElementById("s-auto_create_accounts").checked,
   };
   await post("/api/settings", {settings});
   const res = await post("/api/profile", {profile: out});
   msg.textContent = res.ok ? "Saved." : res.error;
   msg.className = res.ok ? "saved g" : "saved r";
   if (res.ok) setTimeout(() => { msg.textContent = ""; }, 2500);
+}
+
+async function loadCredentials() {
+  const box = document.getElementById("credList");
+  if (!box) return;
+  let creds = {};
+  try { creds = (await (await fetch("/api/credentials")).json()).credentials || {}; } catch (e) {}
+  const hosts = Object.keys(creds);
+  if (!hosts.length) {
+    box.innerHTML = `<p class="sm">None yet — one is created the first time you hit a site that needs a sign-up.</p>`;
+    return;
+  }
+  box.innerHTML = hosts.map(h => `
+    <div class="repeat">
+      <button class="del" onclick="forgetCredential('${esc(h)}')">Forget</button>
+      <div class="grid">
+        <div class="row"><label>Site</label><input value="${esc(h)}" readonly></div>
+        <div class="row"><label>Login</label><input value="${esc(creds[h].login || '')}" readonly></div>
+        <div class="row"><label>Password</label>
+          <input type="password" id="pw-${esc(h)}" value="${esc(creds[h].password || '')}" readonly>
+        </div>
+      </div>
+      <button class="ghost" onclick="togglePw('${esc(h)}')" style="margin-top:8px">Show/hide password</button>
+    </div>`).join("");
+}
+
+function togglePw(host) {
+  const el = document.getElementById("pw-" + host);
+  if (el) el.type = el.type === "password" ? "text" : "password";
+}
+
+async function forgetCredential(host) {
+  await post("/api/credentials/forget", {hostname: host});
+  loadCredentials();
 }
 
 async function loadProfile() {
