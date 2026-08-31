@@ -169,7 +169,16 @@ function extractFields() {
     return "";
   }
 
-  document.querySelectorAll("[data-ja-id]").forEach((el) => el.removeAttribute("data-ja-id"));
+  // Clear ids AND the colored outline from any previous run -- a field
+  // that's now already_filled is never revisited to redraw its outline,
+  // so last run's red/amber/green ring would otherwise persist even after
+  // the field is fine (e.g. you answered it yourself, or a later refill on
+  // a multi-step form just doesn't touch it again).
+  document.querySelectorAll("[data-ja-id]").forEach((el) => {
+    el.removeAttribute("data-ja-id");
+    el.style.outline = "";
+    el.style.outlineOffset = "";
+  });
 
   const SKIP_TYPES = new Set(["hidden", "submit", "button", "image", "reset"]);
   const nodes = Array.from(document.querySelectorAll("input, select, textarea"));

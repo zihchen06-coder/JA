@@ -228,10 +228,18 @@ _EXTRACT_JS = r"""
     return '';
   }
 
-  // Clear ids from any previous scan. Elements that have since become
-  // hidden would otherwise keep a stale id and collide with a freshly
-  // assigned one, making the Python-side locator ambiguous.
-  document.querySelectorAll('[data-ja-id]').forEach(el => el.removeAttribute('data-ja-id'));
+  // Clear ids AND the colored outline from any previous scan. Elements
+  // that have since become hidden would otherwise keep a stale id and
+  // collide with a freshly assigned one, making the Python-side locator
+  // ambiguous -- and a field that's now already_filled (you answered it
+  // yourself, or a later refill just doesn't touch it again) is never
+  // revisited to redraw its outline, so last run's red/amber/green ring
+  // would otherwise sit there indefinitely, even after the field is fine.
+  document.querySelectorAll('[data-ja-id]').forEach(el => {
+    el.removeAttribute('data-ja-id');
+    el.style.outline = '';
+    el.style.outlineOffset = '';
+  });
 
   const SKIP_TYPES = new Set(['hidden', 'submit', 'button', 'image', 'reset']);
   const nodes = Array.from(document.querySelectorAll('input, select, textarea'));
