@@ -394,6 +394,22 @@ function initTabs() {
   };
   document.getElementById("save").onclick = save;
 
+  document.getElementById("export-profile").onclick = () => {
+    // Documents are large base64 blobs not worth pasting into a chat, and
+    // credentials are security-sensitive -- neither belongs in an export
+    // meant to be shared as plain text.
+    const { resume_file, cover_letter_file, ...exportable } = gatherProfile();
+    const blob = new Blob([JSON.stringify(exportable, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ja-profile-backup.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const wireFileInput = (inputId, key, elId) => {
     document.getElementById(inputId).onchange = async (e) => {
       const file = e.target.files[0];
@@ -423,10 +439,22 @@ function initTabs() {
     }
     const eduList = document.getElementById("edu-list");
     const expList = document.getElementById("exp-list");
+    const answersList = document.getElementById("answers-list");
     (data.education || []).forEach((e) => eduList.appendChild(eduRow(e)));
     (data.experience || []).forEach((e) => expList.appendChild(expRow(e)));
+
+    const existingKeywords = new Set(
+      Array.from(answersList.querySelectorAll('[data-k="keyword"]')).map((inp) => inp.value.trim().toLowerCase())
+    );
+    let answersAdded = 0;
+    Object.entries(data.custom_answers || {}).forEach(([keyword, answer]) => {
+      if (existingKeywords.has(keyword.trim().toLowerCase())) return;
+      answersList.appendChild(answerRow(keyword, answer));
+      answersAdded++;
+    });
+
     status.style.color = "var(--green)";
-    status.textContent = `Added ${(data.education || []).length} school(s) and ${(data.experience || []).length} job(s) -- review them on the Education & Work tab, then Save.`;
+    status.textContent = `Added ${(data.education || []).length} school(s), ${(data.experience || []).length} job(s), and ${answersAdded} answer(s) -- review them on the Education & Work and Answers tabs, then Save.`;
     document.getElementById("import-json").value = "";
   };
 })();

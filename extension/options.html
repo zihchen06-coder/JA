@@ -181,9 +181,9 @@
         </div>
       </div>
 
-      <h3>Import education &amp; work history</h3>
-      <p class="note">Paste a JSON snippet shaped like <code>{"education": [...], "experience": [...]}</code> — ask Claude to generate this from your resume — and it's added to the lists on the Education &amp; Work tab (existing rows aren't touched, so review for duplicates after importing).</p>
-      <textarea id="import-json" rows="4" placeholder='{"education": [{"school": "...", "degree": "...", "field_of_study": "...", "graduation_year": "..."}], "experience": [{"company": "...", "title": "...", "start_date": "...", "end_date": "...", "description": "..."}]}'></textarea>
+      <h3>Import education, work history &amp; answers</h3>
+      <p class="note">Paste a JSON snippet shaped like <code>{"education": [...], "experience": [...], "custom_answers": {...}}</code> (any of the three keys is optional) — ask Claude to generate this from your resume or your own written answers — and it's added to the Education &amp; Work and Answers tabs (existing rows aren't touched, so review for duplicates after importing).</p>
+      <textarea id="import-json" rows="4" placeholder='{"education": [...], "experience": [...], "custom_answers": {"why do you want to work": "..."}}'></textarea>
       <div class="row" style="margin-top:8px;">
         <button class="ghost" id="import-json-btn" type="button">Import</button>
         <span id="import-status" class="note"></span>
@@ -216,8 +216,10 @@
 
   <div class="savebar">
     <button id="save">Save</button>
+    <button class="ghost" id="export-profile" type="button">Export as JSON</button>
     <span id="status"></span>
   </div>
+  <p class="note">Downloads everything on this page (not documents/credentials) as a local file -- paste its contents to Claude any time you want it kept somewhere durable, or to pick this profile back up in a future conversation.</p>
 </div>
 <script src="field_aliases.js"></script>
 <script src="options.js"></script>
