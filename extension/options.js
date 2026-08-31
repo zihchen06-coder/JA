@@ -18,6 +18,68 @@ const BOOL_LABELS = {
 
 let state = { profile: {}, settings: {}, credentials: {} };
 
+// Keywords, not exact question text -- matched as a substring against a
+// question's normalized label (see ja/filler.py's _match_custom_answer),
+// so each one is written broadly enough to catch the common ways a
+// real form phrases the same underlying question, without being so
+// generic ("team", "work") that it risks matching something unrelated.
+// Populated with blank answers -- these are prompts for the applicant to
+// answer in their own words, never something this tool should guess at.
+const TOP_QUESTIONS = [
+  "why do you want to work",
+  "why are you interested in this",
+  "why should we hire you",
+  "tell us about yourself",
+  "tell me about yourself",
+  "describe yourself in a few words",
+  "good fit for this",
+  "greatest strength",
+  "greatest weakness",
+  "areas of improvement",
+  "describe a challenge",
+  "time you failed",
+  "overcame an obstacle",
+  "conflict with a co",
+  "leadership experience",
+  "greatest achievement",
+  "proudest accomplishment",
+  "why are you leaving",
+  "why did you leave",
+  "career goals",
+  "see yourself in",
+  "what motivates you",
+  "ideal work environment",
+  "management style",
+  "handle stress",
+  "handle pressure",
+  "prioritize your work",
+  "communication style",
+  "know about our company",
+  "know about this role",
+  "anything else you would like",
+  "additional information",
+  "worked as part of a team",
+  "showed initiative",
+  "learn something new quickly",
+  "sets you apart",
+  "work style",
+  "coworkers describe you",
+  "colleagues describe you",
+  "manager describe you",
+  "disagreed with your manager",
+  "mistake you made",
+  "experience with remote work",
+  "change careers",
+  "questions do you have",
+  "ideal manager",
+  "passionate about",
+  "project you are most proud",
+  "stay organized",
+  "approach to problem solving",
+  "work in this industry",
+  "mentoring others",
+];
+
 function emptyProfile() {
   return {
     first_name: "", last_name: "", middle_name: "", preferred_name: "",
@@ -313,6 +375,23 @@ function initTabs() {
   document.getElementById("add-edu").onclick = () => document.getElementById("edu-list").appendChild(eduRow());
   document.getElementById("add-exp").onclick = () => document.getElementById("exp-list").appendChild(expRow());
   document.getElementById("add-answer").onclick = () => document.getElementById("answers-list").appendChild(answerRow());
+
+  document.getElementById("add-common-questions").onclick = () => {
+    const list = document.getElementById("answers-list");
+    const existing = new Set(
+      Array.from(list.querySelectorAll('[data-k="keyword"]')).map((inp) => inp.value.trim().toLowerCase())
+    );
+    let added = 0;
+    for (const keyword of TOP_QUESTIONS) {
+      if (existing.has(keyword)) continue;
+      list.appendChild(answerRow(keyword, ""));
+      added++;
+    }
+    const status = document.getElementById("common-questions-status");
+    status.textContent = added
+      ? `Added ${added} question(s) below with blank answers -- fill in your own answer for each, delete any you don't want, then Save.`
+      : "All of these are already in your list.";
+  };
   document.getElementById("save").onclick = save;
 
   const wireFileInput = (inputId, key, elId) => {

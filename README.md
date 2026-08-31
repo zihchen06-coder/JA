@@ -68,6 +68,14 @@ There's no in-browser resume parser — this reuses Claude's own reading of
 your resume rather than a fragile heuristic parser, so it's worth a quick
 review of the imported rows before saving.
 
+**Open-ended questions**: the Answers tab's "+ Add top 50 common questions"
+button adds ~50 rows for the recurring essay-style prompts job forms ask
+("Why do you want to work here?", "Tell us about yourself", "Describe a
+challenge you overcame", ...) with the keyword already filled in and the
+answer left blank for you to write yourself. Nothing here is ever answered
+on your behalf — this only saves you the setup of typing each keyword, not
+the actual answer, since only you know what you'd honestly say.
+
 ## Setup
 
 Requires Python 3.10+. On macOS, run `python3 --version` first; if it's
