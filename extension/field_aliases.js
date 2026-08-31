@@ -2,7 +2,7 @@
 // use. Ported line-for-line from ja/field_aliases.py -- keep the two in sync.
 "use strict";
 
-const FIELD_ALIASES = {
+var FIELD_ALIASES = {
   first_name: ["first name", "given name", "legal first name"],
   last_name: ["last name", "surname", "family name", "legal last name"],
   full_name: ["full name", "your name", "applicant name", "legal name"],
@@ -159,7 +159,7 @@ const FIELD_ALIASES = {
 
 // Question labels containing any of these phrases are demographic/EEO
 // questions and are always left for the applicant to answer by hand.
-const SENSITIVE_GROUPS = {
+var SENSITIVE_GROUPS = {
   demographic: [
     "Self-identification question: set your answer under " +
       "Self-identification in your profile, or answer it here.",
@@ -181,12 +181,12 @@ const SENSITIVE_GROUPS = {
   ],
 };
 
-const EEO_KEYWORDS = Object.values(SENSITIVE_GROUPS).flatMap(([, keywords]) => keywords);
+var EEO_KEYWORDS = Object.values(SENSITIVE_GROUPS).flatMap(([, keywords]) => keywords);
 
-const RESUME_KEYWORDS = ["resume", "resume cv", "cv"];
-const COVER_LETTER_KEYWORDS = ["cover letter", "covering letter", "letter of interest"];
+var RESUME_KEYWORDS = ["resume", "resume cv", "cv"];
+var COVER_LETTER_KEYWORDS = ["cover letter", "covering letter", "letter of interest"];
 
-const BOOLEAN_FIELDS = new Set([
+var BOOLEAN_FIELDS = new Set([
   "work_authorized", "needs_sponsorship", "willing_to_relocate",
   "over_18", "has_drivers_license", "willing_to_travel",
   "consent_background_check", "consent_drug_test",
@@ -195,15 +195,15 @@ const BOOLEAN_FIELDS = new Set([
   "bound_by_noncompete",
 ]);
 
-const EDUCATION_FIELDS = new Set(["school", "degree", "field_of_study", "graduation_year"]);
+var EDUCATION_FIELDS = new Set(["school", "degree", "field_of_study", "graduation_year"]);
 
-const SELF_ID_FIELDS = new Set([
+var SELF_ID_FIELDS = new Set([
   "gender", "pronouns", "hispanic_latino", "race_ethnicity",
   "veteran_status", "disability_status", "sexual_orientation",
   "transgender_status",
 ]);
 
-const SELF_ID_DISPLAY_NAMES = {
+var SELF_ID_DISPLAY_NAMES = {
   gender: "Gender",
   pronouns: "Pronouns",
   hispanic_latino: "Hispanic or Latino?",
@@ -214,7 +214,7 @@ const SELF_ID_DISPLAY_NAMES = {
   transgender_status: "Transgender Status",
 };
 
-const SELF_ID_CHOICES = {
+var SELF_ID_CHOICES = {
   gender: ["Male", "Female", "Non-binary", "Decline to self-identify"],
   hispanic_latino: ["Yes", "No", "Decline to self-identify"],
   race_ethnicity: [
@@ -244,7 +244,7 @@ const SELF_ID_CHOICES = {
   transgender_status: ["Yes", "No", "Decline to self-identify"],
 };
 
-const OPTION_CHOICES = {
+var OPTION_CHOICES = {
   education_level: [
     "High School Diploma / GED", "Associate's Degree", "Bachelor's Degree",
     "Master's Degree", "Doctorate (PhD)", "Professional Degree (MD, JD, etc.)", "Other",
@@ -256,5 +256,5 @@ const OPTION_CHOICES = {
   ],
 };
 
-const TRUE_WORDS = new Set(["yes", "y", "true", "i am", "authorized", "agree", "eligible"]);
-const FALSE_WORDS = new Set(["no", "n", "false", "i am not", "not authorized", "disagree", "ineligible"]);
+var TRUE_WORDS = new Set(["yes", "y", "true", "i am", "authorized", "agree", "eligible"]);
+var FALSE_WORDS = new Set(["no", "n", "false", "i am not", "not authorized", "disagree", "ineligible"]);

@@ -26,10 +26,8 @@ you to answer by hand.
   (already signed into whatever you're signed into). No Python, no separate
   browser window, no local server. See "Browser extension" below.
 - **The Python CLI / web UI** (`apply.py`) — drives its own dedicated
-  browser window via Playwright. More setup, but it can attach your resume
-  and cover letter to file-upload fields automatically, which the extension
-  cannot do (browsers block ordinary extension JavaScript from setting a
-  file input's value — only privileged automation tools like Playwright can).
+  browser window via Playwright. More setup, but everything runs locally
+  from a `profile.yaml` file rather than browser storage.
 
 Both read the same rules (never auto-submit, never guess on self-ID/
 criminal-history/salary-history questions) but keep entirely separate
@@ -49,15 +47,26 @@ Everyday use: load it once, then click its icon on any application page.
    red = required and left blank), and shows a summary in the corner.
    **Nothing is ever submitted for you.**
 
-Your profile, settings, and any saved site logins live in this browser's own
-local extension storage — never synced to a Google account, never sent
-anywhere except the job site being filled.
+Your profile, settings, saved documents, and any saved site logins live in
+this browser's own local extension storage — never synced to a Google
+account, never sent anywhere except the job site being filled.
 
-The one thing it structurally can't do is attach a resume or cover letter
-file: browsers don't let ordinary extension JavaScript set a file input's
-value (only privileged automation tools like Playwright can, which is what
-the Python CLI uses instead). File-upload fields are flagged instead so you
-remember to attach them yourself.
+**Resume and cover letter**: upload them once under Options → Documents.
+When a job form has a resume/cover-letter upload field, the saved file is
+attached automatically (green outline) instead of being flagged. Under the
+hood this constructs a real `File` object from the bytes you uploaded and
+assigns it to the field via the browser's `DataTransfer` API — the same
+mechanism testing tools use to simulate a real file pick — which is
+different from (and, unlike setting `.value` on a file input directly,
+allowed for) ordinary extension JavaScript.
+
+**Importing education/work history from a resume**: paste your resume's
+text to Claude and ask for a JSON snippet shaped like
+`{"education": [...], "experience": [...]}` (matching the fields on the
+Education & Work tab), then paste that into the Documents tab's import box.
+There's no in-browser resume parser — this reuses Claude's own reading of
+your resume rather than a fragile heuristic parser, so it's worth a quick
+review of the imported rows before saving.
 
 ## Setup
 

@@ -32,7 +32,49 @@ function emptyProfile() {
     veteran_status: "", disability_status: "", sexual_orientation: "", transgender_status: "",
     cover_letter_text: "",
     education: [], experience: [], custom_answers: {},
+    resume_file: null, cover_letter_file: null,
   };
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderDocSlot(key, elId, inputId) {
+  const holder = document.getElementById(elId);
+  const info = state.profile[key];
+  if (!info) {
+    holder.innerHTML = '<span class="note">No file saved.</span>';
+    return;
+  }
+  holder.innerHTML = `<span class="note">${esc(info.name)}${info.size ? ` (${formatBytes(info.size)})` : ""}</span>`;
+  const btn = document.createElement("button");
+  btn.className = "danger";
+  btn.type = "button";
+  btn.textContent = "Remove";
+  btn.style.marginLeft = "8px";
+  btn.onclick = async () => {
+    state.profile[key] = null;
+    await chrome.storage.local.set({ profile: state.profile });
+    renderDocSlot(key, elId, inputId);
+  };
+  holder.appendChild(btn);
+}
+
+function renderDocs() {
+  renderDocSlot("resume_file", "resume-current", "resume-input");
+  renderDocSlot("cover_letter_file", "cover-current", "cover-input");
 }
 
 function buildBoolGrid() {
@@ -187,6 +229,7 @@ function loadIntoForm() {
   document.getElementById("s-auto-accounts").checked = !!(state.settings && state.settings.auto_create_accounts);
 
   renderCredentials();
+  renderDocs();
 }
 
 function gatherProfile() {
@@ -218,6 +261,9 @@ function gatherProfile() {
     const answer = row.querySelector('[data-k="answer"]').value.trim();
     if (keyword) p.custom_answers[keyword] = answer;
   });
+
+  p.resume_file = state.profile.resume_file || null;
+  p.cover_letter_file = state.profile.cover_letter_file || null;
 
   return p;
 }
@@ -267,4 +313,40 @@ function initTabs() {
   document.getElementById("add-exp").onclick = () => document.getElementById("exp-list").appendChild(expRow());
   document.getElementById("add-answer").onclick = () => document.getElementById("answers-list").appendChild(answerRow());
   document.getElementById("save").onclick = save;
+
+  const wireFileInput = (inputId, key, elId) => {
+    document.getElementById(inputId).onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const dataUrl = await fileToDataUrl(file);
+      state.profile[key] = { name: file.name, size: file.size, dataUrl };
+      await chrome.storage.local.set({ profile: state.profile });
+      renderDocSlot(key, elId, inputId);
+      e.target.value = "";
+    };
+  };
+  wireFileInput("resume-input", "resume_file", "resume-current");
+  wireFileInput("cover-input", "cover_letter_file", "cover-current");
+
+  document.getElementById("import-json-btn").onclick = () => {
+    const status = document.getElementById("import-status");
+    const raw = document.getElementById("import-json").value.trim();
+    if (!raw) return;
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (e) {
+      status.className = "note";
+      status.style.color = "var(--red)";
+      status.textContent = "That's not valid JSON.";
+      return;
+    }
+    const eduList = document.getElementById("edu-list");
+    const expList = document.getElementById("exp-list");
+    (data.education || []).forEach((e) => eduList.appendChild(eduRow(e)));
+    (data.experience || []).forEach((e) => expList.appendChild(expRow(e)));
+    status.style.color = "var(--green)";
+    status.textContent = `Added ${(data.education || []).length} school(s) and ${(data.experience || []).length} job(s) -- review them on the Education & Work tab, then Save.`;
+    document.getElementById("import-json").value = "";
+  };
 })();

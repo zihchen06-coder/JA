@@ -1,13 +1,15 @@
 // Core fill logic: read extracted form fields, decide what to fill from the
 // profile, and apply it to the real DOM -- never touching submit controls,
-// never filling a file input (browsers block that for content-script JS;
-// see extension/README notes), never guessing on self-ID/criminal/salary
-// questions. Ported from ja/filler.py -- keep the two in sync.
+// never guessing on self-ID/criminal/salary questions. Ported from
+// ja/filler.py -- keep the two in sync (the file-upload handling below is
+// the one deliberate divergence: this version can attach a saved resume/
+// cover-letter file directly, which Playwright's set_input_files already
+// does natively on the Python side).
 "use strict";
 
-const MARK_FILLED = "#22c55e";
-const MARK_REVIEW = "#f59e0b";
-const MARK_BLANK = "#ef4444";
+var MARK_FILLED = "#22c55e";
+var MARK_REVIEW = "#f59e0b";
+var MARK_BLANK = "#ef4444";
 
 function _sel(jaId) {
   return `[data-ja-id="${jaId}"]`;
@@ -97,7 +99,7 @@ function _displayLabel(label, canonical) {
   return label.trim() || canonical || label;
 }
 
-const _SIGNATURE_CONTEXT_KEYWORDS = ["disability", "veteran", "signature"];
+var _SIGNATURE_CONTEXT_KEYWORDS = ["disability", "veteran", "signature"];
 
 function _isSignatureContext(wideText) {
   const norm = normalize(wideText);
@@ -170,7 +172,7 @@ function _handleSimpleField(profile, report, f, creds) {
   }
 
   if (ftype === "file") {
-    _handleFileField(report, f);
+    _handleFileField(profile, report, f);
     return;
   }
 
@@ -365,24 +367,75 @@ function _handleCheckbox(profile, report, f) {
   addResult(report, label, canonical, "filled", value ? "checked" : "unchecked", required);
 }
 
-function _handleFileField(report, f) {
+// A data: URL's base64 payload can be decoded synchronously with atob(),
+// unlike fetch(dataUrl) which returns a Promise -- staying synchronous here
+// keeps the whole fill pipeline synchronous rather than needing every
+// caller up the chain to become async for this one field type.
+function _dataUrlToFile(dataUrl, filename) {
+  const commaIdx = dataUrl.indexOf(",");
+  const meta = dataUrl.slice(5, commaIdx); // strip leading "data:"
+  const mime = (meta.split(";")[0] || "application/octet-stream") || "application/octet-stream";
+  const binary = atob(dataUrl.slice(commaIdx + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new File([bytes], filename, { type: mime });
+}
+
+// Setting a file input's .value is always blocked (browsers refuse to let
+// script spoof a local file path), but assigning a FileList built from a
+// script-constructed File via DataTransfer is not -- this is the same
+// technique testing-library's userEvent.upload() uses, and it fires a real
+// 'change' event the page's own upload handler will see.
+function _attachFile(el, file) {
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  el.files = dt.files;
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function _handleFileField(profile, report, f) {
   const label = f.label || "";
   const required = f.required || false;
 
-  let canonical, note;
+  let canonical, fileInfo, kind;
   if (isResumeLabel(label)) {
-    canonical = "resume_path";
-    note = "Browser extensions can't fill file uploads -- attach your resume here yourself.";
+    canonical = "resume_file";
+    fileInfo = profile.resume_file;
+    kind = "resume";
   } else if (isCoverLetterLabel(label)) {
-    canonical = "cover_letter_path";
-    note = "Browser extensions can't fill file uploads -- attach your cover letter here yourself.";
+    canonical = "cover_letter_file";
+    fileInfo = profile.cover_letter_file;
+    kind = "cover letter";
   } else {
     addResult(report, label || "file upload", null, "skipped_no_match", "", required);
     return;
   }
 
-  _mark(f.ja_id, MARK_REVIEW);
-  addResult(report, label, canonical, "needs_review", note, required);
+  if (!fileInfo || !fileInfo.dataUrl) {
+    _mark(f.ja_id, MARK_REVIEW);
+    addResult(
+      report, label, canonical, "needs_review",
+      `No ${kind} saved -- add one under the extension's Options → Documents tab, or attach it here yourself.`,
+      required
+    );
+    return;
+  }
+
+  const el = _el(f.ja_id);
+  if (!el) {
+    addResult(report, label, canonical, "error", "Field disappeared from the page.", required);
+    return;
+  }
+
+  try {
+    _attachFile(el, _dataUrlToFile(fileInfo.dataUrl, fileInfo.name));
+    _mark(f.ja_id, MARK_FILLED);
+    addResult(report, label, canonical, "filled", fileInfo.name, required);
+  } catch (exc) {
+    _mark(f.ja_id, MARK_REVIEW);
+    addResult(report, label, canonical, "needs_review", `Could not attach automatically (${exc}) -- attach it here yourself.`, required);
+  }
 }
 
 function _handleRadioGroup(profile, report, options) {

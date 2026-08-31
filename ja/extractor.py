@@ -269,7 +269,16 @@ _EXTRACT_JS = r"""
       // -- so !!el.value is true before the user ever touches it. The first
       // option being a not-yet-chosen placeholder is close to universal
       // convention, so selectedIndex > 0 is what actually means "answered".
-      item.has_value = el.selectedIndex > 0;
+      // Some templated forms (a select2-driven State dropdown seen in
+      // practice) duplicate that placeholder -- two leading <option
+      // value=""> elements both marked selected, one also disabled -- and
+      // the browser resolves selectedIndex to the SECOND one, landing on 1
+      // rather than 0. el.value still correctly reads "" either way (a
+      // present-but-empty value="" attribute is honored exactly, unlike a
+      // missing attribute), so requiring both catches the duplicate-
+      // placeholder case without reopening the one selectedIndex alone was
+      // fixing.
+      item.has_value = el.selectedIndex > 0 && el.value !== '';
     } else if (type === 'file') {
       item.label = labelFor(el);
       item.has_value = !!(el.files && el.files.length);

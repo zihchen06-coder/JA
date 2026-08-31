@@ -4,7 +4,7 @@
 // the outlines drawn on individual fields.
 "use strict";
 
-const REQUIRED_FIELDS = ["first_name", "last_name", "email", "phone"];
+var REQUIRED_FIELDS = ["first_name", "last_name", "email", "phone"];
 
 function _showBanner(html, tone) {
   document.getElementById("ja-autofill-banner")?.remove();

@@ -5,8 +5,8 @@
 // Ported from ja/credentials.py -- keep the two in sync.
 "use strict";
 
-const _ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
-const _SPECIAL_RE = /[!@#$%^&*]/;
+var _ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+var _SPECIAL_RE = /[!@#$%^&*]/;
 
 function generatePassword(length = 16) {
   for (;;) {

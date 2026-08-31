@@ -202,7 +202,12 @@ function extractFields() {
       item.label = labelFor(el);
       item.context = wideContext(el);
       item.options = Array.from(el.options).map((o) => ({ value: o.value, text: cleanText(o.text) }));
-      item.has_value = el.selectedIndex > 0;
+      // See ja/extractor.py's matching comment: some templated forms
+      // duplicate the leading placeholder option, which can leave
+      // selectedIndex resolving to 1 instead of 0 even though nothing was
+      // ever really chosen -- el.value still correctly reads "" for an
+      // explicit value="" attribute, so requiring both catches that case.
+      item.has_value = el.selectedIndex > 0 && el.value !== "";
     } else if (type === "file") {
       item.label = labelFor(el);
       item.has_value = !!(el.files && el.files.length);

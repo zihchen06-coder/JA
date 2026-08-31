@@ -92,6 +92,7 @@
     <div class="tab" data-tab="eligibility">Eligibility</div>
     <div class="tab" data-tab="selfid">Self-ID</div>
     <div class="tab" data-tab="edu">Education &amp; Work</div>
+    <div class="tab" data-tab="docs">Documents</div>
     <div class="tab" data-tab="answers">Answers</div>
     <div class="tab" data-tab="accounts">Accounts</div>
   </div>
@@ -156,6 +157,30 @@
       <h3>Work experience</h3>
       <div id="exp-list"></div>
       <button class="ghost" id="add-exp" type="button">+ Add job</button>
+    </div>
+
+    <div class="ptab" id="pt-docs">
+      <p class="note">Stored as a file in this browser's own local extension storage (never synced, never sent anywhere but the job site being filled). When a job form has a resume/cover-letter upload field, the saved file is attached automatically.</p>
+      <div class="grid">
+        <div class="field">
+          <label>Resume</label>
+          <input type="file" id="resume-input" accept=".pdf,.doc,.docx,.rtf,.txt">
+          <div class="row" id="resume-current" style="margin-top:4px;"></div>
+        </div>
+        <div class="field">
+          <label>Cover letter</label>
+          <input type="file" id="cover-input" accept=".pdf,.doc,.docx,.rtf,.txt">
+          <div class="row" id="cover-current" style="margin-top:4px;"></div>
+        </div>
+      </div>
+
+      <h3>Import education &amp; work history</h3>
+      <p class="note">Paste a JSON snippet shaped like <code>{"education": [...], "experience": [...]}</code> — ask Claude to generate this from your resume — and it's added to the lists on the Education &amp; Work tab (existing rows aren't touched, so review for duplicates after importing).</p>
+      <textarea id="import-json" rows="4" placeholder='{"education": [{"school": "...", "degree": "...", "field_of_study": "...", "graduation_year": "..."}], "experience": [{"company": "...", "title": "...", "start_date": "...", "end_date": "...", "description": "..."}]}'></textarea>
+      <div class="row" style="margin-top:8px;">
+        <button class="ghost" id="import-json-btn" type="button">Import</button>
+        <span id="import-status" class="note"></span>
+      </div>
     </div>
 
     <div class="ptab" id="pt-answers">
