@@ -19,6 +19,46 @@ answers you set yourself under Self-identification — nothing is inferred
 from your name or resume, and anything you leave blank stays flagged for
 you to answer by hand.
 
+## Two ways to run this
+
+- **The `extension/` folder** — a Chrome extension you load once, then click
+  its toolbar icon on any job application page in your own everyday browser
+  (already signed into whatever you're signed into). No Python, no separate
+  browser window, no local server. See "Browser extension" below.
+- **The Python CLI / web UI** (`apply.py`) — drives its own dedicated
+  browser window via Playwright. More setup, but it can attach your resume
+  and cover letter to file-upload fields automatically, which the extension
+  cannot do (browsers block ordinary extension JavaScript from setting a
+  file input's value — only privileged automation tools like Playwright can).
+
+Both read the same rules (never auto-submit, never guess on self-ID/
+criminal-history/salary-history questions) but keep entirely separate
+profiles and local storage — filling in one does not fill in the other.
+
+## Browser extension
+
+Everyday use: load it once, then click its icon on any application page.
+
+1. Open `chrome://extensions`, turn on **Developer mode** (top right).
+2. Click **Load unpacked** and select the `extension/` folder in this repo.
+3. Right-click the new toolbar icon → **Options**, and fill in your profile
+   (first/last name, email, and phone are required; everything else is
+   optional). Click **Save**.
+4. On any job application page, click the toolbar icon. It fills what it
+   can, outlines each field (green = filled, amber = flagged for you,
+   red = required and left blank), and shows a summary in the corner.
+   **Nothing is ever submitted for you.**
+
+Your profile, settings, and any saved site logins live in this browser's own
+local extension storage — never synced to a Google account, never sent
+anywhere except the job site being filled.
+
+The one thing it structurally can't do is attach a resume or cover letter
+file: browsers don't let ordinary extension JavaScript set a file input's
+value (only privileged automation tools like Playwright can, which is what
+the Python CLI uses instead). File-upload fields are flagged instead so you
+remember to attach them yourself.
+
 ## Setup
 
 Requires Python 3.10+. On macOS, run `python3 --version` first; if it's

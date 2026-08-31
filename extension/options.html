@@ -1,0 +1,189 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Job Application Autofill — Profile</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f172a;
+    --panel: rgba(30, 41, 59, 0.6);
+    --border: rgba(148, 163, 184, 0.18);
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --red: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(circle at 20% 0%, #1e293b 0%, #0f172a 60%);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    min-height: 100vh;
+    padding: 32px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; font-size: 13px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    backdrop-filter: blur(10px);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+  .tab {
+    padding: 8px 14px; border-radius: 999px; cursor: pointer; font-size: 13px;
+    border: 1px solid var(--border); color: var(--muted); background: transparent;
+  }
+  .tab.active { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
+  .ptab { display: none; }
+  .ptab.active { display: block; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field.full { grid-column: 1 / -1; }
+  label { font-size: 12px; color: var(--muted); }
+  input, select, textarea {
+    background: rgba(15, 23, 42, 0.7);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 9px 10px;
+    font: inherit;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 10px; align-items: center; }
+  button {
+    background: var(--accent); color: #0f172a; border: none; border-radius: 8px;
+    padding: 9px 16px; font-weight: 600; cursor: pointer; font: inherit;
+  }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  button.danger { background: transparent; color: var(--red); border: 1px solid var(--red); padding: 6px 10px; }
+  .listitem {
+    border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .listitem .top { display: flex; justify-content: flex-end; }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .toggle-row .desc { color: var(--muted); font-size: 12px; max-width: 560px; }
+  #status { margin-top: 14px; font-size: 13px; min-height: 18px; }
+  #status.ok { color: var(--green); }
+  #status.err { color: var(--red); }
+  .cred-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 10px; align-items: center; }
+  .cred-row input[readonly] { color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; }
+  .savebar { position: sticky; bottom: 0; padding-top: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Job Application Autofill</h1>
+  <p class="sub">Stored only on this device, in this browser's own local storage. Never synced, never sent anywhere except the job site being filled.</p>
+
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-tab="contact">Contact</div>
+    <div class="tab" data-tab="background">Background</div>
+    <div class="tab" data-tab="eligibility">Eligibility</div>
+    <div class="tab" data-tab="selfid">Self-ID</div>
+    <div class="tab" data-tab="edu">Education &amp; Work</div>
+    <div class="tab" data-tab="answers">Answers</div>
+    <div class="tab" data-tab="accounts">Accounts</div>
+  </div>
+
+  <div class="card">
+    <div class="ptab active" id="pt-contact">
+      <div class="grid">
+        <div class="field"><label>First name *</label><input data-f="first_name"></div>
+        <div class="field"><label>Last name *</label><input data-f="last_name"></div>
+        <div class="field"><label>Middle name</label><input data-f="middle_name"></div>
+        <div class="field"><label>Preferred name</label><input data-f="preferred_name"></div>
+        <div class="field"><label>Email *</label><input data-f="email" type="email"></div>
+        <div class="field"><label>Phone *</label><input data-f="phone"></div>
+        <div class="field full"><label>Address line 1</label><input data-f="address_line1"></div>
+        <div class="field full"><label>Address line 2</label><input data-f="address_line2"></div>
+        <div class="field"><label>City</label><input data-f="city"></div>
+        <div class="field"><label>State / Province</label><input data-f="state"></div>
+        <div class="field"><label>Postal code</label><input data-f="postal_code"></div>
+        <div class="field"><label>Country</label><input data-f="country"></div>
+        <div class="field"><label>LinkedIn URL</label><input data-f="linkedin_url"></div>
+        <div class="field"><label>GitHub URL</label><input data-f="github_url"></div>
+        <div class="field full"><label>Portfolio / website URL</label><input data-f="portfolio_url"></div>
+      </div>
+    </div>
+
+    <div class="ptab" id="pt-background">
+      <div class="grid">
+        <div class="field"><label>Current company</label><input data-f="current_company"></div>
+        <div class="field"><label>Current title</label><input data-f="current_title"></div>
+        <div class="field"><label>Years of experience</label><input data-f="years_experience"></div>
+        <div class="field"><label>Desired salary</label><input data-f="desired_salary" placeholder="e.g. Depends on the budget allocated for this role"></div>
+        <div class="field"><label>Earliest start date</label><input data-f="notice_period" placeholder="e.g. 2027-05-11"></div>
+        <div class="field"><label>How did you hear about us</label><input data-f="how_heard"></div>
+        <div class="field"><label>GPA</label><input data-f="gpa"></div>
+        <div class="field"><label>Security clearance</label><input data-f="security_clearance"></div>
+        <div class="field"><label>Preferred location</label><input data-f="preferred_location"></div>
+        <div class="field"><label>Employment type</label><input data-f="employment_type"></div>
+        <div class="field"><label>Languages</label><input data-f="languages"></div>
+        <div class="field full"><label>References</label><textarea data-f="references"></textarea></div>
+        <div class="field full"><label>Cover letter text (pasted into text boxes, not file uploads)</label><textarea data-f="cover_letter_text"></textarea></div>
+      </div>
+    </div>
+
+    <div class="ptab" id="pt-eligibility">
+      <div class="grid" id="bool-grid"></div>
+      <div class="grid" style="margin-top:14px;">
+        <div class="field"><label>Citizenship / employment eligibility</label><select data-f="citizenship_status" data-choices="citizenship_status"></select></div>
+        <div class="field"><label>Highest level of education</label><select data-f="education_level" data-choices="education_level"></select></div>
+        <div class="field full"><label>Who referred you (if anyone)</label><input data-f="referral_name"></div>
+      </div>
+    </div>
+
+    <div class="ptab" id="pt-selfid">
+      <p class="note">Voluntary self-identification. Filled on applications only when set here; left "Not set", the question stays flagged for you to answer by hand on every form — nothing here is ever guessed from your name, resume, or anything else.</p>
+      <div class="grid" id="selfid-grid"></div>
+    </div>
+
+    <div class="ptab" id="pt-edu">
+      <h3 style="margin-top:0;">Education</h3>
+      <div id="edu-list"></div>
+      <button class="ghost" id="add-edu" type="button">+ Add school</button>
+      <h3>Work experience</h3>
+      <div id="exp-list"></div>
+      <button class="ghost" id="add-exp" type="button">+ Add job</button>
+    </div>
+
+    <div class="ptab" id="pt-answers">
+      <p class="note">Free-text answers for recurring open-ended questions. Matched when the keyword appears anywhere in a question's label.</p>
+      <div id="answers-list"></div>
+      <button class="ghost" id="add-answer" type="button">+ Add answer</button>
+    </div>
+
+    <div class="ptab" id="pt-accounts">
+      <div class="toggle-row">
+        <div>
+          <div><strong>Automatically create accounts</strong></div>
+          <div class="desc">Some job sites (iCIMS especially) require a candidate account before showing the real application. When on, a strong password is generated per site the first time it's needed, and reused on later visits to that same site.</div>
+        </div>
+        <label class="row"><input type="checkbox" id="s-auto-accounts" style="width:18px;height:18px;"></label>
+      </div>
+      <h3>Saved site logins</h3>
+      <div id="cred-list"></div>
+      <p class="note" id="cred-empty">None saved yet.</p>
+    </div>
+  </div>
+
+  <div class="savebar">
+    <button id="save">Save</button>
+    <span id="status"></span>
+  </div>
+</div>
+<script src="field_aliases.js"></script>
+<script src="options.js"></script>
+</body>
+</html>
