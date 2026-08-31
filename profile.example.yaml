@@ -66,6 +66,7 @@ education:
 experience:
   - company: "Acme Corp"
     title: "Software Engineer"
+    location: "Remote"
     start_date: "2021-06"
     end_date: "Present"
     description: "Built and maintained backend services."

@@ -260,6 +260,7 @@ _EXTRACT_JS = r"""
       tag,
       type,
       name: el.getAttribute('name') || '',
+      id: el.id || '',
       required: !!(el.required || el.getAttribute('aria-required') === 'true'),
     };
 

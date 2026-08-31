@@ -214,6 +214,14 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
             _fill_text(page, report, f, "account_login", creds[0], required)
             return
 
+    # A work-history "add another job" repeater block (Job title / Company /
+    # Location / From / To) -- identified by the field's own machine name,
+    # since the bare labels are too generic to alias safely by text alone.
+    exp_field = matcher.experience_field_for(f.get("name", ""), f.get("id", ""))
+    if exp_field and exp_field != "current_checkbox":
+        _fill_experience_field(page, profile, report, f, exp_field, required)
+        return
+
     # Long EEO boilerplate (the federal CC-305 disability form especially)
     # can put thousands of characters between a section's real heading and
     # its control, well past reach of the short display label -- wide_text
@@ -315,6 +323,14 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
             else:
                 option_value = matcher.best_option(str(value), options)
                 detail = str(value)
+                # A "Degree" dropdown almost always lists coarse categories
+                # ("Bachelors Degree", "Masters Degree"), not the applicant's
+                # own abbreviation for their degree ("B.S.") -- education_level
+                # is shaped for exactly this and is worth trying before
+                # giving up, even though the label itself matched "degree".
+                if option_value is None and canonical == "degree" and profile.education_level:
+                    option_value = matcher.best_option(profile.education_level, options)
+                    detail = profile.education_level
             if option_value is None:
                 if required:
                     _mark(page, f["ja_id"], _MARK_BLANK)
@@ -345,10 +361,79 @@ def _handle_simple_field(page: Any, profile: Profile, report: FillReport, f: dic
         report.add(label, canonical, "error", str(exc), required)
 
 
+_EXPERIENCE_ATTR = {
+    "title": "title", "company": "company", "location": "location",
+    "start_date": "start_date", "end_date": "end_date", "description": "description",
+}
+
+
+def _fill_experience_field(page: Any, profile: Profile, report: FillReport, f: dict,
+                            exp_field: str, required: bool) -> None:
+    label = f.get("label", "") or f.get("name", "")
+    canonical = f"experience_{exp_field}"
+
+    if not profile.experience:
+        if required:
+            _mark(page, f["ja_id"], _MARK_BLANK)
+        report.add(label, canonical, "skipped_no_data", "No work experience saved in your profile.", required)
+        return
+
+    value = getattr(profile.experience[0], _EXPERIENCE_ATTR[exp_field], "")
+
+    # An ongoing job's end date isn't a real date to type in -- the "I
+    # currently work here" checkbox next to it is what represents that, and
+    # _handle_current_work_checkbox takes care of checking it.
+    if exp_field == "end_date" and (value or "").strip().lower() in ("present", "current", "ongoing"):
+        report.add(label, canonical, "filled",
+                   "Left blank -- checked \"I currently work here\" instead.", required)
+        return
+
+    if not value:
+        if required:
+            _mark(page, f["ja_id"], _MARK_BLANK)
+        report.add(label, canonical, "skipped_no_data", "No value saved for this field.", required)
+        return
+
+    fill_value = matcher.format_month_year(str(value), "%m/%Y") if exp_field in ("start_date", "end_date") else str(value)
+    _fill_text(page, report, f, canonical, fill_value, required)
+
+
+def _handle_current_work_checkbox(page: Any, profile: Profile, report: FillReport, f: dict) -> None:
+    label = f.get("label") or "I currently work here"
+    required = f.get("required", False)
+    canonical = "experience_end_date"
+
+    if not profile.experience:
+        report.add(label, canonical, "skipped_no_data", "No work experience saved in your profile.", required)
+        return
+
+    want_checked = (profile.experience[0].end_date or "").strip().lower() in ("present", "current", "ongoing")
+    if f.get("checked") is want_checked:
+        if want_checked:
+            report.add(label, canonical, "already_filled", "Left as-is.", required)
+        return
+
+    try:
+        loc = page.locator(_sel(f["ja_id"]))
+        if want_checked:
+            loc.check()
+            _mark(page, f["ja_id"], _MARK_FILLED)
+            report.add(label, canonical, "filled", "checked", required)
+        else:
+            loc.uncheck()
+    except Exception as exc:  # noqa: BLE001
+        report.add(label, canonical, "error", str(exc), required)
+
+
 def _handle_checkbox(page: Any, profile: Profile, report: FillReport, f: dict) -> None:
     label = f.get("label", "")
     group_label = f.get("group_label", "")
     required = f.get("required", False)
+
+    if matcher.experience_field_for(f.get("name", ""), f.get("id", "")) == "current_checkbox":
+        _handle_current_work_checkbox(page, profile, report, f)
+        return
+
     canonical = matcher.match_field(label)
 
     # Some forms present a yes/no question as a pair of checkboxes labelled

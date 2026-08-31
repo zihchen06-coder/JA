@@ -187,6 +187,12 @@ function _handleSimpleField(profile, report, f, creds) {
     }
   }
 
+  const expField = experienceFieldFor(f.name || "", f.id || "");
+  if (expField && expField !== "current_checkbox") {
+    _fillExperienceField(profile, report, f, expField, required);
+    return;
+  }
+
   const context = f.context || "";
   const wideText = context ? `${label} ${context}`.trim() : label;
 
@@ -280,6 +286,14 @@ function _handleSimpleField(profile, report, f, creds) {
         }
         optionValue = bestOption(String(value), options);
         detail = String(value);
+        // A "Degree" dropdown almost always lists coarse categories
+        // ("Bachelors Degree", "Masters Degree"), not the applicant's own
+        // abbreviation for their degree ("B.S.") -- education_level is
+        // shaped for exactly this and is worth trying before giving up.
+        if ((optionValue === null || optionValue === undefined) && canonical === "degree" && profile.education_level) {
+          optionValue = bestOption(profile.education_level, options);
+          detail = profile.education_level;
+        }
       }
       if (optionValue === null || optionValue === undefined) {
         if (required) _mark(f.ja_id, MARK_BLANK);
@@ -307,10 +321,79 @@ function _handleSimpleField(profile, report, f, creds) {
   }
 }
 
+const EXPERIENCE_ATTR = {
+  title: "title", company: "company", location: "location",
+  start_date: "start_date", end_date: "end_date", description: "description",
+};
+
+function _fillExperienceField(profile, report, f, expField, required) {
+  const label = f.label || f.name || "";
+  const canonical = `experience_${expField}`;
+
+  if (!profile.experience || !profile.experience.length) {
+    if (required) _mark(f.ja_id, MARK_BLANK);
+    addResult(report, label, canonical, "skipped_no_data", "No work experience saved in your profile.", required);
+    return;
+  }
+
+  const value = profile.experience[0][EXPERIENCE_ATTR[expField]] || "";
+
+  if (expField === "end_date" && ["present", "current", "ongoing"].includes(value.trim().toLowerCase())) {
+    addResult(report, label, canonical, "filled",
+      'Left blank -- checked "I currently work here" instead.', required);
+    return;
+  }
+
+  if (!value) {
+    if (required) _mark(f.ja_id, MARK_BLANK);
+    addResult(report, label, canonical, "skipped_no_data", "No value saved for this field.", required);
+    return;
+  }
+
+  const fillValue = ["start_date", "end_date"].includes(expField) ? formatMonthYear(String(value), "%m/%Y") : String(value);
+  _fillText(report, f, canonical, fillValue, required);
+}
+
+function _handleCurrentWorkCheckbox(profile, report, f) {
+  const label = f.label || "I currently work here";
+  const required = f.required || false;
+  const canonical = "experience_end_date";
+
+  if (!profile.experience || !profile.experience.length) {
+    addResult(report, label, canonical, "skipped_no_data", "No work experience saved in your profile.", required);
+    return;
+  }
+
+  const wantChecked = ["present", "current", "ongoing"].includes(
+    (profile.experience[0].end_date || "").trim().toLowerCase()
+  );
+  if (f.checked === wantChecked) {
+    if (wantChecked) addResult(report, label, canonical, "already_filled", "Left as-is.", required);
+    return;
+  }
+
+  const el = _el(f.ja_id);
+  if (!el) {
+    addResult(report, label, canonical, "error", "Field disappeared from the page.", required);
+    return;
+  }
+  _setChecked(el, wantChecked);
+  if (wantChecked) {
+    _mark(f.ja_id, MARK_FILLED);
+    addResult(report, label, canonical, "filled", "checked", required);
+  }
+}
+
 function _handleCheckbox(profile, report, f) {
   const label = f.label || "";
   const groupLabel = f.group_label || "";
   const required = f.required || false;
+
+  if (experienceFieldFor(f.name || "", f.id || "") === "current_checkbox") {
+    _handleCurrentWorkCheckbox(profile, report, f);
+    return;
+  }
+
   const canonical = matchField(label);
 
   const optionBool = semanticBool(label);

@@ -29,6 +29,7 @@ class EducationEntry:
 class WorkExperience:
     company: str = ""
     title: str = ""
+    location: str = ""
     start_date: str = ""
     end_date: str = ""
     description: str = ""

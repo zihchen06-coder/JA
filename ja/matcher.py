@@ -19,7 +19,8 @@ from .field_aliases import (
 __all__ = [
     "normalize", "is_eeo_label", "sensitive_group", "sensitive_reason",
     "is_resume_label", "is_cover_letter_label", "match_field", "best_option",
-    "best_choice", "semantic_bool", "normalize_date",
+    "best_choice", "semantic_bool", "normalize_date", "format_month_year",
+    "experience_field_for",
 ]
 
 _PUNCT_RE = re.compile(r"[^a-z0-9\s]")
@@ -182,6 +183,55 @@ def normalize_date(value: str, target_format: str = "%Y-%m-%d") -> str:
         except ValueError:
             continue
     return value
+
+
+def format_month_year(value: str, target_format: str = "%m/%Y") -> str:
+    """Convert a profile-stored 'YYYY-MM' work-history date (the format used
+    by profile.yaml's experience entries) into what a repeater-style
+    "Job title / Company / From / To" experience block usually expects.
+    Returns `value` unchanged if it isn't in that shape, so a value already
+    typed some other way still gets attempted as-is.
+    """
+    text = (value or "").strip()
+    m = re.match(r"^(\d{4})-(\d{2})$", text)
+    if not m:
+        return value
+    year, month = m.group(1), m.group(2)
+    return f"{month}/{year}" if target_format == "%m/%Y" else value
+
+
+# A form's "add another job" repeater block (Workday, and the SmartDreamers/
+# Envista platform seen in practice) names its fields generically -- "Job
+# title", "Company", "Location", "From"/"To" -- with no employer-specific
+# qualifier the way FIELD_ALIASES' current_company/current_title require.
+# Those bare words are deliberately NOT in FIELD_ALIASES: "Company" alone is
+# too likely to false-match some unrelated field elsewhere on the page. The
+# field's own machine name inside the repeater is the safe signal instead --
+# "experience[0][company]", "experience_company" -- present only on fields
+# that really are part of a work-history entry, so matching on it doesn't
+# risk pulling in something else.
+_EXPERIENCE_NAME_KEYWORDS = (
+    ("current_work", "current_checkbox"),
+    ("job_title", "title"),
+    ("company", "company"),
+    ("location", "location"),
+    ("work_start", "start_date"),
+    ("work_end", "end_date"),
+    ("role", "description"),
+)
+
+
+def experience_field_for(name: str, elem_id: str = "") -> str | None:
+    """Which WorkExperience attribute (or the special 'current_checkbox'
+    marker) a repeater field's name/id identifies it as, or None.
+    """
+    combined = f"{elem_id or ''} {name or ''}".lower().replace("-", "_")
+    if "experience" not in combined:
+        return None
+    for keyword, field in _EXPERIENCE_NAME_KEYWORDS:
+        if keyword in combined:
+            return field
+    return None
 
 
 def semantic_bool(choice_text: str) -> bool | None:

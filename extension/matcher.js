@@ -211,6 +211,39 @@ function normalizeDate(value, targetFormat = "%Y-%m-%d") {
   return value;
 }
 
+function formatMonthYear(value, targetFormat = "%m/%Y") {
+  const text = (value || "").trim();
+  const m = text.match(/^(\d{4})-(\d{2})$/);
+  if (!m) return value;
+  const [, year, month] = m;
+  return targetFormat === "%m/%Y" ? `${month}/${year}` : value;
+}
+
+// See ja/matcher.py's experience_field_for for the rationale: bare "Company"/
+// "Job title"/"From"/"To" labels inside a work-history repeater block
+// (Workday, and the SmartDreamers/Envista platform seen in practice) aren't
+// in FIELD_ALIASES since they're too generic to match safely by label alone
+// -- the field's own machine name inside the repeater ("experience[0]
+// [company]", "experience_company") is the safe signal instead.
+const _EXPERIENCE_NAME_KEYWORDS = [
+  ["current_work", "current_checkbox"],
+  ["job_title", "title"],
+  ["company", "company"],
+  ["location", "location"],
+  ["work_start", "start_date"],
+  ["work_end", "end_date"],
+  ["role", "description"],
+];
+
+function experienceFieldFor(name, elemId = "") {
+  const combined = `${elemId || ""} ${name || ""}`.toLowerCase().replace(/-/g, "_");
+  if (!combined.includes("experience")) return null;
+  for (const [keyword, field] of _EXPERIENCE_NAME_KEYWORDS) {
+    if (combined.includes(keyword)) return field;
+  }
+  return null;
+}
+
 function semanticBool(choiceText) {
   const norm = normalize(choiceText);
   if (!norm) return null;

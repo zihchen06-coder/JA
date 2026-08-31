@@ -199,6 +199,7 @@ function extractFields() {
       tag,
       type,
       name: el.getAttribute("name") || "",
+      id: el.id || "",
       required: !!(el.required || el.getAttribute("aria-required") === "true"),
     };
 

@@ -143,8 +143,9 @@ function expRow(entry = {}) {
     <div class="grid">
       <div class="field"><label>Company</label><input data-k="company" value="${esc(entry.company)}"></div>
       <div class="field"><label>Title</label><input data-k="title" value="${esc(entry.title)}"></div>
-      <div class="field"><label>Start date</label><input data-k="start_date" value="${esc(entry.start_date)}"></div>
-      <div class="field"><label>End date</label><input data-k="end_date" value="${esc(entry.end_date)}"></div>
+      <div class="field"><label>Location</label><input data-k="location" value="${esc(entry.location)}"></div>
+      <div class="field"><label>Start date (YYYY-MM)</label><input data-k="start_date" value="${esc(entry.start_date)}" placeholder="2024-07"></div>
+      <div class="field"><label>End date (YYYY-MM, or "Present")</label><input data-k="end_date" value="${esc(entry.end_date)}" placeholder="Present"></div>
       <div class="field full"><label>Description</label><textarea data-k="description">${esc(entry.description)}</textarea></div>
     </div>`;
   div.querySelector("button").onclick = () => div.remove();
