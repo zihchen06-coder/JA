@@ -443,18 +443,33 @@ function initTabs() {
     (data.education || []).forEach((e) => eduList.appendChild(eduRow(e)));
     (data.experience || []).forEach((e) => expList.appendChild(expRow(e)));
 
-    const existingKeywords = new Set(
-      Array.from(answersList.querySelectorAll('[data-k="keyword"]')).map((inp) => inp.value.trim().toLowerCase())
-    );
+    // Keyed by keyword -> that row's answer textarea, so a row already
+    // added (e.g. by "+ Add top 50 common questions") but still blank gets
+    // filled in here instead of silently skipped just because the keyword
+    // already exists as a row.
+    const existingRows = new Map();
+    answersList.querySelectorAll(".listitem").forEach((row) => {
+      const kwInput = row.querySelector('[data-k="keyword"]');
+      if (kwInput) existingRows.set(kwInput.value.trim().toLowerCase(), row.querySelector('[data-k="answer"]'));
+    });
     let answersAdded = 0;
+    let answersFilled = 0;
     Object.entries(data.custom_answers || {}).forEach(([keyword, answer]) => {
-      if (existingKeywords.has(keyword.trim().toLowerCase())) return;
+      const normKeyword = keyword.trim().toLowerCase();
+      const existingAnswerEl = existingRows.get(normKeyword);
+      if (existingAnswerEl) {
+        if (!existingAnswerEl.value.trim() && answer) {
+          existingAnswerEl.value = answer;
+          answersFilled++;
+        }
+        return;
+      }
       answersList.appendChild(answerRow(keyword, answer));
       answersAdded++;
     });
 
     status.style.color = "var(--green)";
-    status.textContent = `Added ${(data.education || []).length} school(s), ${(data.experience || []).length} job(s), and ${answersAdded} answer(s) -- review them on the Education & Work and Answers tabs, then Save.`;
+    status.textContent = `Added ${(data.education || []).length} school(s), ${(data.experience || []).length} job(s), ${answersAdded} new answer(s), and filled in ${answersFilled} previously-blank answer(s) -- review them on the Education & Work and Answers tabs, then Save.`;
     document.getElementById("import-json").value = "";
   };
 })();
