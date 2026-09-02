@@ -36,6 +36,12 @@ function _showBanner(html, tone) {
 }
 
 (async () => {
+  // This runs in every frame on the page, and most of them are ads and
+  // trackers with no form in them at all. Bail before doing anything --
+  // before even reading storage -- so those frames stay silent instead of
+  // each drawing their own banner.
+  if (!document.querySelector('input, select, textarea, button[aria-haspopup="listbox"]')) return;
+
   const { profile, settings, credentials: savedCreds } = await chrome.storage.local.get([
     "profile",
     "settings",
@@ -54,6 +60,8 @@ function _showBanner(html, tone) {
 
   const autoCreateAccounts = !!(settings && settings.auto_create_accounts);
   const fieldsData = extractFields();
+  // A frame whose only controls were hidden or non-fillable.
+  if (!fieldsData.length) return;
   let creds = null;
   if (autoCreateAccounts && fieldsData.some((f) => f.type === "password")) {
     const hostname = hostnameFor(location.href);
@@ -61,6 +69,31 @@ function _showBanner(html, tone) {
   }
 
   const report = await fillForm(profile, creds);
+
+  // Second pass: hand whatever the rule-based matcher couldn't place to
+  // Claude, if the user has turned that on and saved a key. Failures here
+  // are never fatal -- the deterministic fill already happened and stands.
+  let claudeFilled = 0;
+  let claudeError = null;
+  if (settings && settings.use_llm) {
+    const pending = llmFieldsFor(report);
+    if (pending.length) {
+      _showBanner(
+        `<strong>Asking Claude</strong><br>${pending.length} field(s) the matcher didn't recognise\u2026`,
+        "info"
+      );
+      try {
+        const reply = await chrome.runtime.sendMessage({
+          type: "ja-llm-resolve",
+          request: { profile, fields: pending, pageUrl: location.href },
+        });
+        if (reply && reply.error) claudeError = reply.error;
+        else if (reply) claudeFilled = await applyLlmAnswers(report, reply.answers, reply.skipped);
+      } catch (exc) {
+        claudeError = String(exc);
+      }
+    }
+  }
 
   const filled = report.results.filter((r) => r.action === "filled").length;
   const review = report.results.filter((r) => r.action === "needs_review").length;
@@ -70,6 +103,14 @@ function _showBanner(html, tone) {
 
   const parts = [`<strong>Autofill done</strong>`];
   parts.push(`<div style="margin-top:6px; color:#4ade80;">&#9679; ${filled} field(s) filled</div>`);
+  if (claudeFilled) {
+    parts.push(
+      `<div style="color:#7dd3fc;">&#9679; ${claudeFilled} of those answered by Claude &mdash; read them before you submit</div>`
+    );
+  }
+  if (claudeError) {
+    parts.push(`<div style="color:#fbbf24;">&#9679; Claude step failed: ${claudeError}</div>`);
+  }
   if (review) parts.push(`<div style="color:#fbbf24;">&#9679; ${review} flagged for you to answer</div>`);
   if (blankRequired) parts.push(`<div style="color:#f87171;">&#9679; ${blankRequired} required field(s) left blank</div>`);
   parts.push(`<div style="margin-top:8px; color:#94a3b8; font-size:11px;">Nothing was submitted. Review the highlighted fields, then submit yourself.</div>`);

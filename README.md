@@ -47,9 +47,50 @@ Everyday use: load it once, then click its icon on any application page.
    red = required and left blank), and shows a summary in the corner.
    **Nothing is ever submitted for you.**
 
+It injects into every frame on the page, not just the top one — plenty of
+companies host the job posting on their own site and embed the actual
+Greenhouse/Lever/iCIMS application in an iframe, and a top-frame-only
+extension does nothing at all on those.
+
 Your profile, settings, saved documents, and any saved site logins live in
 this browser's own local extension storage — never synced to a Google
-account, never sent anywhere except the job site being filled.
+account, never sent anywhere except the job site being filled. The one
+exception is the optional **AI assist** below, which is off until you turn
+it on.
+
+### AI assist (optional, off by default)
+
+The rule-based matcher knows the field phrasings in `field_aliases`. That
+covers the common ones and costs nothing, but it is a fixed list, and forms
+phrase things in endless ways. Turn on **Options → AI assist** and paste an
+[Anthropic API key](https://console.anthropic.com/settings/keys): after the
+normal fill, whatever is left unrecognised is sent to Claude along with your
+profile, and its answers are filled in. That covers arbitrary phrasings and
+the open-ended essay questions in one step. A typical application costs a
+few cents, billed to your own account.
+
+This is the one part of the tool that leaves your machine. What goes to the
+API: the labels of the unfilled fields on the page, and everything on the
+Options tabs. What does not: your resume and cover letter files, your saved
+site logins, and any field the matcher already handled.
+
+The guarantees don't change, and they are enforced in `filler.js` on the way
+back in rather than merely asked of the model:
+
+- The set of fields offered to Claude is built locally. Self-identification,
+  criminal-history, salary-history and consent questions are never in it —
+  nor are checkboxes and radio buttons at all, since that is how forms ask
+  you to agree to things.
+- An answer for a field that wasn't offered is dropped, not applied.
+- A dropdown answer must match one of its options exactly; the near miss is
+  left blank instead, because picking the wrong item out of a list is worse
+  than leaving it for you.
+- Everything it fills is outlined green and listed in the summary as
+  answered by Claude, so you know what to read before submitting.
+- Nothing is submitted, same as ever.
+
+The API key is stored separately from your profile, so it is never part of
+an export, an import, or the profile sent to the API.
 
 **Resume and cover letter**: upload them once under Options → Documents.
 When a job form has a resume/cover-letter upload field, the saved file is
@@ -393,8 +434,9 @@ behavior.
 `test_filler.py`, `test_profile.py`, `test_credentials.py`) drives the
 Python matching/filling logic against hand-built field data, no browser
 needed. `test_extension_regression.py` is different: it runs the
-**browser extension's** JS logic against saved copies of real job
-application forms (`tests/fixtures/*.html`, personal data scrubbed) in a
+**browser extension's** JS logic — including the AI-assist guardrails,
+against a stubbed `fetch` so no key and no network are needed — against
+saved copies of real job application forms (`tests/fixtures/*.html`, personal data scrubbed) in a
 real headless Chromium via Playwright, since bugs there tend to be DOM
 behavior quirks (a `<select>`'s `selectedIndex`, computed-style visibility)
 that hand-built field data can't reproduce. It needs
@@ -417,6 +459,10 @@ caught by a still-green test — the safety net only knows what it's shown.
 
 - Multi-page forms need a manual `r` press per step (see above); the tool
   doesn't click "Next" for you, by design.
+- Fields go to the optional AI assist only if the deterministic matcher
+  couldn't place them; with it off, an unrecognised field is simply reported
+  as unfilled. It can't fill checkboxes or radios by design (see above), so
+  an unusually-phrased Yes/No radio question still needs you.
 - Custom dropdown widgets are handled in the **extension only**, and only
   the two patterns that have actually turned up:
   - **Workday** asks its questionnaire with `<button aria-haspopup="listbox">`

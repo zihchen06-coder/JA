@@ -102,6 +102,7 @@
     <div class="tab" data-tab="docs">Documents</div>
     <div class="tab" data-tab="answers">Answers</div>
     <div class="tab" data-tab="accounts">Accounts</div>
+    <div class="tab" data-tab="ai">AI assist</div>
   </div>
 
   <div class="card">
@@ -204,6 +205,36 @@
         <button class="ghost" id="add-common-questions" type="button">+ Add top 50 common questions</button>
       </div>
       <p class="note" id="common-questions-status"></p>
+    </div>
+
+    <div class="ptab" id="pt-ai">
+      <div class="toggle-row">
+        <div>
+          <div><strong>Let Claude answer what the matcher can't</strong></div>
+          <div class="desc">After the normal fill, any field left unrecognised is sent to Claude
+            along with your profile, and its answers are filled in. This is the one part of this
+            tool that leaves your device: the field labels on the page and everything on these
+            tabs (not your resume file, not your saved site logins) go to Anthropic's API under
+            your own API key.<br><br>
+            It will not answer self-identification, criminal-history, salary-history or consent
+            questions, and it cannot tick a checkbox or a radio button &mdash; those stay yours,
+            and that is enforced by the extension, not just asked of the model. Everything it
+            does fill is outlined green for you to read before you submit.</div>
+        </div>
+        <label class="row"><input type="checkbox" id="s-use-llm" style="width:18px;height:18px;"></label>
+      </div>
+      <div class="grid" style="margin-top:14px;">
+        <div class="field full">
+          <label>Anthropic API key</label>
+          <input type="password" id="llm-key" placeholder="sk-ant-..." autocomplete="off">
+          <p class="note">Stored in this browser's local extension storage, same as everything else
+            here, and only ever read by the extension's background worker &mdash; never by a script
+            running on a job site. Get one at
+            <a href="https://console.anthropic.com/settings/keys" target="_blank"
+               style="color:var(--accent);">console.anthropic.com</a>. Billed to your own account;
+            a typical application costs a few cents.</p>
+        </div>
+      </div>
     </div>
 
     <div class="ptab" id="pt-accounts">

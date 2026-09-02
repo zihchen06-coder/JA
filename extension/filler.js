@@ -291,6 +291,7 @@ async function fillForm(profile, creds) {
   const simpleFields = fieldsData.filter((f) => f.type !== "radio");
   const radios = fieldsData.filter((f) => f.type === "radio");
 
+  report.fields = fieldsData;
   for (const f of simpleFields) {
     await _handleSimpleField(profile, report, f, creds);
   }
@@ -307,7 +308,17 @@ async function fillForm(profile, creds) {
   return report;
 }
 
+// Stamps every result a field produced with that field's id, without
+// threading it through the thirty-odd addResult call sites below.
 async function _handleSimpleField(profile, report, f, creds) {
+  const before = report.results.length;
+  await _handleSimpleFieldInner(profile, report, f, creds);
+  for (let i = before; i < report.results.length; i++) {
+    report.results[i].ja_id = f.ja_id;
+  }
+}
+
+async function _handleSimpleFieldInner(profile, report, f, creds) {
   let label = f.label || "";
   const required = f.required || false;
   const ftype = f.type;
@@ -507,6 +518,7 @@ async function _fillSelectLike(profile, report, f, el, canonical, value, label, 
       return;
     }
     options = opened.options;
+    f.options = options;
   } else if (f.widget === "icims") {
     _openIcims(el);
   }
@@ -930,4 +942,142 @@ function _handleRadioGroup(profile, report, options) {
 
   if (required) _markAll(options, MARK_BLANK);
   addResult(report, groupLabel, canonical, "skipped_no_match", "No matching Yes/No option found.", required);
+}
+
+// ---------------------------------------------------------------------------
+// Second pass: apply answers that came back from Claude (see llm.js).
+//
+// Everything below treats those answers as a suggestion from outside this
+// extension, not as instructions. The rules that make this tool safe to point
+// at a real application are enforced here, in code, on the way in -- the
+// prompt asks for the same behaviour, but a prompt is not a guarantee and
+// these are the things that must not go wrong.
+// ---------------------------------------------------------------------------
+
+// A dropdown, a text box or a textarea. Deliberately not checkboxes or
+// radios: those are how forms ask for consent, and nothing here is going to
+// tick a consent box on the applicant's behalf. Not files or passwords
+// either -- neither is a question.
+var LLM_FILLABLE_TYPES = new Set(["text", "textarea", "select", "email", "tel", "url", "number", "search"]);
+
+var _CONSENT_RE =
+  /\b(consent|agree|agreement|authoriz|authoris|certify|acknowledg|e-?sign|signature|opt in|terms and conditions)\b/i;
+
+function _isConsentLike(text) {
+  return _CONSENT_RE.test(text || "");
+}
+
+function llmFieldsFor(report) {
+  const fields = report.fields || [];
+  const answered = new Set(
+    report.results
+      .filter((r) => r.action !== "skipped_no_match" && r.action !== "skipped_no_data")
+      .map((r) => r.ja_id)
+  );
+  const out = [];
+  for (const f of fields) {
+    if (answered.has(f.ja_id)) continue;
+    if (f.has_value) continue;
+    if (!LLM_FILLABLE_TYPES.has(f.type) && f.tag !== "select") continue;
+    const wide = f.context ? `${f.label || ""} ${f.context}` : f.label || "";
+    if (sensitiveGroup(wide) || _isConsentLike(f.label) || _isConsentLike(f.group_label)) continue;
+    // "Other School" is the box for a school the list didn't have. Asking a
+    // second time invites the same answer twice, in a field that means "not
+    // the one above".
+    if (isEscapeHatchLabel(f.label)) continue;
+    // Nothing to answer: no label, no group heading, no section.
+    if (!f.label && !f.group_label && !f.section) continue;
+    out.push({
+      ja_id: f.ja_id,
+      label: f.label || "",
+      group_label: f.group_label || "",
+      section: f.section || "",
+      // A textarea has no type attribute of its own, and "this is a
+      // paragraph box, not a one-liner" is exactly what shapes the answer.
+      type: f.tag === "select" ? "select" : f.tag === "textarea" ? "textarea" : f.type,
+      required: !!f.required,
+      max_length: f.max_length || null,
+      options: (f.options || []).map((o) => o.text).filter(Boolean),
+    });
+  }
+  return out;
+}
+
+async function _applyLlmSelect(f, el, value) {
+  let options = f.options || [];
+  let opened = null;
+  if (f.widget === "listbox_button") {
+    opened = await _openListbox(el);
+    if (!opened) return false;
+    options = opened.options;
+  } else if (f.widget === "icims") {
+    _openIcims(el);
+  }
+
+  // An exact option string was asked for; anything less is the model
+  // approximating, and picking the wrong item out of a dropdown is worse
+  // than leaving it for the applicant.
+  const wanted = normalize(value);
+  const match = options.find((o) => normalize(o.text) === wanted);
+  if (!match) {
+    if (opened) _closeListbox(el, opened);
+    return false;
+  }
+
+  if (opened) return _clickListboxOption(el, opened, options.indexOf(match));
+  if (f.widget === "icims") return _setIcimsValue(el, match.value, match.text);
+  _setSelectValue(el, match.value);
+  return true;
+}
+
+async function applyLlmAnswers(report, answers, skipped) {
+  const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
+  const allowed = new Set(llmFieldsFor(report).map((f) => f.ja_id));
+  let filled = 0;
+
+  for (const [jaId, value] of Object.entries(answers || {})) {
+    // Only fields this side offered up in the first place. An answer for
+    // anything else -- a consent box, a self-ID question, a field that was
+    // already filled -- is dropped without being applied.
+    if (!allowed.has(jaId) || !value) continue;
+    const f = byId.get(jaId);
+    const el = _el(jaId);
+    if (!f || !el) continue;
+
+    let applied;
+    try {
+      if (f.tag === "select") {
+        applied = await _applyLlmSelect(f, el, value);
+      } else {
+        _setNativeValue(el, value);
+        applied = true;
+      }
+    } catch (exc) {
+      applied = false;
+    }
+    if (!applied) continue;
+
+    _mark(jaId, MARK_FILLED);
+    filled += 1;
+    const result = report.results.find((r) => r.ja_id === jaId);
+    if (result) {
+      result.action = "filled";
+      result.canonical = "claude";
+      result.detail = value;
+    } else {
+      addResult(report, f.label || "", "claude", "filled", value, !!f.required);
+    }
+  }
+
+  // Say why, on the field itself, when Claude declined one -- otherwise a
+  // sensitive question it correctly refused looks identical to one it never
+  // saw.
+  for (const [jaId, reason] of Object.entries(skipped || {})) {
+    const result = report.results.find((r) => r.ja_id === jaId);
+    if (result && result.action === "skipped_no_match" && reason) {
+      result.detail = reason === "sensitive" ? "Left for you to answer." : reason;
+    }
+  }
+
+  return filled;
 }

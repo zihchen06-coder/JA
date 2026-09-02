@@ -363,6 +363,9 @@ function extractFields() {
       // <label for>, and names the question it belongs to only in
       // aria-labelledby -- so both halves are needed to place the box.
       item.aria_label = ariaLabelledBy(el);
+      // How much room the box gives is the clearest signal of how long an
+      // answer it wants.
+      item.max_length = el.maxLength > 0 ? el.maxLength : null;
       item.context = wideContext(el);
       item.is_datepicker = /datepicker/i.test(el.className || "");
       item.has_value = !!el.value;

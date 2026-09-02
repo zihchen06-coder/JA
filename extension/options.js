@@ -290,6 +290,8 @@ function loadIntoForm() {
   Object.entries(p.custom_answers || {}).forEach(([k, v]) => answersList.appendChild(answerRow(k, v)));
 
   document.getElementById("s-auto-accounts").checked = !!(state.settings && state.settings.auto_create_accounts);
+  document.getElementById("s-use-llm").checked = !!(state.settings && state.settings.use_llm);
+  document.getElementById("llm-key").value = state.llmApiKey || "";
 
   renderCredentials();
   renderDocs();
@@ -340,8 +342,15 @@ async function save() {
     status.textContent = `Missing required field(s): ${missing.join(", ")}`;
     return;
   }
-  const settings = { auto_create_accounts: document.getElementById("s-auto-accounts").checked };
-  await chrome.storage.local.set({ profile, settings });
+  const settings = {
+    auto_create_accounts: document.getElementById("s-auto-accounts").checked,
+    use_llm: document.getElementById("s-use-llm").checked,
+  };
+  // Kept out of `profile` so it is never in anything exported, imported, or
+  // sent to the API as part of the profile blob.
+  const llmApiKey = document.getElementById("llm-key").value.trim();
+  await chrome.storage.local.set({ profile, settings, llm_api_key: llmApiKey });
+  state.llmApiKey = llmApiKey;
   state.profile = profile;
   state.settings = settings;
   status.className = "ok";
@@ -366,7 +375,10 @@ function initTabs() {
   fillOptionChoices();
   initTabs();
 
-  const stored = await chrome.storage.local.get(["profile", "settings", "credentials"]);
+  const stored = await chrome.storage.local.get([
+    "profile", "settings", "credentials", "llm_api_key",
+  ]);
+  state.llmApiKey = stored.llm_api_key || "";
   state.profile = { ...emptyProfile(), ...(stored.profile || {}) };
   state.settings = stored.settings || {};
   state.credentials = stored.credentials || {};
