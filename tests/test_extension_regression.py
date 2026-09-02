@@ -55,9 +55,10 @@ EXPECTED = {
     "icims_profile.html": {"filled": 24, "review": 1},
     "jazzhr_eeo.html": {"filled": 4, "review": 0},
     "jazzlike.html": {"filled": 7, "review": 0},
-    "ldg_form.html": {"filled": 12, "review": 0},
+    "ldg_form.html": {"filled": 13, "review": 0},
     "ldg_real.html": {"filled": 33, "review": 2},
     "multipage.html": {"filled": 3, "review": 0},
+    "routing.html": {"filled": 1, "review": 0},
     "screening.html": {"filled": 11, "review": 2},
     "select2_state.html": {"filled": 1, "review": 0},
     "test_form.html": {"filled": 12, "review": 1},
@@ -737,25 +738,21 @@ def test_radio_questions_are_offered_but_consent_and_self_id_ones_are_not(browse
 
 def test_a_radio_answer_must_be_one_of_that_group_s_own_choices(browser):
     outcome = _evaluate_on(
-        browser, "ldg_form.html",
+        browser, "routing.html",
         """async (profile) => {
-            const report = await fillForm(profile, null, {});
-            const offered = llmFieldsFor(report).find((f) => f.type === 'radio');
-            // Count only this group -- other radio questions on the form
-            // were legitimately answered by the deterministic pass.
-            const group = (report.fields || []).find((f) => f.ja_id === offered.ja_id).name;
-            const checkedInGroup = () => document.querySelectorAll(
-                `input[type=radio][name="${group}"]:checked`).length;
+            const report = await fillForm(profile, null, {answerSensitive: true});
+            const offered = llmFieldsFor(report).find((f) => f.label.includes('shift'));
+            const checked = () => document.querySelectorAll('input[name=shift]:checked').length;
             const invented = await applyLlmAnswers(
-                report, {[offered.ja_id]: "Maybe, it depends"}, {});
-            const afterInvented = checkedInGroup();
-            const real = await applyLlmAnswers(report, {[offered.ja_id]: offered.options[0]}, {});
-            return {choices: offered.options, invented, afterInvented, real,
-                    afterReal: checkedInGroup()};
+                report, {[offered.ja_id]: "Weekends only"}, {}, profile);
+            const afterInvented = checked();
+            const real = await applyLlmAnswers(
+                report, {[offered.ja_id]: "Either"}, {}, profile);
+            return {choices: offered.options, invented, afterInvented, real, afterReal: checked()};
         }""",
         PROFILE,
     )
-    assert outcome["choices"]
+    assert outcome["choices"] == ["Day", "Night", "Either"]
     # Text that is not one of the choices selects nothing at all.
     assert outcome["invented"] == 0
     assert outcome["afterInvented"] == 0
@@ -872,3 +869,146 @@ def test_only_mappings_are_learned_never_written_prose(browser):
         PROFILE,
     )
     assert learned == {}
+
+
+def test_routing_off_leaves_every_radio_and_tick_box_alone(browser):
+    """Without it, a self-ID group, a consent tick box and an ordinary
+    screening radio the matcher doesn't know are all left for the applicant.
+    """
+    offered = _llm_pass(browser, "routing.html", {})["offered"]
+    # An ordinary screening radio is fair game either way -- it is the
+    # sensitive and consent ones that routing is the switch for.
+    assert offered == ["Which shift are you available for?"]
+
+
+def test_routing_on_offers_them_including_a_bland_headed_self_id_group(browser):
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'routing.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        offered = page.evaluate(
+            """async (profile) => {
+                const report = await fillForm(profile, null, {answerSensitive: true});
+                return llmFieldsFor(report).map((f) => f.type + ': ' + f.label);
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+    # The disability group isn't here: with disability_status saved, the
+    # matcher answers it outright and there is nothing left to route.
+    assert len(offered) == 3, offered
+    assert any("shift" in o for o in offered)
+    assert sum(1 for o in offered if o.startswith("checkbox:")) == 2
+
+
+def test_a_sensitive_answer_must_trace_back_to_one_the_applicant_saved(browser):
+    """Routing lets Claude work out which saved answer a question is asking
+    for. It does not let it decide one -- so an answer that isn't the
+    applicant's own is dropped before it reaches the page.
+    """
+    script = """async ({profile, answer}) => {
+        const report = await fillForm(profile, null, {answerSensitive: true});
+        const group = llmFieldsFor(report).find((f) => f.label.includes('check one of the boxes'));
+        if (!group) return {offered: false, chosen: (document.querySelector(
+            'input[name=dis]:checked') || {}).id || null};
+        const applied = await applyLlmAnswers(report, {[group.ja_id]: answer}, {}, profile);
+        const chosen = document.querySelector('input[name=dis]:checked');
+        return {offered: true, applied, chosen: chosen ? chosen.id : null};
+    }"""
+
+    # With their answer saved, the matcher fills it outright -- nothing is
+    # handed over at all, and the deterministic path chose correctly.
+    out = _evaluate_on(browser, "routing.html", script, {
+        "profile": PROFILE,
+        "answer": "Yes, I have a disability, or have had one in the past",
+    })
+    assert out["offered"] is False
+    assert out["chosen"] == "d2"  # their saved "No, I do not have a disability..."
+
+    # Nothing saved: the question is handed over, but there is no answer of
+    # theirs to route to it, so whatever comes back is dropped.
+    for answer in ("No, I do not have a disability and have not had one in the past",
+                   "Yes, I have a disability, or have had one in the past"):
+        out = _evaluate_on(browser, "routing.html", script,
+                           {"profile": {**PROFILE, "disability_status": ""}, "answer": answer})
+        assert out["offered"] is True
+        assert out["applied"] == 0
+        assert out["chosen"] is None
+
+
+def test_a_consent_box_is_ticked_only_from_a_consent_answer_that_was_set(browser):
+    script = """async ({profile, answer}) => {
+        const report = await fillForm(profile, null, {answerSensitive: true});
+        const box = llmFieldsFor(report).find((f) => f.label.includes('certify'));
+        const applied = box
+            ? await applyLlmAnswers(report, {[box.ja_id]: answer}, {}, profile)
+            : 0;
+        return {offered: !!box, applied, ticked: document.getElementById('terms').checked};
+    }"""
+
+    # Nothing saved -- the default. The question is handed over, but there is
+    # no consent of theirs to route to it, so nothing is agreed to.
+    out = _evaluate_on(browser, "routing.html", script, {"profile": PROFILE, "answer": "Yes"})
+    assert out["offered"] is True
+    assert out["applied"] == 0
+    assert out["ticked"] is False
+
+    # Consenting to one thing is not consenting to another: a saved
+    # background-check authorisation says nothing about certifying a form.
+    out = _evaluate_on(browser, "routing.html", script, {
+        "profile": {**PROFILE, "consent_background_check": True, "consent_drug_test": True},
+        "answer": "Yes",
+    })
+    assert out["applied"] == 0
+    assert out["ticked"] is False
+
+    # Set to No on the Eligibility tab: still not a yes.
+    out = _evaluate_on(browser, "routing.html", script,
+                       {"profile": {**PROFILE, "consent_general": False}, "answer": "Yes"})
+    assert out["applied"] == 0
+    assert out["ticked"] is False
+
+    # Set to Yes, so it is their standing answer -- and the matcher then
+    # recognises the wording itself, with nothing left to hand over.
+    out = _evaluate_on(browser, "routing.html", script,
+                       {"profile": {**PROFILE, "consent_general": True}, "answer": "Yes"})
+    assert out["offered"] is False
+    assert out["ticked"] is True
+
+
+def test_saved_answers_reach_the_prompt_only_when_routing_is_on(browser):
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        out = page.evaluate(
+            """async (profile) => {
+                const seen = [];
+                window.fetch = async (url, init) => {
+                    seen.push(JSON.parse(init.body));
+                    return {ok: true, status: 200, text: async () => JSON.stringify({
+                        content: [{type: "text", text: JSON.stringify({answers: []})}],
+                        stop_reason: "end_turn",
+                    })};
+                };
+                const call = (routeSavedAnswers) => resolveWithClaude({
+                    apiKey: "k", profile, routeSavedAnswers, pageUrl: "https://x",
+                    fields: [{ja_id: "ja-1", label: "Disability?", type: "radio", options: []}],
+                });
+                await call(false);
+                await call(true);
+                return seen.map((b) => b.system[0].text + "\\n" + b.messages[0].content);
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    off, on = out
+    assert PROFILE["disability_status"] not in off
+    assert PROFILE["veteran_status"] not in off
+    assert PROFILE["disability_status"] in on
+    # Still out of the cached system prefix either way.
+    assert PROFILE["disability_status"] not in on.split("\n")[0]

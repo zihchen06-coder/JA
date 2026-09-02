@@ -58,6 +58,28 @@ account, never sent anywhere except the job site being filled. The one
 exception is the optional **AI assist** below, which is off until you turn
 it on.
 
+### Routing your saved answers (optional, off by default)
+
+Self-ID, criminal-history and consent questions are answered from what you
+set on the Self-ID and Eligibility tabs — but only when the matcher
+recognises the wording. Forms word them in endless ways, so some still end
+up flagged.
+
+**Options → AI assist → Route my saved answers** lets Claude work out which
+of *your saved answers* an unfamiliar wording is asking for, including radio
+groups and tick boxes that are otherwise left alone entirely. It is matching,
+not deciding, and that is enforced in code rather than asked of the prompt:
+
+- An answer that doesn't trace back to one you saved is dropped before it
+  reaches the page. Nothing can be inferred from your name or your resume.
+- Consenting to one thing is not consenting to another: a saved
+  background-check authorisation can't tick a terms certification, and
+  neither can tick an SMS box.
+- A question you left unset stays blank and flagged, however it is worded.
+- Your saved sensitive answers only leave the machine when this is on, and
+  even then they go in the per-page message as the menu to choose from —
+  never as background for anything else.
+
 ### Learned labels
 
 Whenever Claude resolves a label to something already in your profile, that
@@ -117,7 +139,8 @@ back in rather than merely asked of the model:
 - The set of fields offered to Claude is built locally. Self-identification,
   criminal-history, salary-history and consent questions are never in it,
   however they are phrased and whether they are text boxes, dropdowns or
-  radio buttons. Checkboxes are never in it at all — a single tick box is
+  radio buttons — unless you turn on **Route my saved answers** (below).
+  Checkboxes are never in it at all until then, since a single tick box is
   how forms ask you to agree to something.
 - A radio answer must be one of that group's own choices; anything else
   selects nothing.

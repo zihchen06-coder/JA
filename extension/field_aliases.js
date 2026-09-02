@@ -154,6 +154,12 @@ var FIELD_ALIASES = {
     "essential functions", "perform the essential functions",
     "with or without reasonable accommodation",
   ],
+  consent_general: [
+    "i agree", "i consent", "i certify", "i acknowledge", "i authorize",
+    "i authorise", "agree to the terms", "terms and conditions",
+    "privacy policy", "certify that the information", "electronic signature",
+    "e signature", "accept the terms",
+  ],
   criminal_history: [
     "ever been convicted", "convicted of a felony", "convicted of a crime",
     "criminal conviction", "criminal history", "criminal record",
@@ -205,7 +211,7 @@ var BOOLEAN_FIELDS = new Set([
   "consent_background_check", "consent_drug_test",
   "can_perform_essential_functions", "previously_employed_here",
   "willing_overtime_varied_schedule", "has_reliable_transportation",
-  "bound_by_noncompete", "criminal_history", "sms_consent",
+  "bound_by_noncompete", "criminal_history", "sms_consent", "consent_general",
 ]);
 
 var EDUCATION_FIELDS = new Set(["school", "degree", "field_of_study", "graduation_year"]);
@@ -224,6 +230,13 @@ var SENSITIVE_ANSWER_FIELDS = {
   demographic: SELF_ID_FIELDS,
   criminal: new Set(["criminal_history"]),
 };
+
+// The profile fields that stand for "yes, I agree to that". A consent
+// question is only ever answered from one of these, never from a reading of
+// what the applicant would probably want.
+var CONSENT_FIELDS = new Set([
+  "consent_general", "consent_background_check", "consent_drug_test", "sms_consent",
+]);
 
 var SELF_ID_DISPLAY_NAMES = {
   gender: "Gender",

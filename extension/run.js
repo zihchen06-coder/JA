@@ -76,6 +76,7 @@ function _showBanner(html, tone) {
   const useLlm = !!(settings && settings.use_llm);
   const report = await fillForm(profile, creds, {
     tailorCoverLetter: useLlm && !!(settings && settings.tailor_cover_letter),
+    answerSensitive: useLlm && !!(settings && settings.route_saved_answers),
   });
 
   // Second pass: hand whatever the rule-based matcher couldn't place to
@@ -98,12 +99,13 @@ function _showBanner(html, tone) {
             fields: pending,
             pageUrl: location.href,
             job: extractJobContext(),
+            routeSavedAnswers: !!(settings && settings.route_saved_answers),
           },
         });
         if (reply && reply.error) {
           claudeError = reply.error;
         } else if (reply) {
-          claudeFilled = await applyLlmAnswers(report, reply.answers, reply.skipped);
+          claudeFilled = await applyLlmAnswers(report, reply.answers, reply.skipped, profile);
           const learned = learnFromAnswers(report, reply.answers, profile);
           if (Object.keys(learned).length) {
             chrome.runtime.sendMessage({ type: "ja-learned", learned });

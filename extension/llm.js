@@ -36,7 +36,7 @@ Rules, most important first:
    in themselves costs them ten seconds; a plausible invention on a job
    application is a lie told in their name.
 
-2. Return an empty value with skip_reason "sensitive" for:
+2. These questions are the applicant's to answer, never yours:
    - voluntary self-identification / demographics: race, ethnicity, gender,
      pronouns, veteran status, disability, sexual orientation, transgender
      status, date of birth, national origin
@@ -45,7 +45,20 @@ Rules, most important first:
      salary going forward is fine to answer from the profile.
    - anything asking them to consent, agree, authorise, certify, or sign:
      SMS consent, background-check authorisation, terms, e-signature boxes
-   The applicant answers every one of those themselves, on every form.
+
+   By default, return an empty value with skip_reason "sensitive" for every
+   one of them.
+
+   If, and only if, a "saved_answers" block is given below, the applicant has
+   asked you to route those saved answers to questions whose wording the
+   matcher didn't recognise. Then your job on one of these is to work out
+   *which of their saved answers this question is asking for* and return it,
+   phrased as one of the field's own options. You are matching, not
+   deciding: if their saved answers do not cover what is being asked, or you
+   are unsure which one applies, return empty. Never work out what the
+   answer probably is from their name, their resume, or anything else --
+   inventing a demographic declaration or a consent on someone's behalf is
+   the one thing here that cannot be undone by editing the form afterwards.
 
 3. If a field lists "options", your value must be exactly one of those
    option strings, copied character for character. If none of them is
@@ -131,15 +144,17 @@ function _needsWrittenVoice(fields) {
   });
 }
 
-// Claude is never asked a self-identification or criminal-history question --
-// those are answered from the applicant's own saved answer or not at all, and
-// are never in the set of fields offered here. So there is no request it
-// could need race, gender, veteran status, disability or a conviction to
-// answer, and no reason for any of it to leave the machine.
-var _WITHHELD_FROM_PROMPT = [
+// By default Claude is never asked a self-identification or criminal-history
+// question -- those are answered from the applicant's own saved answer or
+// not at all -- so no request could need race, gender, veteran status,
+// disability or a conviction to answer, and none of it leaves the machine.
+// With routing on they move to a separate block instead, where they are the
+// menu to choose from rather than background for something else.
+var _SENSITIVE_PROFILE_FIELDS = [
   "gender", "pronouns", "hispanic_latino", "race_ethnicity", "veteran_status",
   "disability_status", "sexual_orientation", "transgender_status",
-  "criminal_history",
+  "criminal_history", "consent_general", "consent_background_check",
+  "consent_drug_test", "sms_consent",
 ];
 
 // The saved resume and cover letter are stored as base64 data URLs and can
@@ -149,9 +164,22 @@ function _promptProfile(profile, withAnswers) {
   const copy = { ...profile };
   delete copy.resume_file;
   delete copy.cover_letter_file;
-  for (const field of _WITHHELD_FROM_PROMPT) delete copy[field];
+  for (const field of _SENSITIVE_PROFILE_FIELDS) delete copy[field];
   if (!withAnswers) delete copy.custom_answers;
   return copy;
+}
+
+// The applicant's own answers to the questions only they may answer, sent
+// only when they have turned routing on. Anything they left unset is left
+// out: an absent answer is not a question Claude gets to fill in.
+function _savedAnswers(profile) {
+  const out = {};
+  for (const field of _SENSITIVE_PROFILE_FIELDS) {
+    const value = profile[field];
+    if (value === null || value === undefined || value === "") continue;
+    out[field] = value;
+  }
+  return out;
 }
 
 async function _postMessages(apiKey, body, useFallbacks) {
@@ -189,9 +217,17 @@ function _apiErrorMessage(result) {
 
 // fields: [{ja_id, label, group_label, section, type, required, options}]
 // Returns {answers: {ja_id: value}, skipped: {ja_id: reason}} or {error}.
-async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job }) {
+async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeSavedAnswers }) {
   if (!apiKey) return { error: "No API key saved." };
   if (!fields || !fields.length) return { answers: {}, skipped: {} };
+
+  const saved = routeSavedAnswers ? _savedAnswers(profile) : {};
+  const savedBlock = Object.keys(saved).length
+    ? `The applicant's own answers to the questions only they may answer. For` +
+      ` one of those questions, return whichever of these it is asking for,` +
+      ` phrased as one of that field's options -- or empty if none of them` +
+      ` covers it:\n${JSON.stringify(saved, null, 1)}\n\n`
+    : "";
 
   // The job goes in the per-page message rather than the cached system
   // block: it changes every application, and putting it in the prefix would
@@ -228,6 +264,7 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job }) {
         content:
           `Application page: ${pageUrl}\n\n` +
           jobBlock +
+          savedBlock +
           `Fields the matcher could not fill:\n${JSON.stringify(fields, null, 1)}`,
       },
     ],

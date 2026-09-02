@@ -16,6 +16,7 @@ const BOOL_LABELS = {
   bound_by_noncompete: "Currently bound by a non-compete",
   criminal_history: "Has a criminal conviction to disclose",
   sms_consent: "Consents to application texts (SMS)",
+  consent_general: "Agrees to standard application terms and authorisations",
 };
 
 let state = { profile: {}, settings: {}, credentials: {} };
@@ -294,6 +295,7 @@ function loadIntoForm() {
   document.getElementById("s-auto-accounts").checked = !!(state.settings && state.settings.auto_create_accounts);
   document.getElementById("s-use-llm").checked = !!(state.settings && state.settings.use_llm);
   document.getElementById("s-tailor-cover").checked = !!(state.settings && state.settings.tailor_cover_letter);
+  document.getElementById("s-route-saved").checked = !!(state.settings && state.settings.route_saved_answers);
   document.getElementById("s-auto-fill").checked = !!(state.settings && state.settings.auto_fill_known_sites);
   renderLearned();
   document.getElementById("llm-key").value = state.llmApiKey || "";
@@ -351,6 +353,7 @@ async function save() {
     auto_create_accounts: document.getElementById("s-auto-accounts").checked,
     use_llm: document.getElementById("s-use-llm").checked,
     tailor_cover_letter: document.getElementById("s-tailor-cover").checked,
+    route_saved_answers: document.getElementById("s-route-saved").checked,
     auto_fill_known_sites: document.getElementById("s-auto-fill").checked,
   };
   // Kept out of `profile` so it is never in anything exported, imported, or

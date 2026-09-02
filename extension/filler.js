@@ -920,7 +920,14 @@ function _handleRadioGroup(profile, report, options) {
   }
 
   const context = options.find((o) => o.context)?.context || "";
-  const wideText = context ? `${groupLabel} ${context}`.trim() : groupLabel;
+  // The choices are part of the question. A disability self-ID group can be
+  // headed "Please check one of the boxes below:" -- entirely innocuous --
+  // with the only mention of disability in the options, and the surrounding
+  // text has the options stripped out of it by design. Read without them,
+  // such a group reads as an ordinary unmatched question and doesn't even
+  // get flagged for the applicant to answer.
+  const optionText = options.map((o) => o.label || "").join(" ");
+  const wideText = `${groupLabel} ${context} ${optionText}`.replace(/\s+/g, " ").trim();
 
   const sgroup = sensitiveGroup(wideText);
   if (sgroup) {
@@ -1020,11 +1027,16 @@ function _isConsentLike(text) {
 // anything not on this list can be dropped rather than trusted.
 function _llmCandidates(report) {
   const fields = report.fields || [];
-  const answered = new Set(
-    report.results
-      .filter((r) => r.action !== "skipped_no_match" && r.action !== "skipped_no_data")
-      .map((r) => r.ja_id)
-  );
+  const routeSaved = !!report.opts.answerSensitive;
+  // "Flagged for you to answer" is precisely the pile routing exists to
+  // shrink: a question recognised as sensitive but whose wording the matcher
+  // couldn't tie to one of the applicant's saved answers. Leaving those out
+  // would mean routing only ever reached questions it wasn't asked about.
+  const settled = (r) =>
+    r.action !== "skipped_no_match" &&
+    r.action !== "skipped_no_data" &&
+    !(routeSaved && r.action === "needs_review");
+  const answered = new Set(report.results.filter(settled).map((r) => r.ja_id));
 
   const offer = (f, descriptor, jaIds) => ({ field: f, descriptor, jaIds });
   const out = [];
@@ -1041,19 +1053,29 @@ function _llmCandidates(report) {
     radioGroups.get(key).push(f);
   }
 
+  // With routing on, a self-ID, criminal-history or consent question is
+  // offered too -- but only so Claude can work out *which of the applicant's
+  // own saved answers* an oddly-worded question is asking for. It is never
+  // asked to decide one: _savedAnswerAllows below refuses any answer that
+  // doesn't trace back to something they wrote down themselves.
   const blocked = (label, groupLabel, context) => {
+    if (isEscapeHatchLabel(label)) return true;
+    if (routeSaved) return false;
     const wide = context ? `${label || ""} ${context}` : label || "";
     if (sensitiveGroup(wide)) return true;
     if (_isConsentLike(label) || _isConsentLike(groupLabel)) return true;
-    if (isEscapeHatchLabel(label)) return true;
     return false;
   };
 
   for (const f of fields) {
-    if (f.type === "radio" || f.type === "checkbox") continue;
+    if (f.type === "radio") continue;
+    // A single tick box is how a form asks you to agree to something, so one
+    // is only ever offered once the applicant has said their saved consent
+    // answers may be used for wordings the matcher didn't recognise.
+    if (f.type === "checkbox" && !routeSaved) continue;
     if (answered.has(f.ja_id)) continue;
     if (f.has_value) continue;
-    if (!LLM_FILLABLE_TYPES.has(f.type) && f.tag !== "select") continue;
+    if (!LLM_FILLABLE_TYPES.has(f.type) && f.tag !== "select" && f.type !== "checkbox") continue;
     if (blocked(f.label, f.group_label, f.context)) continue;
     if (!f.label && !f.group_label && !f.section) continue;
     out.push(
@@ -1067,7 +1089,9 @@ function _llmCandidates(report) {
         type: f.tag === "select" ? "select" : f.tag === "textarea" ? "textarea" : f.type,
         required: !!f.required,
         max_length: f.max_length || null,
-        options: (f.options || []).map((o) => o.text).filter(Boolean),
+        options: f.type === "checkbox"
+          ? ["Yes", "No"]
+          : (f.options || []).map((o) => o.text).filter(Boolean),
       }, [f.ja_id])
     );
   }
@@ -1078,8 +1102,12 @@ function _llmCandidates(report) {
     if (group.some((o) => o.checked)) continue;
     const question = group.find((o) => o.group_label)?.group_label || "";
     const context = group.find((o) => o.context)?.context || "";
-    if (blocked(question, question, context)) continue;
-    if (group.some((o) => _isConsentLike(o.label))) continue;
+    // The options are part of the question. A disability self-ID group can be
+    // headed "Please check one of the boxes below:" -- entirely innocuous --
+    // with the only mention of disability in the choices themselves.
+    const optionText = group.map((o) => o.label || "").join(" ");
+    if (blocked(question, question, `${context} ${optionText}`)) continue;
+    if (!routeSaved && group.some((o) => _isConsentLike(o.label))) continue;
     if (!question) continue;
     out.push(
       offer(head, {
@@ -1168,18 +1196,80 @@ function learnFromAnswers(report, answers, profile) {
   return learned;
 }
 
-async function applyLlmAnswers(report, answers, skipped) {
+// Whether a question is one the applicant must have answered for themselves,
+// and if so which pool of their saved answers it may be drawn from.
+function _savedAnswerPool(profile, candidate) {
+  const f = candidate.field;
+  const d = candidate.descriptor;
+  // Question, choices and surrounding text together -- the same reading the
+  // offer side does, so what is judged sensitive here and what is judged
+  // sensitive there can't drift apart.
+  const wide = [d.label, (d.options || []).join(" "), f.label, f.context]
+    .filter(Boolean)
+    .join(" ");
+  const group = sensitiveGroup(wide);
+  if (group) {
+    const allowed = SENSITIVE_ANSWER_FIELDS[group];
+    // Salary history has no pool at all -- there is nothing to route it to.
+    if (!allowed) return { required: true, values: [] };
+    return { required: true, values: [...allowed].map((k) => profile[k]) };
+  }
+  if (_isConsentLike(wide)) {
+    // Consenting to one thing is not consenting to another: agreeing to a
+    // background check says nothing about certifying a form, and neither
+    // says anything about texts. Only the answer to *this* consent counts.
+    const field = _consentFieldFor(wide);
+    return { required: true, values: field ? [profile[field]] : [] };
+  }
+  return { required: false, values: [] };
+}
+
+function _consentFieldFor(text) {
+  const norm = normalize(text);
+  if (/\b(text message|sms|text messages)\b/.test(norm)) return "sms_consent";
+  if (norm.includes("background")) return "consent_background_check";
+  if (norm.includes("drug") || norm.includes("substance")) return "consent_drug_test";
+  return "consent_general";
+}
+
+// The whole safety of routing rests here. Claude may work out *which* of the
+// applicant's saved answers an oddly-worded question is asking for; it may
+// never decide the answer. So a value offered for one of these questions has
+// to be one they actually wrote down -- either the same text, or the yes/no
+// they set. Anything else is an inference, and is dropped.
+function _savedAnswerAllows(profile, candidate, value) {
+  const pool = _savedAnswerPool(profile, candidate);
+  if (!pool.required) return true;
+
+  const wanted = normalize(value);
+  const asBool = semanticBool(value);
+  for (const saved of pool.values) {
+    if (saved === null || saved === undefined || saved === "") continue;
+    if (typeof saved === "boolean") {
+      if (asBool !== null && asBool === saved) return true;
+      continue;
+    }
+    if (normalize(String(saved)) === wanted) return true;
+    // Forms phrase the same self-ID choice at different lengths; a saved
+    // answer and the option offered have to be recognisably the same one.
+    if (bestChoice(String(saved), [value], 0.75) !== null) return true;
+  }
+  return false;
+}
+
+async function applyLlmAnswers(report, answers, skipped, profile) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
   const candidates = new Map(_llmCandidates(report).map((c) => [c.descriptor.ja_id, c]));
   let filled = 0;
 
   for (const [jaId, value] of Object.entries(answers || {})) {
     // Only fields this side offered up in the first place. An answer for
-    // anything else -- a consent box, a self-ID question, a field that was
-    // already filled -- is dropped without being applied.
+    // anything else -- a field that was already filled, or a question that
+    // was never handed over -- is dropped without being applied.
     const candidate = candidates.get(jaId);
     if (!candidate || !value) continue;
     const f = candidate.field;
+    if (!_savedAnswerAllows(profile || {}, candidate, value)) continue;
 
     let applied;
     try {
@@ -1188,7 +1278,18 @@ async function applyLlmAnswers(report, answers, skipped) {
       } else {
         const el = _el(jaId);
         if (!el) continue;
-        if (f.tag === "select") {
+        if (f.type === "checkbox") {
+          // Only ever ticked by a yes; anything that isn't a yes or a no
+          // leaves it exactly as it was.
+          const want = semanticBool(value);
+          if (want === null) {
+            applied = false;
+          } else {
+            _setChecked(el, want);
+            _mark(jaId, MARK_FILLED);
+            applied = true;
+          }
+        } else if (f.tag === "select") {
           applied = await _applyLlmSelect(f, el, value);
         } else {
           _setNativeValue(el, value);

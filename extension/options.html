@@ -235,6 +235,20 @@
       </div>
       <div class="toggle-row" style="margin-top:16px;">
         <div>
+          <div><strong>Route my saved answers to oddly-worded questions</strong></div>
+          <div class="desc">Self-identification, criminal-history and consent questions are only
+            filled when the matcher recognises the wording. Turn this on and Claude also gets to
+            work out which of <em>your saved answers</em> an unusual phrasing is asking for &mdash;
+            including radio groups and tick boxes, which are otherwise left alone entirely.<br><br>
+            It is still only ever choosing between answers you set on the Self-ID and Eligibility
+            tabs. An answer that doesn't trace back to one of yours is dropped by the extension
+            before it reaches the page, so nothing here can be inferred from your name or your
+            resume. Questions you have left unset stay blank and flagged.</div>
+        </div>
+        <label class="row"><input type="checkbox" id="s-route-saved" style="width:18px;height:18px;"></label>
+      </div>
+      <div class="toggle-row" style="margin-top:16px;">
+        <div>
           <div><strong>Fill automatically on known job sites</strong></div>
           <div class="desc">Fill each page of an application as it loads on Workday, iCIMS,
             Greenhouse, Lever, Ashby, SmartRecruiters and the rest, without clicking the icon.
