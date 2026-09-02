@@ -59,6 +59,19 @@ Rules, most important first:
    to what is in the profile. No filler, no superlatives they didn't earn,
    no claims the profile doesn't support.
 
+   When a "job" block is given, use it: name the role and the company where
+   it reads naturally, and pick the parts of their background that this
+   particular job actually calls for. A generic answer to "why do you want
+   this role" is worse than a specific one, and an answer that is specific
+   about the wrong job is worse than both -- if the job block is thin or
+   missing, stay general rather than guessing at what the company does.
+
+   A cover letter field gets a real letter for this job: a short opening
+   naming the role, a middle drawing on the most relevant one or two things
+   in their profile, a brief close. Three short paragraphs, not a page. No
+   salutation placeholder like "Dear Hiring Manager," unless the profile
+   gives a name to use.
+
 5. Match the size of the box. A single-line input wants a phrase or a
    sentence; a textarea wants a paragraph or two. Don't write an essay into
    a one-line field.
@@ -66,6 +79,11 @@ Rules, most important first:
 6. If two fields ask for the same thing, answer both. If a field is asking
    for something the applicant has clearly already given elsewhere on the
    form, still answer it from the profile.
+
+7. A field of type "radio" is a set of choices like a dropdown: return one
+   of its option strings exactly, or empty. Rule 2 still applies -- a radio
+   group asking a self-ID, criminal-history or consent question gets an
+   empty value however it is phrased.
 
 Return exactly one entry for every field you were given, keyed by its
 ja_id.`;
@@ -171,9 +189,16 @@ function _apiErrorMessage(result) {
 
 // fields: [{ja_id, label, group_label, section, type, required, options}]
 // Returns {answers: {ja_id: value}, skipped: {ja_id: reason}} or {error}.
-async function resolveWithClaude({ apiKey, profile, fields, pageUrl }) {
+async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job }) {
   if (!apiKey) return { error: "No API key saved." };
   if (!fields || !fields.length) return { answers: {}, skipped: {} };
+
+  // The job goes in the per-page message rather than the cached system
+  // block: it changes every application, and putting it in the prefix would
+  // throw away the cache on every single request.
+  const jobBlock = job && (job.title || job.description)
+    ? `The job being applied for:\n${JSON.stringify(job, null, 1)}\n\n`
+    : "";
 
   const body = {
     model: LLM_MODEL,
@@ -202,6 +227,7 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl }) {
         role: "user",
         content:
           `Application page: ${pageUrl}\n\n` +
+          jobBlock +
           `Fields the matcher could not fill:\n${JSON.stringify(fields, null, 1)}`,
       },
     ],

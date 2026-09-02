@@ -376,3 +376,44 @@ function extractFields() {
 
   return results;
 }
+
+// What job this page is for. Without it, an answer to "why do you want this
+// role?" can only be generic -- it is the difference between a paragraph
+// about the applicant and a paragraph about the applicant and this job.
+// Best effort and capped: an application page often doesn't restate the
+// posting, and page text is the one input here that has no natural size.
+function extractJobContext() {
+  const clean = (s) => (s || "").replace(/\s+/g, " ").trim();
+  const meta = (key) => {
+    const el = document.querySelector(`meta[property="${key}"], meta[name="${key}"]`);
+    return clean(el && el.getAttribute("content"));
+  };
+
+  const title =
+    clean(document.querySelector('[data-automation-id="jobPostingHeader"]')?.textContent) ||
+    meta("og:title") ||
+    clean(document.querySelector("h1")?.textContent) ||
+    clean(document.title);
+
+  const company = meta("og:site_name") || location.hostname.replace(/^www\./, "");
+
+  // The posting body, if this page still shows it. Headers, navigation and
+  // the form itself are noise; a description is the longest run of prose.
+  let description = "";
+  const candidates = document.querySelectorAll(
+    '[data-automation-id="jobPostingDescription"], [class*="description" i], ' +
+      '[class*="job-detail" i], [id*="description" i], article, main'
+  );
+  for (const node of candidates) {
+    if (node.querySelector("input, select, textarea")) continue;
+    const text = clean(node.innerText || node.textContent);
+    if (text.length > description.length) description = text;
+  }
+
+  return {
+    title: title.slice(0, 200),
+    company: company.slice(0, 120),
+    description: description.slice(0, 1500),
+    url: location.href.slice(0, 300),
+  };
+}

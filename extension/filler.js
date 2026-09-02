@@ -298,8 +298,9 @@ function _matchCustomAnswer(label, profile) {
 // Async because a custom-widget dropdown (Workday's listbox buttons) only
 // reveals its options once opened, which means clicking and then waiting for
 // the page's own script to render them.
-async function fillForm(profile, creds) {
+async function fillForm(profile, creds, opts) {
   const report = makeReport(detectPlatform(location.href));
+  report.opts = opts || {};
   const fieldsData = extractFields();
 
   const simpleFields = fieldsData.filter((f) => f.type !== "radio");
@@ -316,7 +317,13 @@ async function fillForm(profile, creds) {
     byName.get(f.name).push(f);
   }
   for (const group of byName.values()) {
+    const before = report.results.length;
     _handleRadioGroup(profile, report, group);
+    // A radio group's result belongs to the whole group; the first option's
+    // id stands for it, the same handle llmFieldsFor offers it under.
+    for (let i = before; i < report.results.length; i++) {
+      report.results[i].ja_id = group[0].ja_id;
+    }
   }
 
   return report;
@@ -424,6 +431,13 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
     }
 
     canonical = matchField(label);
+    if (canonical === "cover_letter_text" && report.opts.tailorCoverLetter) {
+      // One saved cover letter pasted into every application reads worse
+      // than none. Left for the second pass, which knows what job this is.
+      addResult(report, label, canonical, "skipped_no_data",
+        "Left for Claude to write for this job.", required);
+      return;
+    }
     // The machine-name fallback must not undo an escape-hatch label:
     // "Other School" is named OtherSchool, which reads as a plain school.
     if (canonical === null && !isEscapeHatchLabel(label)) {
@@ -1000,40 +1014,92 @@ function _isConsentLike(text) {
   return _CONSENT_RE.test(text || "");
 }
 
-function llmFieldsFor(report) {
+// Every field this side is willing to have Claude answer, with both the
+// descriptor sent to the API and the local handles needed to apply what
+// comes back. Built here and recomputed on the way in, so an answer for
+// anything not on this list can be dropped rather than trusted.
+function _llmCandidates(report) {
   const fields = report.fields || [];
   const answered = new Set(
     report.results
       .filter((r) => r.action !== "skipped_no_match" && r.action !== "skipped_no_data")
       .map((r) => r.ja_id)
   );
+
+  const offer = (f, descriptor, jaIds) => ({ field: f, descriptor, jaIds });
   const out = [];
+
+  // Radio groups are offered as one question with its options, the way a
+  // person reads them -- but only ever as a question. A consent or self-ID
+  // group is filtered out below like any other, and applying an answer can
+  // only ever select one of the group's own options.
+  const radioGroups = new Map();
   for (const f of fields) {
+    if (f.type !== "radio") continue;
+    const key = f.name || f.ja_id;
+    if (!radioGroups.has(key)) radioGroups.set(key, []);
+    radioGroups.get(key).push(f);
+  }
+
+  const blocked = (label, groupLabel, context) => {
+    const wide = context ? `${label || ""} ${context}` : label || "";
+    if (sensitiveGroup(wide)) return true;
+    if (_isConsentLike(label) || _isConsentLike(groupLabel)) return true;
+    if (isEscapeHatchLabel(label)) return true;
+    return false;
+  };
+
+  for (const f of fields) {
+    if (f.type === "radio" || f.type === "checkbox") continue;
     if (answered.has(f.ja_id)) continue;
     if (f.has_value) continue;
     if (!LLM_FILLABLE_TYPES.has(f.type) && f.tag !== "select") continue;
-    const wide = f.context ? `${f.label || ""} ${f.context}` : f.label || "";
-    if (sensitiveGroup(wide) || _isConsentLike(f.label) || _isConsentLike(f.group_label)) continue;
-    // "Other School" is the box for a school the list didn't have. Asking a
-    // second time invites the same answer twice, in a field that means "not
-    // the one above".
-    if (isEscapeHatchLabel(f.label)) continue;
-    // Nothing to answer: no label, no group heading, no section.
+    if (blocked(f.label, f.group_label, f.context)) continue;
     if (!f.label && !f.group_label && !f.section) continue;
-    out.push({
-      ja_id: f.ja_id,
-      label: f.label || "",
-      group_label: f.group_label || "",
-      section: f.section || "",
-      // A textarea has no type attribute of its own, and "this is a
-      // paragraph box, not a one-liner" is exactly what shapes the answer.
-      type: f.tag === "select" ? "select" : f.tag === "textarea" ? "textarea" : f.type,
-      required: !!f.required,
-      max_length: f.max_length || null,
-      options: (f.options || []).map((o) => o.text).filter(Boolean),
-    });
+    out.push(
+      offer(f, {
+        ja_id: f.ja_id,
+        label: f.label || "",
+        group_label: f.group_label || "",
+        section: f.section || "",
+        // A textarea has no type attribute of its own, and "this is a
+        // paragraph box, not a one-liner" is exactly what shapes the answer.
+        type: f.tag === "select" ? "select" : f.tag === "textarea" ? "textarea" : f.type,
+        required: !!f.required,
+        max_length: f.max_length || null,
+        options: (f.options || []).map((o) => o.text).filter(Boolean),
+      }, [f.ja_id])
+    );
   }
+
+  for (const group of radioGroups.values()) {
+    const head = group[0];
+    if (answered.has(head.ja_id)) continue;
+    if (group.some((o) => o.checked)) continue;
+    const question = group.find((o) => o.group_label)?.group_label || "";
+    const context = group.find((o) => o.context)?.context || "";
+    if (blocked(question, question, context)) continue;
+    if (group.some((o) => _isConsentLike(o.label))) continue;
+    if (!question) continue;
+    out.push(
+      offer(head, {
+        ja_id: head.ja_id,
+        label: question,
+        group_label: "",
+        section: head.section || "",
+        type: "radio",
+        required: group.some((o) => o.required),
+        max_length: null,
+        options: group.map((o) => o.label || "").filter(Boolean),
+      }, group.map((o) => o.ja_id))
+    );
+  }
+
   return out;
+}
+
+function llmFieldsFor(report) {
+  return _llmCandidates(report).map((c) => c.descriptor);
 }
 
 async function _applyLlmSelect(f, el, value) {
@@ -1063,34 +1129,79 @@ async function _applyLlmSelect(f, el, value) {
   return true;
 }
 
+function _applyLlmRadio(byId, candidate, value) {
+  const wanted = normalize(value);
+  // Only ever one of this group's own options -- the model returns text, and
+  // text that isn't one of the choices selects nothing.
+  const chosen = candidate.jaIds
+    .map((id) => byId.get(id))
+    .find((f) => f && normalize(f.label || "") === wanted);
+  if (!chosen) return false;
+  const el = _el(chosen.ja_id);
+  if (!el) return false;
+  _setChecked(el, true);
+  _mark(chosen.ja_id, MARK_FILLED);
+  return true;
+}
+
+// A label Claude resolved to something already in the profile is a label
+// worth remembering: next time it matches for free, instantly, with no API
+// call. Only mappings are learned, never the prose -- a cover letter or an
+// essay answer written for one job has no business being reused at another.
+function learnFromAnswers(report, answers, profile) {
+  const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
+  const learned = {};
+  for (const [jaId, value] of Object.entries(answers || {})) {
+    const f = byId.get(jaId);
+    const label = normalize(f && f.label);
+    if (!label || !value) continue;
+    // Already known by name; nothing to learn.
+    if (matchField(f.label)) continue;
+    for (const [key, saved] of Object.entries(profile || {})) {
+      if (typeof saved !== "string" && typeof saved !== "number") continue;
+      if (String(saved) && String(saved) === String(value)) {
+        learned[label] = key;
+        break;
+      }
+    }
+  }
+  return learned;
+}
+
 async function applyLlmAnswers(report, answers, skipped) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
-  const allowed = new Set(llmFieldsFor(report).map((f) => f.ja_id));
+  const candidates = new Map(_llmCandidates(report).map((c) => [c.descriptor.ja_id, c]));
   let filled = 0;
 
   for (const [jaId, value] of Object.entries(answers || {})) {
     // Only fields this side offered up in the first place. An answer for
     // anything else -- a consent box, a self-ID question, a field that was
     // already filled -- is dropped without being applied.
-    if (!allowed.has(jaId) || !value) continue;
-    const f = byId.get(jaId);
-    const el = _el(jaId);
-    if (!f || !el) continue;
+    const candidate = candidates.get(jaId);
+    if (!candidate || !value) continue;
+    const f = candidate.field;
 
     let applied;
     try {
-      if (f.tag === "select") {
-        applied = await _applyLlmSelect(f, el, value);
+      if (candidate.descriptor.type === "radio") {
+        applied = _applyLlmRadio(byId, candidate, value);
       } else {
-        _setNativeValue(el, value);
-        applied = true;
+        const el = _el(jaId);
+        if (!el) continue;
+        if (f.tag === "select") {
+          applied = await _applyLlmSelect(f, el, value);
+        } else {
+          _setNativeValue(el, value);
+          _mark(jaId, MARK_FILLED);
+          applied = true;
+        }
       }
     } catch (exc) {
       applied = false;
     }
     if (!applied) continue;
 
-    _mark(jaId, MARK_FILLED);
+    if (f.tag === "select") _mark(jaId, MARK_FILLED);
     filled += 1;
     const result = report.results.find((r) => r.ja_id === jaId);
     if (result) {
@@ -1113,36 +1224,4 @@ async function applyLlmAnswers(report, answers, skipped) {
   }
 
   return filled;
-}
-
-// A sensitive question asked as a checkbox: a yes/no one is ticked or left
-// alone, and a "tick all that apply" one (race is often built this way) is
-// ticked only when this box is the choice the applicant saved.
-function _sensitiveCheckbox(report, f, canonical, label, value, required) {
-  const el = _el(f.ja_id);
-  if (!el) {
-    addResult(report, label, canonical, "error", "Field disappeared from the page.", required);
-    return;
-  }
-
-  let wantChecked;
-  if (typeof value === "boolean") {
-    wantChecked = value;
-  } else {
-    const own = f.label || "";
-    if (!own || bestChoice(String(value), [own]) === null) {
-      // This box isn't the saved choice. Leaving it unticked is the answer.
-      addResult(report, label, canonical, "skipped_no_match", "", required);
-      return;
-    }
-    wantChecked = true;
-  }
-
-  if (f.checked === wantChecked) {
-    if (wantChecked) addResult(report, label, canonical, "already_filled", "Left as-is.", required);
-    return;
-  }
-  _setChecked(el, wantChecked);
-  _mark(f.ja_id, MARK_FILLED);
-  addResult(report, label, canonical, "filled", wantChecked ? "checked" : "unchecked", required);
 }

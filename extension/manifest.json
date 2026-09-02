@@ -24,9 +24,26 @@
     "storage",
     "unlimitedStorage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
-    "https://api.anthropic.com/*"
+    "https://api.anthropic.com/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.workday.com/*",
+    "https://*.icims.com/*",
+    "https://*.greenhouse.io/*",
+    "https://*.lever.co/*",
+    "https://*.smartrecruiters.com/*",
+    "https://*.ashbyhq.com/*",
+    "https://*.jobvite.com/*",
+    "https://*.taleo.net/*",
+    "https://*.successfactors.com/*",
+    "https://*.workable.com/*",
+    "https://*.breezy.hr/*",
+    "https://*.applytojob.com/*",
+    "https://*.bamboohr.com/*",
+    "https://*.paylocity.com/*",
+    "https://*.dayforcehcm.com/*"
   ]
 }

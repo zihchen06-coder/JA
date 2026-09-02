@@ -293,6 +293,9 @@ function loadIntoForm() {
 
   document.getElementById("s-auto-accounts").checked = !!(state.settings && state.settings.auto_create_accounts);
   document.getElementById("s-use-llm").checked = !!(state.settings && state.settings.use_llm);
+  document.getElementById("s-tailor-cover").checked = !!(state.settings && state.settings.tailor_cover_letter);
+  document.getElementById("s-auto-fill").checked = !!(state.settings && state.settings.auto_fill_known_sites);
+  renderLearned();
   document.getElementById("llm-key").value = state.llmApiKey || "";
 
   renderCredentials();
@@ -347,6 +350,8 @@ async function save() {
   const settings = {
     auto_create_accounts: document.getElementById("s-auto-accounts").checked,
     use_llm: document.getElementById("s-use-llm").checked,
+    tailor_cover_letter: document.getElementById("s-tailor-cover").checked,
+    auto_fill_known_sites: document.getElementById("s-auto-fill").checked,
   };
   // Kept out of `profile` so it is never in anything exported, imported, or
   // sent to the API as part of the profile blob.
@@ -378,9 +383,10 @@ function initTabs() {
   initTabs();
 
   const stored = await chrome.storage.local.get([
-    "profile", "settings", "credentials", "llm_api_key",
+    "profile", "settings", "credentials", "llm_api_key", "learned_aliases",
   ]);
   state.llmApiKey = stored.llm_api_key || "";
+  state.learned = stored.learned_aliases || {};
   state.profile = { ...emptyProfile(), ...(stored.profile || {}) };
   state.settings = stored.settings || {};
   state.credentials = stored.credentials || {};
@@ -530,3 +536,36 @@ function initTabs() {
     document.getElementById("import-json").value = "";
   };
 })();
+
+// --- Learned label mappings -------------------------------------------------
+
+function renderLearned() {
+  const list = document.getElementById("learned-list");
+  const empty = document.getElementById("learned-empty");
+  const entries = Object.entries(state.learned || {}).sort();
+  list.innerHTML = "";
+  empty.style.display = entries.length ? "none" : "";
+
+  for (const [label, field] of entries) {
+    const row = document.createElement("div");
+    row.className = "cred-row";
+    row.style.marginBottom = "8px";
+    row.innerHTML = `
+      <input readonly value="${label.replace(/"/g, "&quot;")}">
+      <input readonly value="${BOOL_LABELS[field] || field}">
+      <span></span>
+      <button class="danger" type="button">Forget</button>`;
+    row.querySelector("button").onclick = async () => {
+      delete state.learned[label];
+      await chrome.storage.local.set({ learned_aliases: state.learned });
+      renderLearned();
+    };
+    list.appendChild(row);
+  }
+}
+
+document.getElementById("clear-learned").addEventListener("click", async () => {
+  state.learned = {};
+  await chrome.storage.local.set({ learned_aliases: {} });
+  renderLearned();
+});

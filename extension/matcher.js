@@ -123,10 +123,26 @@ function isEscapeHatchLabel(label) {
   return _ESCAPE_HATCH_RE.test(normalize(label));
 }
 
+// Label phrasings worked out on a previous application and remembered, so
+// the same odd wording resolves instantly and for free the next time it is
+// seen. Set from storage before a fill; see filler.js's learnFromAnswers for
+// where entries come from and options.js for where they can be deleted.
+var LEARNED_ALIASES = {};
+
+function setLearnedAliases(map) {
+  LEARNED_ALIASES = map || {};
+}
+
 function matchField(label, minRatio = 0.72) {
   const norm = normalize(label);
   if (!norm) return null;
   if (_ESCAPE_HATCH_RE.test(norm)) return null;
+
+  // An exact match on the whole label, learned from a fill that actually
+  // worked -- more specific evidence than any substring alias below.
+  if (Object.prototype.hasOwnProperty.call(LEARNED_ALIASES, norm)) {
+    return LEARNED_ALIASES[norm];
+  }
 
   let bestField = null;
   let bestKey = [-1, -1];

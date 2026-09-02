@@ -702,3 +702,173 @@ def test_self_id_and_criminal_history_never_leave_the_machine(browser):
     assert PROFILE["email"] in system
     assert PROFILE["experience"][0]["company"] in system
     assert PROFILE["education"][0]["school"] in system
+
+
+def _evaluate_on(browser, fname, script, arg):
+    """A fresh page per call. Two fillForm runs against one page would see the
+    fields the first run already filled, which is not what any of these are
+    testing.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, fname)}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        return page.evaluate(script, arg)
+    finally:
+        page.close()
+
+
+def test_radio_questions_are_offered_but_consent_and_self_id_ones_are_not(browser):
+    """A screening question asked as radio buttons is a question like any
+    other; a consent or self-ID group asked the same way is still not.
+    """
+    offered = _llm_pass(browser, "ldg_form.html", {})["offered"]
+    # Without radio support this form offers nothing at all.
+    assert offered, "no radio question was offered"
+
+    for eeo_form in ("eeo.html", "jazzhr_eeo.html", "cc305_form.html"):
+        assert _llm_pass(browser, eeo_form, {})["offered"] == []
+
+    joined = " | ".join(_llm_pass(browser, "screening.html", {})["offered"]).lower()
+    for forbidden in ("felony", "convict", "background check", "drug"):
+        assert forbidden not in joined, forbidden
+
+
+def test_a_radio_answer_must_be_one_of_that_group_s_own_choices(browser):
+    outcome = _evaluate_on(
+        browser, "ldg_form.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const offered = llmFieldsFor(report).find((f) => f.type === 'radio');
+            // Count only this group -- other radio questions on the form
+            // were legitimately answered by the deterministic pass.
+            const group = (report.fields || []).find((f) => f.ja_id === offered.ja_id).name;
+            const checkedInGroup = () => document.querySelectorAll(
+                `input[type=radio][name="${group}"]:checked`).length;
+            const invented = await applyLlmAnswers(
+                report, {[offered.ja_id]: "Maybe, it depends"}, {});
+            const afterInvented = checkedInGroup();
+            const real = await applyLlmAnswers(report, {[offered.ja_id]: offered.options[0]}, {});
+            return {choices: offered.options, invented, afterInvented, real,
+                    afterReal: checkedInGroup()};
+        }""",
+        PROFILE,
+    )
+    assert outcome["choices"]
+    # Text that is not one of the choices selects nothing at all.
+    assert outcome["invented"] == 0
+    assert outcome["afterInvented"] == 0
+    assert outcome["real"] == 1
+    assert outcome["afterReal"] == 1
+
+
+def test_the_job_being_applied_for_is_sent_with_the_fields(browser):
+    """Without it an answer to "why this role" can only be generic."""
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        sent = page.evaluate(
+            """async ({profile, job}) => {
+                let body = null;
+                window.fetch = async (url, init) => {
+                    body = JSON.parse(init.body);
+                    return {ok: true, status: 200, text: async () => JSON.stringify({
+                        content: [{type: "text", text: JSON.stringify({answers: []})}],
+                        stop_reason: "end_turn",
+                    })};
+                };
+                await resolveWithClaude({
+                    apiKey: "k", profile, job, pageUrl: "https://x/apply",
+                    fields: [{ja_id: "ja-1", label: "Why this role?",
+                              type: "textarea", options: []}],
+                });
+                return {user: body.messages[0].content, system: body.system[0].text};
+            }""",
+            {"profile": PROFILE, "job": {
+                "title": "Mechanical Engineering Intern",
+                "company": "aerotech.com",
+                "description": "Design and test motion control hardware.",
+            }},
+        )
+    finally:
+        page.close()
+
+    assert "Mechanical Engineering Intern" in sent["user"]
+    assert "motion control hardware" in sent["user"]
+    # The job changes every application; keeping it out of the cached system
+    # prefix is what stops it throwing the cache away on every request.
+    assert "Mechanical Engineering Intern" not in sent["system"]
+
+
+def test_a_saved_cover_letter_is_used_unless_tailoring_is_on(browser):
+    script = """async ({profile, opts}) => {
+        const report = await fillForm(profile, null, opts);
+        const r = report.results.find((x) => x.canonical === 'cover_letter_text');
+        return {action: r.action, detail: r.detail,
+                offered: llmFieldsFor(report).some((f) => f.ja_id === r.ja_id)};
+    }"""
+    off = _evaluate_on(browser, "ldg_real.html", script, {"profile": PROFILE, "opts": {}})
+    assert off["action"] == "filled"
+    assert off["detail"] == PROFILE["cover_letter_text"]
+
+    on = _evaluate_on(browser, "ldg_real.html", script,
+                      {"profile": PROFILE, "opts": {"tailorCoverLetter": True}})
+    assert on["action"] == "skipped_no_data"
+    assert on["offered"] is True  # handed to Claude to write for this job
+
+
+def test_learned_mappings_cover_a_label_the_aliases_do_not(browser):
+    """The point of remembering one: the same odd wording resolves for free
+    next time instead of costing another API call.
+    """
+    first = _evaluate_on(
+        browser, "unknowns.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const target = llmFieldsFor(report)[0];
+            const answers = {[target.ja_id]: profile.city};
+            await applyLlmAnswers(report, answers, {});
+            return {label: target.label, learned: learnFromAnswers(report, answers, profile)};
+        }""",
+        PROFILE,
+    )
+    assert list(first["learned"].values()) == ["city"]
+
+    # A later application, fresh page, same odd label.
+    second = _evaluate_on(
+        browser, "unknowns.html",
+        """async ({profile, learned}) => {
+            setLearnedAliases(learned);
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'city');
+            const labels = llmFieldsFor(report).map((f) => f.label);
+            return {action: r.action, detail: r.detail, label: r.label, stillOffered: labels};
+        }""",
+        {"profile": PROFILE, "learned": first["learned"]},
+    )
+    assert second["action"] == "filled"
+    assert second["detail"] == PROFILE["city"]
+    # That one label costs nothing now. The form's other unknowns still do.
+    assert second["label"] == first["label"]
+    assert first["label"] not in second["stillOffered"]
+
+
+def test_only_mappings_are_learned_never_written_prose(browser):
+    """A cover letter or an essay answer belongs to the job it was written
+    for; remembering one would paste it into the next company's form.
+    """
+    learned = _evaluate_on(
+        browser, "test_form.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const essay = llmFieldsFor(report).find((f) => f.type === 'textarea');
+            const answers = {[essay.ja_id]:
+                "I rebuilt the documentation pipeline at my last job."};
+            await applyLlmAnswers(report, answers, {});
+            return learnFromAnswers(report, answers, profile);
+        }""",
+        PROFILE,
+    )
+    assert learned == {}

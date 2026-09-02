@@ -42,11 +42,12 @@ function _showBanner(html, tone) {
   // each drawing their own banner.
   if (!document.querySelector('input, select, textarea, button[aria-haspopup="listbox"]')) return;
 
-  const { profile, settings, credentials: savedCreds } = await chrome.storage.local.get([
-    "profile",
-    "settings",
-    "credentials",
-  ]);
+  const {
+    profile,
+    settings,
+    credentials: savedCreds,
+    learned_aliases: learnedAliases,
+  } = await chrome.storage.local.get(["profile", "settings", "credentials", "learned_aliases"]);
 
   if (!profile || REQUIRED_FIELDS.some((f) => !profile[f])) {
     _showBanner(
@@ -68,14 +69,21 @@ function _showBanner(html, tone) {
     creds = await getOrCreate(hostname, profile.email);
   }
 
-  const report = await fillForm(profile, creds);
+  // Label phrasings worked out on earlier applications, so they match for
+  // free this time instead of costing another API call.
+  setLearnedAliases(learnedAliases || {});
+
+  const useLlm = !!(settings && settings.use_llm);
+  const report = await fillForm(profile, creds, {
+    tailorCoverLetter: useLlm && !!(settings && settings.tailor_cover_letter),
+  });
 
   // Second pass: hand whatever the rule-based matcher couldn't place to
   // Claude, if the user has turned that on and saved a key. Failures here
   // are never fatal -- the deterministic fill already happened and stands.
   let claudeFilled = 0;
   let claudeError = null;
-  if (settings && settings.use_llm) {
+  if (useLlm) {
     const pending = llmFieldsFor(report);
     if (pending.length) {
       _showBanner(
@@ -85,10 +93,22 @@ function _showBanner(html, tone) {
       try {
         const reply = await chrome.runtime.sendMessage({
           type: "ja-llm-resolve",
-          request: { profile, fields: pending, pageUrl: location.href },
+          request: {
+            profile,
+            fields: pending,
+            pageUrl: location.href,
+            job: extractJobContext(),
+          },
         });
-        if (reply && reply.error) claudeError = reply.error;
-        else if (reply) claudeFilled = await applyLlmAnswers(report, reply.answers, reply.skipped);
+        if (reply && reply.error) {
+          claudeError = reply.error;
+        } else if (reply) {
+          claudeFilled = await applyLlmAnswers(report, reply.answers, reply.skipped);
+          const learned = learnFromAnswers(report, reply.answers, profile);
+          if (Object.keys(learned).length) {
+            chrome.runtime.sendMessage({ type: "ja-learned", learned });
+          }
+        }
       } catch (exc) {
         claudeError = String(exc);
       }

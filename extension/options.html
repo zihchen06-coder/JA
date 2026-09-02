@@ -103,6 +103,7 @@
     <div class="tab" data-tab="answers">Answers</div>
     <div class="tab" data-tab="accounts">Accounts</div>
     <div class="tab" data-tab="ai">AI assist</div>
+    <div class="tab" data-tab="learned">Learned</div>
   </div>
 
   <div class="card">
@@ -223,6 +224,26 @@
         </div>
         <label class="row"><input type="checkbox" id="s-use-llm" style="width:18px;height:18px;"></label>
       </div>
+      <div class="toggle-row" style="margin-top:16px;">
+        <div>
+          <div><strong>Write a cover letter for each job</strong></div>
+          <div class="desc">When a form has a cover-letter box, draft one for that specific role
+            from the posting and your profile, instead of pasting the single saved letter from the
+            Background tab into every application. Needs AI assist on.</div>
+        </div>
+        <label class="row"><input type="checkbox" id="s-tailor-cover" style="width:18px;height:18px;"></label>
+      </div>
+      <div class="toggle-row" style="margin-top:16px;">
+        <div>
+          <div><strong>Fill automatically on known job sites</strong></div>
+          <div class="desc">Fill each page of an application as it loads on Workday, iCIMS,
+            Greenhouse, Lever, Ashby, SmartRecruiters and the rest, without clicking the icon.
+            A six-page Workday application becomes one pass instead of six clicks. Still never
+            submits anything. Note this spends API credit without a click, so it is off until you
+            turn it on.</div>
+        </div>
+        <label class="row"><input type="checkbox" id="s-auto-fill" style="width:18px;height:18px;"></label>
+      </div>
       <div class="grid" style="margin-top:14px;">
         <div class="field full">
           <label>Anthropic API key</label>
@@ -235,6 +256,17 @@
             a typical application costs a few cents.</p>
         </div>
       </div>
+    </div>
+
+    <div class="ptab" id="pt-learned">
+      <p class="note">Label phrasings Claude worked out on an earlier application, kept so the same
+        wording fills for free and instantly next time instead of costing another API call. Only
+        mappings are remembered &mdash; never written answers or cover letters, which belong to the
+        job they were written for. Delete any row that looks wrong; it will simply be worked out
+        again next time it comes up.</p>
+      <div id="learned-list"></div>
+      <p class="note" id="learned-empty">Nothing learned yet.</p>
+      <button class="ghost" id="clear-learned" type="button">Forget everything</button>
     </div>
 
     <div class="ptab" id="pt-accounts">

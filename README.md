@@ -58,6 +58,21 @@ account, never sent anywhere except the job site being filled. The one
 exception is the optional **AI assist** below, which is off until you turn
 it on.
 
+### Learned labels
+
+Whenever Claude resolves a label to something already in your profile, that
+mapping is remembered: *"Home Telephone" → phone*. The next form using that
+wording matches for free and instantly, with no API call, so the tool gets
+cheaper and faster the more you apply — without you teaching it anything.
+
+Only mappings are learned, never written prose. A cover letter or an essay
+answer belongs to the job it was written for, and reusing one at the next
+company is exactly the failure worth avoiding.
+
+Every mapping is listed on the **Learned** tab with a Forget button, plus a
+"Forget everything" button. A mapping you delete is simply worked out again
+the next time it comes up, so deleting one is never destructive.
+
 ### AI assist (optional, off by default)
 
 The rule-based matcher knows the field phrasings in `field_aliases`. That
@@ -82,13 +97,30 @@ go: your resume and cover-letter files, your saved site logins, your API
 key, and your Self-ID and criminal-history answers — Claude is never asked
 one of those questions, so no request could need them.
 
+It is told what job this is — the role title, the company, and the posting
+text if the page still shows it — so an answer to "why do you want this
+role?" is about *this* role rather than being generically about you. Two
+optional extras build on that:
+
+- **Write a cover letter for each job** drafts one per application from the
+  posting and your profile, instead of pasting the single saved letter from
+  the Background tab into every form.
+- **Fill automatically on known job sites** fills each page as it loads on
+  Workday, iCIMS, Greenhouse, Lever, Ashby, SmartRecruiters and the rest, so
+  a six-page Workday application is one pass instead of six clicks. Off until
+  you turn it on, since it spends API credit without a click. Still never
+  submits.
+
 The guarantees don't change, and they are enforced in `filler.js` on the way
 back in rather than merely asked of the model:
 
 - The set of fields offered to Claude is built locally. Self-identification,
-  criminal-history, salary-history and consent questions are never in it —
-  nor are checkboxes and radio buttons at all, since that is how forms ask
-  you to agree to things.
+  criminal-history, salary-history and consent questions are never in it,
+  however they are phrased and whether they are text boxes, dropdowns or
+  radio buttons. Checkboxes are never in it at all — a single tick box is
+  how forms ask you to agree to something.
+- A radio answer must be one of that group's own choices; anything else
+  selects nothing.
 - An answer for a field that wasn't offered is dropped, not applied.
 - A dropdown answer must match one of its options exactly; the near miss is
   left blank instead, because picking the wrong item out of a list is worse
