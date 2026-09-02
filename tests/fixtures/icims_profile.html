@@ -1,0 +1,518 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>iCIMS candidate profile</title>
+<!--
+  Frozen snapshot of a real iCIMS ("Marvin") Candidate Profile step, with the
+  applicant's prefilled email blanked out.
+
+  Every dropdown on it is the same custom widget: a real
+  <select class="dropdown-hide"> that is display:none and holds nothing but
+  an empty placeholder <option>, alongside an <a class="dropdown-select">
+  the applicant actually clicks and a <ul class="dropdown-results"> of
+  <li role="option"> holding the real choices. Long lists (schools,
+  countries) ship only their first page and fetch the rest through the
+  widget's own search box.
+
+  The markup is verbatim; the script at the bottom stands in for iCIMS's own
+  bundle, which isn't in a saved page. It reproduces the two behaviours
+  extension/filler.js drives: clicking an <li> writes the choice back to the
+  hidden <select> and the visible display span, and typing in the search box
+  replaces the results with matches from the full list.
+-->
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 24px; }
+  /* iCIMS's own rule -- the reason the real <select> is never seen, and the
+     reason the extractor has to fall back to the widget's visibility. */
+  .dropdown-hide { display: none; }
+  .dropdown-container { position: absolute; z-index: 10; background: #fff; border: 1px solid #999; }
+  .dropdown-invisible { display: none; }
+  .dropdown-select { display: block; width: 300px; border: 1px solid #999; padding: 4px 6px; cursor: pointer; }
+  .dropdown-results { list-style: none; margin: 0; padding: 0; max-height: 24em; overflow: auto; }
+  .dropdown-result { padding: 3px 6px; cursor: pointer; }
+  .iCIMS_TableRow { margin-bottom: 8px; }
+  input, textarea, select { min-width: 240px; }
+</style>
+<div class="iCIMS_CenteredPageContent">
+
+
+<h2>Candidate Profile</h2>
+
+
+<div class="iCIMS_InfoMsg iCIMS_InfoMsg_Candidate">
+
+<span class="iCIMS_InfoInstruction"><p style="margin: 0px;">Please be sure to fill out all required fields</p><p style="margin: 0px;">&nbsp;</p><div><p style="margin: 0px;"><strong data-olk-copy-source="MessageBody">If you are experiencing any issues while trying to complete your application, please email <a href="mailto:tasystemsupport@marvin.com" target="_blank" rel="noopener"><span>tasystemsupport@marvin.com</span></a><span>&nbsp;</span>for assistance.</strong></p></div> </span>
+<span class="Field_RequiredStar">*</span> indicates a required field.
+
+</div>
+
+
+
+
+
+
+
+
+
+<div class="iCIMS_ProfileFormTable iCIMS_Table"><div class="iCIMS_TableRow"><div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_TableCell"><div class="iCIMS_SocialLoginLabel" id="label_connect_with_social">Connect your account</div></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_TableCell"><div class="iCIMS_SocialLoginContainer iCIMS_SocialSelection"><button id="icims-social-button-linked-in" type="button" data-accounttype="Linkedin" aria-labelledby="label_connect_with_social icims-social-button-image-linked-in" class="icims-social-login icims-social-linked-in iCIMS_Action_Button" onclick="var screenLeft=((screen.width-450)/2);var screenTop=((screen.height-450)/2);var args='status=yes, toolbar=no, location=no, menubar=no, directories=no, resizable=yes, scrollbars=yes, height=450, width=450, left=' + screenLeft + ',top=' + screenTop;window.top.location.href='about:blank#scrubbed'"> <img src="" alt="LinkedIn" id="icims-social-button-image-linked-in" alt="linked-in">  <span class="icims-social-text">Log in with LinkedIn</span> </button><span id="iCIMS_SocialInfo_Link" class="iCIMS_Anchor" tabindex="0" role="tooltip" data-toggle="tooltip" data-trigger="hover focus" title="" aria-describedby="iCIMS_SocialInfo" data-original-title="Allows you to log in to your candidate profile using your social account (using single sign on)."><span class="glyphicons glyphicons-info-sign" aria-hidden="true"></span><span id="iCIMS_SocialInfo" class="sr-only">Social Account Information Icon Allows you to log in to your candidate profile using your social account (using single sign on).</span></span></div></div></div></div>
+<input type="hidden" name="accountId" value="-1">
+
+
+
+
+
+
+
+
+<div role="group">
+<h2 class="iCIMS_SubHeader iCIMS_SubHeader_Candidate">Resume</h2>
+
+<div class="iCIMS_InfoMsg iCIMS_InfoMsg_Candidate"><ul><li>Provide your resume below to pre-fill your profile. Existing data in the form will be replaced:</li></ul></div>
+
+<div class="iCIMS_ProfileFormTable iCIMS_Table">
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="iCIMS_EvenRow iCIMS_TableRow iCIMS_FieldRow_PortalProfileFields.Resume ">
+<div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_Resume iCIMS_TableCell"><label tabindex="-1" id="label_PortalProfileFields.Resume_File" for="PortalProfileFields.Resume_File">Please upload your resume (max size: 5 MB)</label></div>
+<div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_Resume iCIMS_TableCell"><div id="PortalProfileFields.Resume_Loading" class="iCIMS_NoDisplay iCIMS_loadingImageResume"><div class="iCIMS_loadingImageResumeText">Parsing resume, please wait...</div></div><div class="iCIMS_ResumeContentDiv" id="PortalProfileFields.Resume_Content"><input id="PortalProfileFields.Resume" name="PortalProfileFields.Resume" type="hidden" value="false" isimage="false"><input id="PortalProfileFields.Resume_FileName" name="PortalProfileFields.Resume_FileName" type="hidden" value=""><div id="PortalProfileFields.Resume_CurrentFile"><div id="PortalProfileFields.Resume_FileNameLabel" class="iCIMS_CurrentFile iCIMS_NoDisplay"><span></span><span class="iCIMS_NoDisplay iCIMS_CurrentFileIcon" id="PortalProfileFields.Resume_CurrentFileIcon"></span></div><div id="PortalProfileFields.Resume_DeleteButtonSpan" class="iCIMS_FileUploadDeleteButtonContainer iCIMS_NoDisplay"><button id="PortalProfileFields.Resume_Button" type="button" class="small iCIMS_Button iCIMS_DeleteButton iCIMS_SecondaryButton" onclick="pageDirtyFlag=true; toggleDeleteImageCF('PortalProfileFields.Resume', true)">Replace Resume</button></div><div class="iCIMS_CurrentFileIcon"><span class="iCIMS_NoDisplay" id="PortalProfileFields.Resume_NoDisplay_CurrentFileIcon"></span></div></div><div id="PortalProfileFields.Resume_UploadButtons" class="upload-buttons"><div class="iCIMS_FileUploadButtonBlock PortalProfileFields.Resume_local_ButtonContainer localButton "><div tabindex="0" class="iCIMS_FileFieldButton iCIMS_SecondaryButton iCIMS_resumeUpload" onkeydown="if (event.code === 13 || event.keyCode === 13 || event.code === 32 || event.keyCode === 32) { this.onclick(); event.stopPropagation(); event.preventDefault(); }" onclick="var input = document.getElementById('PortalProfileFields.Resume_File'); if (input) {input.click();}" onfocus="this.setAttribute('role','button');" onblur="this.removeAttribute('role')"><label for="PortalProfileFields.Resume_File" id="label_for_PortalProfileFields.Resume_File" aria-hidden="true" class="iCIMS_508_Label">My Computer (Opens new window)</label><input type="file" id="PortalProfileFields.Resume_File" name="PortalProfileFields.Resume_File" tabindex="-1" aria-labelledby="label_for_PortalProfileFields.Resume_File label_PortalProfileFields.Resume_File" onclick="event.stopPropagation();" onchange="pageDirtyFlag=true;icims_setFileFieldValue('PortalProfileFields.Resume', document.getElementById('PortalProfileFields.Resume_File').value, '', '', false, 'local');window.document.body.onbeforeunload = null;this.form.action=this.form.action+'&amp;uploadResume=1';this.form.submit();" onfocus="$(this).parent().addClass('focused');" onblur="$(this).parent().removeClass('focused');" validtypes="text/html,image/jpeg,image/tiff,image/bmp,image/gif,application/rtf,image/png,image/heif,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/tiff,text/plain,application/gzip,application/pdf,application/msword,image/jpeg,text/html,application/vnd.oasis.opendocument.text"><span class="iCIMS_FileFieldIcon"><span class="icims-file-upload glyphicons glyphicons-folder-open"></span><span class="iCIMS_NoDisplay glyphicons glyphicons-folder-open" id="PortalProfileFields.Resume_local_icon"></span></span><span aria-hidden="true" class="iCIMS_FileFieldText">My Computer</span></div></div><div class="iCIMS_FileUploadButtonBlock PortalProfileFields.Resume_googleDrive_ButtonContainer"><label for="PortalProfileFields.Resume_googleDrive" id="label_for_PortalProfileFields.Resume_googleDrive" aria-hidden="true" class="iCIMS_508_Label">Google Drive (Opens new window)</label><button type="button" aria-labelledby="label_for_PortalProfileFields.Resume_googleDrive label_PortalProfileFields.Resume_File" class="iCIMS_FileFieldButton iCIMS_SecondaryButton iCIMS_googleDriveButton" onclick="var screenLeft=((screen.width-450)/2);var screenTop=((screen.height-450)/2);var args='status=yes, toolbar=no, location=no, menubar=no, directories=no, resizable=yes, scrollbars=yes, height=450, width=450, left=' + screenLeft + ',top=' + screenTop; window.open('about:blank#scrubbed', 'socialLogin', args); return false;"><span class="iCIMS_FileFieldIcon">  <span class="icims-file-upload social social-google-drive"></span> </span><span class="iCIMS_FileFieldText" aria-hidden="true">Google Drive</span><span class="iCIMS_NoDisplay social social-google-drive" id="PortalProfileFields.Resume_googleDrive_icon"></span></button></div><div class="iCIMS_FileUploadButtonBlock PortalProfileFields.Resume_dropBox_ButtonContainer"><label for="PortalProfileFields.Resume_dropBox" id="label_for_PortalProfileFields.Resume_dropBox" aria-hidden="true" class="iCIMS_508_Label">Dropbox (Opens new window)</label><button type="button" aria-labelledby="label_for_PortalProfileFields.Resume_dropBox label_PortalProfileFields.Resume_File" class="iCIMS_FileFieldButton iCIMS_SecondaryButton iCIMS_dropboxButton" onclick="Dropbox.choose({linkType: 'direct', success: function(files) { icims_setFileFieldValueFromUrl('PortalProfileFields.Resume', files[0].name, files[0].link, files[0].thumbnails['200x200'], 'dropbox'); }});; return false;"><span class="iCIMS_FileFieldIcon"><span class="icims-file-upload social social-dropbox"></span></span><span class="iCIMS_FileFieldText" aria-hidden="true">Dropbox</span><span class="iCIMS_NoDisplay social social-dropbox" id="PortalProfileFields.Resume_dropbox_icon"></span></button></div><div class="iCIMS_FileUploadButtonBlock PortalProfileFields.Resume_oneDrive_ButtonContainer"><label for="PortalProfileFields.Resume_oneDrive" id="label_for_PortalProfileFields.Resume_oneDrive" aria-hidden="true" class="iCIMS_508_Label">OneDrive (Opens new window)</label><button type="button" aria-labelledby="label_for_PortalProfileFields.Resume_oneDrive label_PortalProfileFields.Resume_File" class="iCIMS_FileFieldButton iCIMS_SecondaryButton iCIMS_oneDriveButton" onclick="launchOneDrivePopup('about:blank#scrubbed'); return false;"><span class="iCIMS_FileFieldIcon"><span class="icims-file-upload social social-windows"></span></span><span class="iCIMS_FileFieldText" aria-hidden="true">OneDrive</span><span class="iCIMS_NoDisplay social social-windows" id="PortalProfileFields.Resume_onedrive_icon"></span></button></div></div><input type="hidden" id="PortalProfileFields.Resume_URL" name="PortalProfileFields.Resume_URL"></div><noscript><input type="submit" class="iCIMS_SecondaryButton" name="uploadResume" onclick="window.onbeforeunload = null; icims_showResumeLoading()" value="Submit Resume" /></noscript></div>
+</div>
+
+
+
+
+
+
+
+
+</div>
+</div>
+
+<div role="group">
+<h2 class="iCIMS_SubHeader iCIMS_SubHeader_Candidate">Create a login to access your application</h2>
+
+<div class="iCIMS_ProfileFormTable iCIMS_Table">
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="iCIMS_EvenRow iCIMS_TableRow iCIMS_FieldRow_Inline iCIMS_FieldRow_Inline_LinedUpStdFields iCIMS_FieldRow_PersonProfileFields.Login ">
+
+
+
+<div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_TableCell"><label tabindex="-1" id="label_PersonProfileFields.Login" for="PersonProfileFields.Login">Email/Login</label><span class="Field_Required"><span class="Field_RequiredStar">* </span></span></div>
+<div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_TableCell"><input type="text" id="PersonProfileFields.Login" name="PersonProfileFields.Login" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control" onchange="pageDirtyFlag=true;" aria-required="true" i_required="true" maxlength="128" autocomplete="username"></div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="iCIMS_OddRow iCIMS_TableRow iCIMS_FieldRow_Inline iCIMS_FieldRow_Inline_LinedUpStdFields iCIMS_FieldRow_PersonProfileFields.Password ">
+
+
+
+<div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_TableCell"><label tabindex="-1" id="label_PersonProfileFields.Password" for="PersonProfileFields.Password">Password (passwords must be 8 characters with at least 1 uppercase and 1 numeric value)</label><span class="Field_Required"><span class="Field_RequiredStar">* </span></span></div>
+<div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_TableCell"><input type="password" autocomplete="new-password" id="PersonProfileFields.Password" name="PersonProfileFields.Password" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_PasswordField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control" onchange="pageDirtyFlag=true;handlePasswordFieldChange(event);" maxlength="128" onblur=" var callHandlePasswordFieldChange = true; if (callHandlePasswordFieldChange) { handlePasswordFieldChange(event); } " onkeyup="handlePasswordFieldChange(event);" title="Minimum 8 characters, 1 alphabetic, 1 lowercase, 1 uppercase, 1 numeric" aria-label="Password (passwords must be 8 characters with at least 1 uppercase and 1 numeric value): Minimum 8 characters, 1 alphabetic, 1 lowercase, 1 uppercase, 1 numeric" aria-required="true" i_required="true"><div id="PersonProfileFields.Password.PassFailContainer" class="iCIMS_PasswordPassFail NoDisplay">		<span id="PersonProfileFields.Password.FailIndicator" class="iCIMS_PassFailIndicator glyphicons glyphicons-exclamation-sign" aria-hidden="true"></span><span id="PersonProfileFields.Password.passwordMessage" class="NoDisplay" aria-live="assertive"></span>		<span id="PersonProfileFields.Password.PassIndicator" class="iCIMS_PassFailIndicator glyphicons glyphicons-ok-sign pass NoDisplay" aria-hidden="true"></span></div><div id="PersonProfileFields.Password.MsgContainer" class="iCIMS_PasswordMsgContainer NoDisplay">	<div id="PersonProfileFields.Password.srAlert" class="NoDisplay" aria-live="polite"> </div> 	<div id="PersonProfileFields.Password.PasswordLoginSame">Your password cannot be the same as your login		</div> 	<div id="PersonProfileFields.Password.passwordReqTitle" class="iCIMS_PasswordRequirements">Your password must have at least:		</div>		<ul class="iCIMS_PasswordRequirementsList">			<li id="PersonProfileFields.Password.Length">8 characters</li>			<li id="PersonProfileFields.Password.Alphabet">1 alphabetic</li>			<li id="PersonProfileFields.Password.LowerCase">1 lowercase</li>			<li id="PersonProfileFields.Password.UpperCase">1 uppercase</li>			<li id="PersonProfileFields.Password.Number">1 numeric</li>		</ul></div></div>
+</div>
+
+
+
+
+
+<div class="iCIMS_OddRow iCIMS_TableRow iCIMS_FieldRow_Inline iCIMS_FieldRow_Inline_LinedUpStdFields iCIMS_FieldRow_PersonProfileFields.Password">
+<div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_TableCell"><label tabindex="-1" id="label_PersonProfileFields.Password_Confirm" for="PersonProfileFields.Password_Confirm">Password (passwords must be 8 characters with at least 1 uppercase and 1 numeric value) (Re-enter)</label><span class="Field_Required"><span class="Field_RequiredStar">* </span></span></div>
+<div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_TableCell"><input type="password" autocomplete="new-password" id="PersonProfileFields.Password_Confirm" name="PersonProfileFields.Password_Confirm" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_PasswordField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control" onchange="pageDirtyFlag=true;handlePasswordConfirmFieldChange(event);" maxlength="128" onblur=" var callHandlePasswordConfirmFieldChange = true; if (callHandlePasswordConfirmFieldChange) { handlePasswordConfirmFieldChange(event); } " onkeyup="handlePasswordConfirmFieldChange(event);" title="Minimum 8 characters, 1 alphabetic, 1 lowercase, 1 uppercase, 1 numeric" aria-label="Password (passwords must be 8 characters with at least 1 uppercase and 1 numeric value) (Re-enter): Minimum 8 characters, 1 alphabetic, 1 lowercase, 1 uppercase, 1 numeric" aria-required="true" i_required="true"><div id="PersonProfileFields.Password_Confirm.PassFailContainer" class="iCIMS_PasswordPassFail NoDisplay">		<span id="PersonProfileFields.Password_Confirm.PassIndicator" class="iCIMS_PassFailIndicator glyphicons glyphicons-ok-sign pass NoDisplay" aria-hidden="true"></span></div></div>
+</div>
+
+
+
+
+
+
+
+
+
+
+</div>
+</div>
+
+<div role="group">
+<h2 class="iCIMS_SubHeader iCIMS_SubHeader_Candidate">Enter your information</h2>
+
+<div class="iCIMS_ProfileFormTable iCIMS_Table">
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="iCIMS_EvenRow iCIMS_TableRow iCIMS_FieldRow_Inline iCIMS_FieldRow_Inline_LinedUpStdFields iCIMS_FieldRow_PersonProfileFields.FirstName ">
+
+
+
+<div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_TableCell"><label tabindex="-1" id="label_PersonProfileFields.FirstName" for="PersonProfileFields.FirstName">First Name</label><span class="Field_Required"><span class="Field_RequiredStar">* </span></span></div>
+<div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_TableCell"><input type="text" id="PersonProfileFields.FirstName" name="PersonProfileFields.FirstName" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control" onchange="pageDirtyFlag=true;" aria-required="true" i_required="true" bgtparse="true" maxlength="192" autocomplete="given-name"></div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="iCIMS_OddRow iCIMS_TableRow iCIMS_FieldRow_Inline iCIMS_FieldRow_Inline_LinedUpStdFields iCIMS_FieldRow_PersonProfileFields.LastName ">
+
+
+
+<div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_TableCell"><label tabindex="-1" id="label_PersonProfileFields.LastName" for="PersonProfileFields.LastName">Last Name</label><span class="Field_Required"><span class="Field_RequiredStar">* </span></span></div>
+<div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_TableCell"><input type="text" id="PersonProfileFields.LastName" name="PersonProfileFields.LastName" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control" onchange="pageDirtyFlag=true;" aria-required="true" i_required="true" bgtparse="true" maxlength="64" autocomplete="family-name"></div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="iCIMS_EvenRow iCIMS_TableRow iCIMS_FieldRow iCIMS_FieldRow_rcf2022 ">
+
+<div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_TableCell"><label tabindex="-1" id="label_rcf2022" for="rcf2022">Preferred Name</label></div>
+<div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_TableCell"><input type="text" id="rcf2022" name="rcf2022" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull form-control" onchange="pageDirtyFlag=true;"></div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="iCIMS_OddRow iCIMS_TableRow iCIMS_FieldRow iCIMS_FieldRow_PersonProfileFields.Email ">
+
+<div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_TableCell"><label tabindex="-1" id="label_PersonProfileFields.Email" for="PersonProfileFields.Email">Email</label><span class="Field_Required"><span class="Field_RequiredStar">* </span></span></div>
+<div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_TableCell"><input type="email" id="PersonProfileFields.Email" name="PersonProfileFields.Email" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_EmailField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control" onchange="pageDirtyFlag=true;" aria-required="true" i_required="true" maxlength="128" autocomplete="email" value=""></div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div tabindex="-1" class="iCIMS_CollectionContainer PersonProfileFields.Phones-1-Container"><fieldset class="iCIMS_CollectionGroup iCIMS_OddRow"><legend><span tabindex="-1" class="iCIMS_LabelText" name="labelText" id="PersonProfileFields.Phones_-1_label">Phones (1)<span class="Field_Required"><span class="Field_RequiredStar">* </span><span class="sr-only">required.</span></span></span></legend><div class="PersonProfileFields.Phones-1 iCIMS_TableRow"><div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionLegend iCIMS_TableCell"></div><div class="iCIMS_InfoData iCIMS_TableCell"></div></div><input tabindex="-1" type="hidden" name="portalLabelPersonProfileFields.Phones-1" id="portalLabelPersonProfileFields.Phones-1" value="Phones (1)"><div data-collection="PersonProfileFields.Phones" data-index="1" class="PersonProfileFields.Phones-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.PhoneType" for="-1_PersonProfileFields.PhoneType"><span class="iCIMS_LabelText" name="labelText">Type</span></label><span class="Field_Required"><span class="Field_RequiredStar">* </span><span class="sr-only">required.</span></span></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><select id="-1_PersonProfileFields.PhoneType" name="-1_PersonProfileFields.PhoneType" data-label="Type" class=" iCIMS_Forms_Global customFieldContainer iCIMS_Forms_ListEditorField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control" aria-label="Type" bgtparse="true" list="lists.phone_type" type="3025" onchange="pageDirtyFlag=true;if (this.options[this.selectedIndex].value == -1) { return addItemToSelectFieldNLevelList(this); }else{ this.prevIndex = this.selectedIndex; } " aria-required="true" i_required="true" icimsdropdown-enabled="0" icimsdropdown-ajax="1" icimsdropdown-search="0" icimsdropdown-selected="" hash="bfb91d1d8d09c978ac4eac23321c7e16ad840ab3ecd688ee2f9ed7b1451851a7"><option value="" legacy="true"></option><option title="Preferred" value="37539">Preferred</option><option title="Mobile" value="15145">Mobile</option><option title="Home" value="15143">Home</option><option title="Work" value="15142">Work</option><option title="Other" value="15147">Other</option></select></div></div><div data-collection="PersonProfileFields.Phones" data-index="1" class="PersonProfileFields.Phones-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.PhoneNumber" for="-1_PersonProfileFields.PhoneNumber"><span class="iCIMS_LabelText" name="labelText">Number</span></label><span class="Field_Required"><span class="Field_RequiredStar">* </span><span class="sr-only">required.</span></span></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><input type="text" id="-1_PersonProfileFields.PhoneNumber" name="-1_PersonProfileFields.PhoneNumber" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control" onchange="pageDirtyFlag=true;" aria-required="true" i_required="true" bgtparse="true" maxlength="128" autocomplete="tel-national"></div></div></fieldset><div class="iCIMS_CollectionButtonsRow"><div class="iCIMS_CollectionButtons iCIMS_OddRow PersonProfileFields.Phones-1 PersonProfileFields.Phones-1-Button iCIMS_TableRow"><div></div><div class="iCIMS_InfoData iCIMS_TableCell"><a role="button" class="iCIMS_Anchor" href="javascript:void(0)" onclick="pageDirtyFlag=true; showGroup('PersonProfileFields.Phones', '-1', '-2', 2, 'recruit')" id="PersonProfileFields.PhonesButton_-1">Add More (Phones)</a></div></div></div></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="iCIMS_OddRow iCIMS_TableRow iCIMS_FieldRow iCIMS_FieldRow_rcf3553 ">
+
+<div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_TableCell"><label tabindex="-1" id="label_rcf3553" for="rcf3553">Do you consent to receive text message communication during your application process?</label><span class="Field_Required"><span class="Field_RequiredStar">* </span></span></div>
+<div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_TableCell"><label class="iCIMS_508_Label" for="rcf3553">Do you consent to receive text message communication during your application process?</label><select id="rcf3553" name="rcf3553" data-label="Do you consent to receive text message communication during your application process?" class=" iCIMS_Forms_Global customFieldContainer iCIMS_Forms_ListEditorField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control dropdown-hide" aria-label="Do you consent to receive text message communication during your application process?" list="lists.customfields_lists" type="3553" onchange="pageDirtyFlag=true;if (this.options[this.selectedIndex].value == -1) { return addItemToSelectFieldNLevelList(this); }else{ this.prevIndex = this.selectedIndex; } " i_required="true" icimsdropdown-enabled="1" icimsdropdown-ajax="1" icimsdropdown-search="0" icimsdropdown-selected="" hash="0f1a592297ae75bbb8bca410ba159cc0ffaf0712186f4b33c509cbc0968d839f"><option value="" legacy="true"></option></select><a id="rcf3553_icimsDropdown" class="dropdown-select" aria-expanded="false" tabindex="0" aria-label="Do you consent to receive text message communication during your application process?" aria-required="true" role="combobox"><span id="rcf3553_fakeSelected_icimsDropdown" class="dropdown-text"><span class="dropdown-placeholder">— Make a Selection —</span></span><div class="dropdown-arrow-container"><i class="dropdown-arrow"></i></div></a><div id="rcf3553_icimsDropdown_ctnr" class="dropdown-container dropdown-invisible" aria-owns="rcf3553_dropdown-results" aria-expanded="false" style="width: 650px;"><input type="text" class="dropdown-search dropdown-invisible" autocomplete="off" placeholder="— Type to Search —" title="— Type to Search —" aria-label="— Type to Search —" role="combobox" aria-hidden="true" style="width: 608px;"><div aria-live="polite"><ul id="rcf3553_dropdown-results" class="dropdown-results" role="listbox" style="max-height: 24em;"><li id="result-selectable_rcf3553_-1" class="dropdown-result result-selectable" role="option" dropdown-index="-1" title="— Make a Selection —" aria-label="— Make a Selection —"><span class="dropdown-placeholder">— Make a Selection —</span></li><li id="result-selectable_rcf3553_0" class="dropdown-result result-selectable" role="option" dropdown-index="0" title="Yes" aria-label="Yes">Yes</li><li id="result-selectable_rcf3553_1" class="dropdown-result result-selectable" role="option" dropdown-index="1" title="No" aria-label="No">No</li></ul><div class="dropdown-loading hide" style="width: 0%;"></div><div style="overflow: hidden; display: block; width:0;height:0;" role="status" id="result-summary_rcf3553">3 results available. Use down and up arrow keys to navigate. </div></div></div></div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div tabindex="-1" class="iCIMS_CollectionContainer PersonProfileFields.Addresses-1-Container"><fieldset class="iCIMS_CollectionGroup iCIMS_OddRow"><legend><span tabindex="-1" class="iCIMS_LabelText" name="labelText" id="PersonProfileFields.Addresses_-1_label">Addresses (1)<span class="Field_Required"><span class="Field_RequiredStar">* </span><span class="sr-only">required.</span></span></span></legend><div class="PersonProfileFields.Addresses-1 iCIMS_TableRow"><div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionLegend iCIMS_TableCell"></div><div class="iCIMS_InfoData iCIMS_TableCell"></div></div><input tabindex="-1" type="hidden" name="portalLabelPersonProfileFields.Addresses-1" id="portalLabelPersonProfileFields.Addresses-1" value="Addresses (1)"><div data-collection="PersonProfileFields.Addresses" data-index="1" class="PersonProfileFields.Addresses-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.AddressStreet1" for="-1_PersonProfileFields.AddressStreet1"><span class="iCIMS_LabelText" name="labelText">Address</span></label><span class="Field_Required"><span class="Field_RequiredStar">* </span><span class="sr-only">required.</span></span></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><input type="text" id="-1_PersonProfileFields.AddressStreet1" name="-1_PersonProfileFields.AddressStreet1" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control" onchange="pageDirtyFlag=true;" aria-required="true" i_required="true" bgtparse="true" maxlength="128" autocomplete="street-address"></div></div><div data-collection="PersonProfileFields.Addresses" data-index="1" class="PersonProfileFields.Addresses-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.AddressStreet2" for="-1_PersonProfileFields.AddressStreet2"><span class="iCIMS_LabelText" name="labelText">Address 2</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><input type="text" id="-1_PersonProfileFields.AddressStreet2" name="-1_PersonProfileFields.AddressStreet2" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull form-control" onchange="pageDirtyFlag=true;" bgtparse="true" maxlength="128" autocomplete="address-line2"></div></div><div data-collection="PersonProfileFields.Addresses" data-index="1" class="PersonProfileFields.Addresses-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.AddressCity" for="-1_PersonProfileFields.AddressCity"><span class="iCIMS_LabelText" name="labelText">City</span></label><span class="Field_Required"><span class="Field_RequiredStar">* </span><span class="sr-only">required.</span></span></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><input type="text" id="-1_PersonProfileFields.AddressCity" name="-1_PersonProfileFields.AddressCity" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control" onchange="pageDirtyFlag=true;" aria-required="true" i_required="true" bgtparse="true" maxlength="64" autocomplete="address-level2"></div></div><div data-collection="PersonProfileFields.Addresses" data-index="1" class="PersonProfileFields.Addresses-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.AddressZip" for="-1_PersonProfileFields.AddressZip"><span class="iCIMS_LabelText" name="labelText">Zip/Postal Code</span></label><span class="Field_Required"><span class="Field_RequiredStar">* </span><span class="sr-only">required.</span></span></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><input type="text" id="-1_PersonProfileFields.AddressZip" name="-1_PersonProfileFields.AddressZip" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control" onchange="pageDirtyFlag=true;" aria-required="true" i_required="true" bgtparse="true" maxlength="16" autocomplete="postal-code"></div></div><div data-collection="PersonProfileFields.Addresses" data-index="1" class="PersonProfileFields.Addresses-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.AddressCountry" for="-1_PersonProfileFields.AddressCountry"><span class="iCIMS_LabelText" name="labelText">Country</span></label><span class="Field_Required"><span class="Field_RequiredStar">* </span><span class="sr-only">required.</span></span></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><select id="-1_PersonProfileFields.AddressCountry" name="-1_PersonProfileFields.AddressCountry" data-label="Country" class=" iCIMS_Forms_Global customFieldContainer iCIMS_Forms_IdDropDown iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control dropdown-hide" onchange="pageDirtyFlag=true;icimsChangeParent('-1_PersonProfileFields.AddressCountry', '-1_PersonProfileFields.AddressState')" icimsdropdown-enabled="1" icimsdropdown-ajax="1" icimsdropdown-search="1" icimsdropdown-selected="" data-ddd-child-link="PersonProfileFields.AddressState" data-ddd-message="Please select a country" data-ddd-no-children="No states available" bgtparse="true" i_required="true" aria-describedby="-1_PersonProfileFields.AddressCountry_error" role="combobox" aria-expanded="false" aria-controls="-1_PersonProfileFields.AddressCountry_listbox" aria-activedescendant="" hash="ca2b49a043d8b8785515fcc4a110beef5afda8f6d088cff23fcebe6a769ac067"><option value="" legacy="true"></option></select><a id="-1_PersonProfileFields.AddressCountry_icimsDropdown" class="dropdown-select" aria-expanded="false" tabindex="0" aria-labelledby="label_-1_PersonProfileFields.AddressCountry" aria-required="true" role="combobox" autocomplete="country-name" aria-label="Country"><span id="-1_PersonProfileFields.AddressCountry_fakeSelected_icimsDropdown" class="dropdown-text"><span class="dropdown-placeholder">— Make a Selection —</span></span><div class="dropdown-arrow-container"><i class="dropdown-arrow"></i></div></a><div id="-1_PersonProfileFields.AddressCountry_icimsDropdown_ctnr" class="dropdown-container dropdown-invisible" aria-owns="-1_PersonProfileFields.AddressCountry_dropdown-results" aria-expanded="false" style="width: 650px;"><input type="text" class="dropdown-search" autocomplete="off" placeholder="— Type to Search —" title="— Type to Search —" aria-label="— Type to Search —" role="combobox" aria-autocomplete="list" aria-controls="-1_PersonProfileFields.AddressCountry_dropdown-results" style="width: 608px;"><div aria-live="polite"><ul id="-1_PersonProfileFields.AddressCountry_dropdown-results" class="dropdown-results" role="listbox" style="max-height: 24em;"><li id="result-selectable_-1_PersonProfileFields.AddressCountry_-1" class="dropdown-result result-selectable" role="option" dropdown-index="-1" title="— Make a Selection —" aria-label="— Make a Selection —"><span class="dropdown-placeholder">— Make a Selection —</span></li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_0" class="dropdown-result result-selectable" role="option" dropdown-index="0" title="United States" aria-label="United States">United States</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_1" class="dropdown-result result-selectable" role="option" dropdown-index="1" title="Afghanistan" aria-label="Afghanistan">Afghanistan</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_2" class="dropdown-result result-selectable" role="option" dropdown-index="2" title="Åland Islands" aria-label="Åland Islands">Åland Islands</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_3" class="dropdown-result result-selectable" role="option" dropdown-index="3" title="Albania" aria-label="Albania">Albania</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_4" class="dropdown-result result-selectable" role="option" dropdown-index="4" title="Algeria" aria-label="Algeria">Algeria</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_5" class="dropdown-result result-selectable" role="option" dropdown-index="5" title="American Samoa" aria-label="American Samoa">American Samoa</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_6" class="dropdown-result result-selectable" role="option" dropdown-index="6" title="Andorra" aria-label="Andorra">Andorra</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_7" class="dropdown-result result-selectable" role="option" dropdown-index="7" title="Angola" aria-label="Angola">Angola</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_8" class="dropdown-result result-selectable" role="option" dropdown-index="8" title="Anguilla" aria-label="Anguilla">Anguilla</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_9" class="dropdown-result result-selectable" role="option" dropdown-index="9" title="Antarctica" aria-label="Antarctica">Antarctica</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_10" class="dropdown-result result-selectable" role="option" dropdown-index="10" title="Antigua And Barbuda" aria-label="Antigua And Barbuda">Antigua And Barbuda</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_11" class="dropdown-result result-selectable" role="option" dropdown-index="11" title="Argentina" aria-label="Argentina">Argentina</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_12" class="dropdown-result result-selectable" role="option" dropdown-index="12" title="Armenia" aria-label="Armenia">Armenia</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_13" class="dropdown-result result-selectable" role="option" dropdown-index="13" title="Aruba" aria-label="Aruba">Aruba</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_14" class="dropdown-result result-selectable" role="option" dropdown-index="14" title="Australia" aria-label="Australia">Australia</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_15" class="dropdown-result result-selectable" role="option" dropdown-index="15" title="Austria" aria-label="Austria">Austria</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_16" class="dropdown-result result-selectable" role="option" dropdown-index="16" title="Azerbaijan" aria-label="Azerbaijan">Azerbaijan</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_17" class="dropdown-result result-selectable" role="option" dropdown-index="17" title="Bahamas" aria-label="Bahamas">Bahamas</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_18" class="dropdown-result result-selectable" role="option" dropdown-index="18" title="Bahrain" aria-label="Bahrain">Bahrain</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_19" class="dropdown-result result-selectable" role="option" dropdown-index="19" title="Bangladesh" aria-label="Bangladesh">Bangladesh</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_20" class="dropdown-result result-selectable" role="option" dropdown-index="20" title="Barbados" aria-label="Barbados">Barbados</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_21" class="dropdown-result result-selectable" role="option" dropdown-index="21" title="Belarus" aria-label="Belarus">Belarus</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_22" class="dropdown-result result-selectable" role="option" dropdown-index="22" title="Belgium" aria-label="Belgium">Belgium</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_23" class="dropdown-result result-selectable" role="option" dropdown-index="23" title="Belize" aria-label="Belize">Belize</li><li id="result-selectable_-1_PersonProfileFields.AddressCountry_24" class="dropdown-result result-selectable" role="option" dropdown-index="24" title="Benin" aria-label="Benin">Benin</li></ul><div class="dropdown-loading hide" style="width: 0%;"></div><div style="overflow: hidden; display: block; width:0;height:0;" role="status" id="result-summary_-1_PersonProfileFields.AddressCountry">26 results available. Use down and up arrow keys to navigate. </div></div></div></div></div><div data-collection="PersonProfileFields.Addresses" data-index="1" class="PersonProfileFields.Addresses-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.AddressState" for="-1_PersonProfileFields.AddressState"><span class="iCIMS_LabelText" name="labelText">State/Province</span></label><span class="Field_Required"><span class="Field_RequiredStar">* </span><span class="sr-only">required.</span></span></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><select id="-1_PersonProfileFields.AddressState" name="-1_PersonProfileFields.AddressState" data-label="State/Province" class=" iCIMS_Forms_Global customFieldContainer iCIMS_Forms_IdDropDown iCIMS_Forms_Qnull iCIMS_Forms_RequiredField form-control dropdown-hide" onchange="pageDirtyFlag=true;" icimsdropdown-enabled="1" icimsdropdown-ajax="1" icimsdropdown-search="1" icimsdropdown-selected="" data-ddd-parent-link="PersonProfileFields.AddressCountry" bgtparse="true" i_required="true" aria-describedby="-1_PersonProfileFields.AddressState_error" role="combobox" aria-expanded="false" aria-controls="-1_PersonProfileFields.AddressState_listbox" aria-activedescendant="" hash="f70ba135908e21ed35deb5bfcaa90d9fdcbe340aeed7dbc160d0c69bcc5141ca"><option value="-999" selected="selected">Please select a country</option></select><a id="-1_PersonProfileFields.AddressState_icimsDropdown" class="dropdown-select" aria-expanded="false" tabindex="0" aria-labelledby="label_-1_PersonProfileFields.AddressState" aria-required="true" role="combobox" autocomplete="address-level1" aria-label="State/Province"><span id="-1_PersonProfileFields.AddressState_fakeSelected_icimsDropdown" class="dropdown-text"><span class="dropdown-placeholder">Please select a country</span></span><div class="dropdown-arrow-container"><i class="dropdown-arrow"></i></div></a><div id="-1_PersonProfileFields.AddressState_icimsDropdown_ctnr" class="dropdown-container dropdown-invisible" aria-owns="-1_PersonProfileFields.AddressState_dropdown-results" aria-expanded="false" style="width: 650px;"><input type="text" class="dropdown-search" autocomplete="off" placeholder="— Type to Search —" title="— Type to Search —" aria-label="— Type to Search —" role="combobox" aria-autocomplete="list" aria-controls="-1_PersonProfileFields.AddressState_dropdown-results" aria-expanded="false" style="width: 608px;"><div aria-live="polite"><ul id="-1_PersonProfileFields.AddressState_dropdown-results" class="dropdown-results" role="listbox" style="max-height: 24em;"><li id="result-selectable_-1_PersonProfileFields.AddressState_-1" class="dropdown-result result-selectable" role="option" dropdown-index="-1" title="— Make a Selection —" aria-label="— Make a Selection —"><span class="dropdown-placeholder">— Make a Selection —</span></li><li id="result-selectable_-1_PersonProfileFields.AddressState_-1" class="dropdown-result result-unselectable" role="presentation" dropdown-index="-1" title="No Results" aria-label="No Results">No Results</li></ul><div class="dropdown-loading hide" style="width: 0%;"></div><div style="overflow: hidden; display: block; width:0;height:0;" role="status" id="result-summary_-1_PersonProfileFields.AddressState">1 result available. Use down and up arrow keys to navigate.</div></div></div></div></div></fieldset><div class="iCIMS_CollectionButtonsRow"><div class="iCIMS_CollectionButtons iCIMS_OddRow PersonProfileFields.Addresses-1 PersonProfileFields.Addresses-1-Button iCIMS_TableRow"><div></div><div class="iCIMS_InfoData iCIMS_TableCell"><a role="button" class="iCIMS_Anchor" href="javascript:void(0)" onclick="pageDirtyFlag=true; showGroup('PersonProfileFields.Addresses', '-1', '-2', 2, 'recruit')" id="PersonProfileFields.AddressesButton_-1">Add More (Addresses)</a></div></div></div></div>
+
+
+
+
+
+
+</div>
+</div>
+
+<div role="group">
+<h2 class="iCIMS_SubHeader iCIMS_SubHeader_Candidate">Education</h2>
+
+<div class="iCIMS_ProfileFormTable iCIMS_Table">
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div tabindex="-1" class="iCIMS_CollectionContainer CandProfileFields.Education-1-Container"><fieldset class="iCIMS_CollectionGroup iCIMS_OddRow"><legend><span tabindex="-1" class="iCIMS_LabelText" name="labelText" id="CandProfileFields.Education_-1_label">Education (1)</span></legend><div class="CandProfileFields.Education-1 iCIMS_TableRow"><div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionLegend iCIMS_TableCell"></div><div class="iCIMS_InfoData iCIMS_TableCell"></div></div><input tabindex="-1" type="hidden" name="portalLabelCandProfileFields.Education-1" id="portalLabelCandProfileFields.Education-1" value="Education (1)"><div data-collection="CandProfileFields.Education" data-index="1" class="CandProfileFields.Education-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_CandProfileFields.School" for="-1_CandProfileFields.School"><span class="iCIMS_LabelText" name="labelText">School</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><label class="iCIMS_508_Label" for="-1_CandProfileFields.School">School</label><select id="-1_CandProfileFields.School" name="-1_CandProfileFields.School" data-label="School" class=" iCIMS_Forms_Global customFieldContainer iCIMS_Forms_ListEditorField iCIMS_Forms_Qnull form-control dropdown-hide" aria-label="School" bgtparse="true" list="lists.school" type="3081" onchange="pageDirtyFlag=true;if (this.options[this.selectedIndex].value == -1) { return addItemToSelectFieldNLevelList(this); }else{ this.prevIndex = this.selectedIndex; } " icimsdropdown-enabled="1" icimsdropdown-ajax="1" icimsdropdown-search="1" icimsdropdown-selected="" hash="c4586fb4f5fd508db2b894517df44d883af976a754e031c24c11db0ca823e180"><option value="" legacy="true"></option></select><a id="-1_CandProfileFields.School_icimsDropdown" class="dropdown-select" aria-expanded="false" tabindex="0" aria-label="School" role="combobox"><span id="-1_CandProfileFields.School_fakeSelected_icimsDropdown" class="dropdown-text"><span class="dropdown-placeholder">— Make a Selection —</span></span><div class="dropdown-arrow-container"><i class="dropdown-arrow"></i></div></a><div id="-1_CandProfileFields.School_icimsDropdown_ctnr" class="dropdown-container dropdown-invisible" aria-owns="-1_CandProfileFields.School_dropdown-results" aria-expanded="false" style="width: 650px;"><input type="text" class="dropdown-search" autocomplete="off" placeholder="— Type to Search —" title="— Type to Search —" aria-label="— Type to Search —" role="combobox" aria-autocomplete="list" aria-controls="-1_CandProfileFields.School_dropdown-results" style="width: 608px;"><div aria-live="polite"><ul id="-1_CandProfileFields.School_dropdown-results" class="dropdown-results" role="listbox" style="max-height: 24em;"><li id="result-selectable_-1_CandProfileFields.School_-1" class="dropdown-result result-selectable" role="option" dropdown-index="-1" title="— Make a Selection —" aria-label="— Make a Selection —"><span class="dropdown-placeholder">— Make a Selection —</span></li><li id="result-selectable_-1_CandProfileFields.School_0" class="dropdown-result result-selectable" role="option" dropdown-index="0" title="2nd Military Medical University" aria-label="2nd Military Medical University">2nd Military Medical University</li><li id="result-selectable_-1_CandProfileFields.School_1" class="dropdown-result result-selectable" role="option" dropdown-index="1" title="3rd Military Medical University" aria-label="3rd Military Medical University">3rd Military Medical University</li><li id="result-selectable_-1_CandProfileFields.School_2" class="dropdown-result result-selectable" role="option" dropdown-index="2" title="4th Military Medical University" aria-label="4th Military Medical University">4th Military Medical University</li><li id="result-selectable_-1_CandProfileFields.School_3" class="dropdown-result result-selectable" role="option" dropdown-index="3" title="A. C. Patil College of Engineering" aria-label="A. C. Patil College of Engineering">A. C. Patil College of Engineering</li><li id="result-selectable_-1_CandProfileFields.School_4" class="dropdown-result result-selectable" role="option" dropdown-index="4" title="A.T. Still University of Health Sciences" aria-label="A.T. Still University of Health Sciences">A.T. Still University of Health Sciences</li><li id="result-selectable_-1_CandProfileFields.School_5" class="dropdown-result result-selectable" role="option" dropdown-index="5" title="Aakers Business College" aria-label="Aakers Business College">Aakers Business College</li><li id="result-selectable_-1_CandProfileFields.School_6" class="dropdown-result result-selectable" role="option" dropdown-index="6" title="Aalborg University" aria-label="Aalborg University">Aalborg University</li><li id="result-selectable_-1_CandProfileFields.School_7" class="dropdown-result result-selectable" role="option" dropdown-index="7" title="Aalto University" aria-label="Aalto University">Aalto University</li><li id="result-selectable_-1_CandProfileFields.School_8" class="dropdown-result result-selectable" role="option" dropdown-index="8" title="Aarhus School of Architecture (Arkitektskolen Aarhus)" aria-label="Aarhus School of Architecture (Arkitektskolen Aarhus)">Aarhus School of Architecture (Arkitektskolen Aarhus)</li><li id="result-selectable_-1_CandProfileFields.School_9" class="dropdown-result result-selectable" role="option" dropdown-index="9" title="Aarhus Tekniske Skole" aria-label="Aarhus Tekniske Skole">Aarhus Tekniske Skole</li><li id="result-selectable_-1_CandProfileFields.School_10" class="dropdown-result result-selectable" role="option" dropdown-index="10" title="Aarhus University" aria-label="Aarhus University">Aarhus University</li><li id="result-selectable_-1_CandProfileFields.School_11" class="dropdown-result result-selectable" role="option" dropdown-index="11" title="Abai Kazakh National Pedagogical University" aria-label="Abai Kazakh National Pedagogical University">Abai Kazakh National Pedagogical University</li><li id="result-selectable_-1_CandProfileFields.School_12" class="dropdown-result result-selectable" role="option" dropdown-index="12" title="ABE International Business College" aria-label="ABE International Business College">ABE International Business College</li><li id="result-selectable_-1_CandProfileFields.School_13" class="dropdown-result result-selectable" role="option" dropdown-index="13" title="Aberystwyth University (Prifysgol Aberystwyth)" aria-label="Aberystwyth University (Prifysgol Aberystwyth)">Aberystwyth University (Prifysgol Aberystwyth)</li><li id="result-selectable_-1_CandProfileFields.School_14" class="dropdown-result result-selectable" role="option" dropdown-index="14" title="Abilene Christian University" aria-label="Abilene Christian University">Abilene Christian University</li><li id="result-selectable_-1_CandProfileFields.School_15" class="dropdown-result result-selectable" role="option" dropdown-index="15" title="Abingdon &amp;amp; Witney College" aria-label="Abingdon &amp;amp; Witney College">Abingdon &amp; Witney College</li><li id="result-selectable_-1_CandProfileFields.School_16" class="dropdown-result result-selectable" role="option" dropdown-index="16" title="Abington Memorial Hospital Dixon School of Nursing" aria-label="Abington Memorial Hospital Dixon School of Nursing">Abington Memorial Hospital Dixon School of Nursing</li><li id="result-selectable_-1_CandProfileFields.School_17" class="dropdown-result result-selectable" role="option" dropdown-index="17" title="Åbo Akademi University" aria-label="Åbo Akademi University">Åbo Akademi University</li><li id="result-selectable_-1_CandProfileFields.School_18" class="dropdown-result result-selectable" role="option" dropdown-index="18" title="Abraham Baldwin Agricultural College" aria-label="Abraham Baldwin Agricultural College">Abraham Baldwin Agricultural College</li><li id="result-selectable_-1_CandProfileFields.School_19" class="dropdown-result result-selectable" role="option" dropdown-index="19" title="Abubakar Tafawa Balewa University" aria-label="Abubakar Tafawa Balewa University">Abubakar Tafawa Balewa University</li><li id="result-selectable_-1_CandProfileFields.School_20" class="dropdown-result result-selectable" role="option" dropdown-index="20" title="Academiat Addirasat Alulia" aria-label="Academiat Addirasat Alulia">Academiat Addirasat Alulia</li><li id="result-selectable_-1_CandProfileFields.School_21" class="dropdown-result result-selectable" role="option" dropdown-index="21" title="Academic College of Tel-Aviv Yaffo" aria-label="Academic College of Tel-Aviv Yaffo">Academic College of Tel-Aviv Yaffo</li><li id="result-selectable_-1_CandProfileFields.School_22" class="dropdown-result result-selectable" role="option" dropdown-index="22" title="Académie de l&amp;#039;Entrepreneurship Québécois" aria-label="Académie de l&amp;#039;Entrepreneurship Québécois">Académie de l'Entrepreneurship Québécois</li><li id="result-selectable_-1_CandProfileFields.School_23" class="dropdown-result result-selectable" role="option" dropdown-index="23" title="Academy Canada" aria-label="Academy Canada">Academy Canada</li><li id="result-selectable_-1_CandProfileFields.School_24" class="dropdown-result result-selectable" role="option" dropdown-index="24" title="Academy College" aria-label="Academy College">Academy College</li></ul><div class="dropdown-loading hide" style="width: 0%;"></div><div style="overflow: hidden; display: block; width:0;height:0;" role="status" id="result-summary_-1_CandProfileFields.School">26 results available. Use down and up arrow keys to navigate. </div></div></div></div></div><div data-collection="CandProfileFields.Education" data-index="1" class="CandProfileFields.Education-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_CandProfileFields.OtherSchool" for="-1_CandProfileFields.OtherSchool"><span class="iCIMS_LabelText" name="labelText">Other School</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><input type="text" id="-1_CandProfileFields.OtherSchool" name="-1_CandProfileFields.OtherSchool" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull form-control" onchange="pageDirtyFlag=true;" bgtparse="true" maxlength="256"></div></div><div data-collection="CandProfileFields.Education" data-index="1" class="CandProfileFields.Education-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_CandProfileFields.Degree" for="-1_CandProfileFields.Degree"><span class="iCIMS_LabelText" name="labelText">Degree</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><label class="iCIMS_508_Label" for="-1_CandProfileFields.Degree">Degree</label><select id="-1_CandProfileFields.Degree" name="-1_CandProfileFields.Degree" data-label="Degree" class=" iCIMS_Forms_Global customFieldContainer iCIMS_Forms_ListEditorField iCIMS_Forms_Qnull form-control dropdown-hide" aria-label="Degree" bgtparse="true" list="lists.school.degree" type="3081" onchange="pageDirtyFlag=true;if (this.options[this.selectedIndex].value == -1) { return addItemToSelectFieldNLevelList(this); }else{ this.prevIndex = this.selectedIndex; } " icimsdropdown-enabled="1" icimsdropdown-ajax="1" icimsdropdown-search="1" icimsdropdown-selected="" hash="049ea6da524868b3a088b720e54dbd97b38cf49848b4d6272a4d86547091e33b"><option value="" legacy="true"></option></select><a id="-1_CandProfileFields.Degree_icimsDropdown" class="dropdown-select" aria-expanded="false" tabindex="0" aria-label="Degree" role="combobox"><span id="-1_CandProfileFields.Degree_fakeSelected_icimsDropdown" class="dropdown-text"><span class="dropdown-placeholder">— Make a Selection —</span></span><div class="dropdown-arrow-container"><i class="dropdown-arrow"></i></div></a><div id="-1_CandProfileFields.Degree_icimsDropdown_ctnr" class="dropdown-container dropdown-invisible" aria-owns="-1_CandProfileFields.Degree_dropdown-results" aria-expanded="false" style="width: 650px;"><input type="text" class="dropdown-search" autocomplete="off" placeholder="— Type to Search —" title="— Type to Search —" aria-label="— Type to Search —" role="combobox" aria-autocomplete="list" aria-controls="-1_CandProfileFields.Degree_dropdown-results" style="width: 608px;"><div aria-live="polite"><ul id="-1_CandProfileFields.Degree_dropdown-results" class="dropdown-results" role="listbox" style="max-height: 24em;"><li id="result-selectable_-1_CandProfileFields.Degree_-1" class="dropdown-result result-selectable" role="option" dropdown-index="-1" title="— Make a Selection —" aria-label="— Make a Selection —"><span class="dropdown-placeholder">— Make a Selection —</span></li><li id="result-selectable_-1_CandProfileFields.Degree_0" class="dropdown-result result-selectable" role="option" dropdown-index="0" title="AS" aria-label="AS">AS</li><li id="result-selectable_-1_CandProfileFields.Degree_1" class="dropdown-result result-selectable" role="option" dropdown-index="1" title="BS" aria-label="BS">BS</li><li id="result-selectable_-1_CandProfileFields.Degree_2" class="dropdown-result result-selectable" role="option" dropdown-index="2" title="MS" aria-label="MS">MS</li><li id="result-selectable_-1_CandProfileFields.Degree_3" class="dropdown-result result-selectable" role="option" dropdown-index="3" title="PhD" aria-label="PhD">PhD</li><li id="result-selectable_-1_CandProfileFields.Degree_4" class="dropdown-result result-selectable" role="option" dropdown-index="4" title="MBA" aria-label="MBA">MBA</li><li id="result-selectable_-1_CandProfileFields.Degree_5" class="dropdown-result result-selectable" role="option" dropdown-index="5" title="MCS" aria-label="MCS">MCS</li><li id="result-selectable_-1_CandProfileFields.Degree_6" class="dropdown-result result-selectable" role="option" dropdown-index="6" title="BCS" aria-label="BCS">BCS</li><li id="result-selectable_-1_CandProfileFields.Degree_7" class="dropdown-result result-selectable" role="option" dropdown-index="7" title="BA" aria-label="BA">BA</li><li id="result-selectable_-1_CandProfileFields.Degree_8" class="dropdown-result result-selectable" role="option" dropdown-index="8" title="Bachelors" aria-label="Bachelors">Bachelors</li><li id="result-selectable_-1_CandProfileFields.Degree_9" class="dropdown-result result-selectable" role="option" dropdown-index="9" title="HS Diploma" aria-label="HS Diploma">HS Diploma</li><li id="result-selectable_-1_CandProfileFields.Degree_10" class="dropdown-result result-selectable" role="option" dropdown-index="10" title="Master&amp;#039;s in Industrial and Syste" aria-label="Master&amp;#039;s in Industrial and Syste">Master's in Industrial and Syste</li><li id="result-selectable_-1_CandProfileFields.Degree_11" class="dropdown-result result-selectable" role="option" dropdown-index="11" title="HS" aria-label="HS">HS</li><li id="result-selectable_-1_CandProfileFields.Degree_12" class="dropdown-result result-selectable" role="option" dropdown-index="12" title="BBA" aria-label="BBA">BBA</li><li id="result-selectable_-1_CandProfileFields.Degree_13" class="dropdown-result result-selectable" role="option" dropdown-index="13" title="Masters" aria-label="Masters">Masters</li><li id="result-selectable_-1_CandProfileFields.Degree_14" class="dropdown-result result-selectable" role="option" dropdown-index="14" title="AA" aria-label="AA">AA</li><li id="result-selectable_-1_CandProfileFields.Degree_15" class="dropdown-result result-selectable" role="option" dropdown-index="15" title="Bachelor of Science" aria-label="Bachelor of Science">Bachelor of Science</li><li id="result-selectable_-1_CandProfileFields.Degree_16" class="dropdown-result result-selectable" role="option" dropdown-index="16" title="Master of Science in Computer Sc" aria-label="Master of Science in Computer Sc">Master of Science in Computer Sc</li><li id="result-selectable_-1_CandProfileFields.Degree_17" class="dropdown-result result-selectable" role="option" dropdown-index="17" title="Bachelor of Arts" aria-label="Bachelor of Arts">Bachelor of Arts</li><li id="result-selectable_-1_CandProfileFields.Degree_18" class="dropdown-result result-selectable" role="option" dropdown-index="18" title="Some college" aria-label="Some college">Some college</li><li id="result-selectable_-1_CandProfileFields.Degree_19" class="dropdown-result result-selectable" role="option" dropdown-index="19" title="Master of Business Administratio" aria-label="Master of Business Administratio">Master of Business Administratio</li><li id="result-selectable_-1_CandProfileFields.Degree_20" class="dropdown-result result-selectable" role="option" dropdown-index="20" title="Master of science" aria-label="Master of science">Master of science</li><li id="result-selectable_-1_CandProfileFields.Degree_21" class="dropdown-result result-selectable" role="option" dropdown-index="21" title="GRD" aria-label="GRD">GRD</li><li id="result-selectable_-1_CandProfileFields.Degree_22" class="dropdown-result result-selectable" role="option" dropdown-index="22" title="Doctorate" aria-label="Doctorate">Doctorate</li><li id="result-selectable_-1_CandProfileFields.Degree_23" class="dropdown-result result-selectable" role="option" dropdown-index="23" title="MA" aria-label="MA">MA</li><li id="result-selectable_-1_CandProfileFields.Degree_24" class="dropdown-result result-selectable" role="option" dropdown-index="24" title="GED" aria-label="GED">GED</li></ul><div class="dropdown-loading hide" style="width: 0%;"></div><div style="overflow: hidden; display: block; width:0;height:0;" role="status" id="result-summary_-1_CandProfileFields.Degree">26 results available. Use down and up arrow keys to navigate. </div></div></div></div></div><div data-collection="CandProfileFields.Education" data-index="1" class="CandProfileFields.Education-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_CandProfileFields.IsGraduated" for="-1_CandProfileFields.IsGraduated"><span class="iCIMS_LabelText" name="labelText">Did You Graduate?</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><select id="-1_CandProfileFields.IsGraduated" name="-1_CandProfileFields.IsGraduated" data-label="Did You Graduate?" class=" iCIMS_Forms_Global customFieldContainer iCIMS_Forms_ListEditorField iCIMS_Forms_Qnull form-control" aria-label="Did You Graduate?" bgtparse="true" list="lists.customfields_lists" type="3081" onchange="pageDirtyFlag=true;if (this.options[this.selectedIndex].value == -1) { return addItemToSelectFieldNLevelList(this); }else{ this.prevIndex = this.selectedIndex; } " icimsdropdown-enabled="0" icimsdropdown-ajax="1" icimsdropdown-search="0" icimsdropdown-selected="" hash="a27b83f0f73add7a69f970a6f153c5bdbe3ef531a9c3ab0d70765d4183264eeb"><option value="" legacy="true"></option><option title="Yes" value="20466">Yes</option><option title="No" value="20467">No</option></select></div></div></fieldset><div class="iCIMS_CollectionButtonsRow"><div class="iCIMS_CollectionButtons iCIMS_OddRow CandProfileFields.Education-1 CandProfileFields.Education-1-Button iCIMS_TableRow"><div></div><div class="iCIMS_InfoData iCIMS_TableCell"><a role="button" class="iCIMS_Anchor" href="javascript:void(0)" onclick="pageDirtyFlag=true; showGroup('CandProfileFields.Education', '-1', '-2', 2, 'recruit')" id="CandProfileFields.EducationButton_-1">Add More (Education)</a></div></div></div></div>
+
+
+
+
+
+
+</div>
+</div>
+
+<div role="group">
+<h2 class="iCIMS_SubHeader iCIMS_SubHeader_Candidate">Professional Experience</h2>
+
+<div class="iCIMS_ProfileFormTable iCIMS_Table">
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div tabindex="-1" class="iCIMS_CollectionContainer rcf3211-1-Container"><fieldset class="iCIMS_CollectionGroup iCIMS_OddRow"><legend><span tabindex="-1" class="iCIMS_LabelText" name="labelText" id="rcf3211_-1_label">Professional Experience (1)</span></legend><div class="rcf3211-1 iCIMS_TableRow"><div class="iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionLegend iCIMS_TableCell"></div><div class="iCIMS_InfoData iCIMS_TableCell"></div></div><input tabindex="-1" type="hidden" name="portalLabelrcf3211-1" id="portalLabelrcf3211-1" value="Professional Experience (1)"><div data-collection="rcf3211" data-index="1" class="rcf3211-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3212" for="-1_PersonProfileFields.rcf3212"><span class="iCIMS_LabelText" name="labelText">Employer</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><input type="text" id="-1_PersonProfileFields.rcf3212" name="-1_PersonProfileFields.rcf3212" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull form-control" onchange="pageDirtyFlag=true;" bgtparse="true" maxlength="128"></div></div><div data-collection="rcf3211" data-index="1" class="rcf3211-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3264" for="-1_PersonProfileFields.rcf3264"><span class="iCIMS_LabelText" name="labelText">Address</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><input type="text" id="-1_PersonProfileFields.rcf3264" name="-1_PersonProfileFields.rcf3264" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull form-control" onchange="pageDirtyFlag=true;" bgtparse="true" maxlength="128"></div></div><div data-collection="rcf3211" data-index="1" class="rcf3211-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3216" for="-1_PersonProfileFields.rcf3216"><span class="iCIMS_LabelText" name="labelText">City</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><input type="text" id="-1_PersonProfileFields.rcf3216" name="-1_PersonProfileFields.rcf3216" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull form-control" onchange="pageDirtyFlag=true;" bgtparse="true" maxlength="128"></div></div><div data-collection="rcf3211" data-index="1" class="rcf3211-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3265" for="-1_PersonProfileFields.rcf3265"><span class="iCIMS_LabelText" name="labelText">Zip</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><input type="text" id="-1_PersonProfileFields.rcf3265" name="-1_PersonProfileFields.rcf3265" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull form-control" onchange="pageDirtyFlag=true;" bgtparse="true" maxlength="64"></div></div><div data-collection="rcf3211" data-index="1" class="rcf3211-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3218" for="-1_PersonProfileFields.rcf3218"><span class="iCIMS_LabelText" name="labelText">Country</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><select id="-1_PersonProfileFields.rcf3218" name="-1_PersonProfileFields.rcf3218" data-label="Country" class=" iCIMS_Forms_Global customFieldContainer iCIMS_Forms_IdDropDown iCIMS_Forms_Qnull form-control dropdown-hide" onchange="pageDirtyFlag=true;icimsChangeParent('-1_PersonProfileFields.rcf3218', '-1_PersonProfileFields.rcf3217')" icimsdropdown-enabled="1" icimsdropdown-ajax="1" icimsdropdown-search="1" icimsdropdown-selected="" data-ddd-child-link="rcf3217" data-ddd-message="Please select a country" data-ddd-no-children="No states available" bgtparse="true" hash="ae632d36cbb77f65f507b869ae9b8888ce34d6855de3f95e4af15cc4db16f6e2"><option value="" legacy="true"></option></select><a id="-1_PersonProfileFields.rcf3218_icimsDropdown" class="dropdown-select" aria-expanded="false" tabindex="0" aria-labelledby="label_-1_PersonProfileFields.rcf3218" role="combobox" aria-label="Country"><span id="-1_PersonProfileFields.rcf3218_fakeSelected_icimsDropdown" class="dropdown-text"><span class="dropdown-placeholder">— Make a Selection —</span></span><div class="dropdown-arrow-container"><i class="dropdown-arrow"></i></div></a><div id="-1_PersonProfileFields.rcf3218_icimsDropdown_ctnr" class="dropdown-container dropdown-invisible" aria-owns="-1_PersonProfileFields.rcf3218_dropdown-results" aria-expanded="false" style="width: 650px;"><input type="text" class="dropdown-search" autocomplete="off" placeholder="— Type to Search —" title="— Type to Search —" aria-label="— Type to Search —" role="combobox" aria-autocomplete="list" aria-controls="-1_PersonProfileFields.rcf3218_dropdown-results" style="width: 608px;"><div aria-live="polite"><ul id="-1_PersonProfileFields.rcf3218_dropdown-results" class="dropdown-results" role="listbox" style="max-height: 24em;"><li id="result-selectable_-1_PersonProfileFields.rcf3218_-1" class="dropdown-result result-selectable" role="option" dropdown-index="-1" title="— Make a Selection —" aria-label="— Make a Selection —"><span class="dropdown-placeholder">— Make a Selection —</span></li><li id="result-selectable_-1_PersonProfileFields.rcf3218_0" class="dropdown-result result-selectable" role="option" dropdown-index="0" title="United States" aria-label="United States">United States</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_1" class="dropdown-result result-selectable" role="option" dropdown-index="1" title="Afghanistan" aria-label="Afghanistan">Afghanistan</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_2" class="dropdown-result result-selectable" role="option" dropdown-index="2" title="Åland Islands" aria-label="Åland Islands">Åland Islands</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_3" class="dropdown-result result-selectable" role="option" dropdown-index="3" title="Albania" aria-label="Albania">Albania</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_4" class="dropdown-result result-selectable" role="option" dropdown-index="4" title="Algeria" aria-label="Algeria">Algeria</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_5" class="dropdown-result result-selectable" role="option" dropdown-index="5" title="American Samoa" aria-label="American Samoa">American Samoa</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_6" class="dropdown-result result-selectable" role="option" dropdown-index="6" title="Andorra" aria-label="Andorra">Andorra</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_7" class="dropdown-result result-selectable" role="option" dropdown-index="7" title="Angola" aria-label="Angola">Angola</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_8" class="dropdown-result result-selectable" role="option" dropdown-index="8" title="Anguilla" aria-label="Anguilla">Anguilla</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_9" class="dropdown-result result-selectable" role="option" dropdown-index="9" title="Antarctica" aria-label="Antarctica">Antarctica</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_10" class="dropdown-result result-selectable" role="option" dropdown-index="10" title="Antigua And Barbuda" aria-label="Antigua And Barbuda">Antigua And Barbuda</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_11" class="dropdown-result result-selectable" role="option" dropdown-index="11" title="Argentina" aria-label="Argentina">Argentina</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_12" class="dropdown-result result-selectable" role="option" dropdown-index="12" title="Armenia" aria-label="Armenia">Armenia</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_13" class="dropdown-result result-selectable" role="option" dropdown-index="13" title="Aruba" aria-label="Aruba">Aruba</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_14" class="dropdown-result result-selectable" role="option" dropdown-index="14" title="Australia" aria-label="Australia">Australia</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_15" class="dropdown-result result-selectable" role="option" dropdown-index="15" title="Austria" aria-label="Austria">Austria</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_16" class="dropdown-result result-selectable" role="option" dropdown-index="16" title="Azerbaijan" aria-label="Azerbaijan">Azerbaijan</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_17" class="dropdown-result result-selectable" role="option" dropdown-index="17" title="Bahamas" aria-label="Bahamas">Bahamas</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_18" class="dropdown-result result-selectable" role="option" dropdown-index="18" title="Bahrain" aria-label="Bahrain">Bahrain</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_19" class="dropdown-result result-selectable" role="option" dropdown-index="19" title="Bangladesh" aria-label="Bangladesh">Bangladesh</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_20" class="dropdown-result result-selectable" role="option" dropdown-index="20" title="Barbados" aria-label="Barbados">Barbados</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_21" class="dropdown-result result-selectable" role="option" dropdown-index="21" title="Belarus" aria-label="Belarus">Belarus</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_22" class="dropdown-result result-selectable" role="option" dropdown-index="22" title="Belgium" aria-label="Belgium">Belgium</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_23" class="dropdown-result result-selectable" role="option" dropdown-index="23" title="Belize" aria-label="Belize">Belize</li><li id="result-selectable_-1_PersonProfileFields.rcf3218_24" class="dropdown-result result-selectable" role="option" dropdown-index="24" title="Benin" aria-label="Benin">Benin</li></ul><div class="dropdown-loading hide" style="width: 0%;"></div><div style="overflow: hidden; display: block; width:0;height:0;" role="status" id="result-summary_-1_PersonProfileFields.rcf3218">26 results available. Use down and up arrow keys to navigate. </div></div></div></div></div><div data-collection="rcf3211" data-index="1" class="rcf3211-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3217" for="-1_PersonProfileFields.rcf3217"><span class="iCIMS_LabelText" name="labelText">State</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><select id="-1_PersonProfileFields.rcf3217" name="-1_PersonProfileFields.rcf3217" data-label="State" class=" iCIMS_Forms_Global customFieldContainer iCIMS_Forms_IdDropDown iCIMS_Forms_Qnull form-control dropdown-hide" onchange="pageDirtyFlag=true;" icimsdropdown-enabled="1" icimsdropdown-ajax="1" icimsdropdown-search="1" icimsdropdown-selected="" data-ddd-parent-link="PersonProfileFields.rcf3218" bgtparse="true" hash="3f60d85833a42d38c479dc17739bf928c8c36c742755baf160084696c3574c8b"><option value="-999" selected="selected">Please select a country</option></select><a id="-1_PersonProfileFields.rcf3217_icimsDropdown" class="dropdown-select" aria-expanded="false" tabindex="0" aria-labelledby="label_-1_PersonProfileFields.rcf3217" role="combobox" aria-label="State"><span id="-1_PersonProfileFields.rcf3217_fakeSelected_icimsDropdown" class="dropdown-text"><span class="dropdown-placeholder">Please select a country</span></span><div class="dropdown-arrow-container"><i class="dropdown-arrow"></i></div></a><div id="-1_PersonProfileFields.rcf3217_icimsDropdown_ctnr" class="dropdown-container dropdown-invisible" aria-owns="-1_PersonProfileFields.rcf3217_dropdown-results" aria-expanded="false" style="width: 650px;"><input type="text" class="dropdown-search" autocomplete="off" placeholder="— Type to Search —" title="— Type to Search —" aria-label="— Type to Search —" role="combobox" aria-autocomplete="list" aria-controls="-1_PersonProfileFields.rcf3217_dropdown-results" aria-expanded="false" style="width: 608px;"><div aria-live="polite"><ul id="-1_PersonProfileFields.rcf3217_dropdown-results" class="dropdown-results" role="listbox" style="max-height: 24em;"><li id="result-selectable_-1_PersonProfileFields.rcf3217_-1" class="dropdown-result result-selectable" role="option" dropdown-index="-1" title="— Make a Selection —" aria-label="— Make a Selection —"><span class="dropdown-placeholder">— Make a Selection —</span></li><li id="result-selectable_-1_PersonProfileFields.rcf3217_-1" class="dropdown-result result-unselectable" role="presentation" dropdown-index="-1" title="No Results" aria-label="No Results">No Results</li></ul><div class="dropdown-loading hide" style="width: 0%;"></div><div style="overflow: hidden; display: block; width:0;height:0;" role="status" id="result-summary_-1_PersonProfileFields.rcf3217">1 result available. Use down and up arrow keys to navigate.</div></div></div></div></div><div data-collection="rcf3211" data-index="1" class="rcf3211-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3213" for="-1_PersonProfileFields.rcf3213"><span class="iCIMS_LabelText" name="labelText">Title</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><input type="text" id="-1_PersonProfileFields.rcf3213" name="-1_PersonProfileFields.rcf3213" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextField iCIMS_Forms_Qnull form-control" onchange="pageDirtyFlag=true;" bgtparse="true" maxlength="64"></div></div><div data-collection="rcf3211" data-index="1" class="rcf3211-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3269" for="-1_PersonProfileFields.rcf3269"><span class="iCIMS_LabelText" name="labelText">Is this your current job?</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><label class="iCIMS_508_Label" for="-1_PersonProfileFields.rcf3269">Is this your current job?</label><select id="-1_PersonProfileFields.rcf3269" name="-1_PersonProfileFields.rcf3269" data-label="Is this your current job?" class=" iCIMS_Forms_Global customFieldContainer iCIMS_Forms_ListEditorField iCIMS_Forms_Qnull form-control dropdown-hide" aria-label="Is this your current job?" bgtparse="true" list="lists.customfields_lists" type="3211" onchange="pageDirtyFlag=true;if (this.options[this.selectedIndex].value == -1) { return addItemToSelectFieldNLevelList(this); }else{ this.prevIndex = this.selectedIndex; } " icimsdropdown-enabled="1" icimsdropdown-ajax="1" icimsdropdown-search="0" icimsdropdown-selected="" hash="7584d0d15ad8a0b671bb731a92ae49fb0ea0a64f682b4bf018be132c657b0d7e"><option value="" legacy="true"></option></select><a id="-1_PersonProfileFields.rcf3269_icimsDropdown" class="dropdown-select" aria-expanded="false" tabindex="0" aria-label="Is this your current job?" role="combobox"><span id="-1_PersonProfileFields.rcf3269_fakeSelected_icimsDropdown" class="dropdown-text"><span class="dropdown-placeholder">— Make a Selection —</span></span><div class="dropdown-arrow-container"><i class="dropdown-arrow"></i></div></a><div id="-1_PersonProfileFields.rcf3269_icimsDropdown_ctnr" class="dropdown-container dropdown-invisible" aria-owns="-1_PersonProfileFields.rcf3269_dropdown-results" aria-expanded="false" style="width: 650px;"><input type="text" class="dropdown-search dropdown-invisible" autocomplete="off" placeholder="— Type to Search —" title="— Type to Search —" aria-label="— Type to Search —" role="combobox" aria-hidden="true" style="width: 608px;"><div aria-live="polite"><ul id="-1_PersonProfileFields.rcf3269_dropdown-results" class="dropdown-results" role="listbox" style="max-height: 24em;"><li id="result-selectable_-1_PersonProfileFields.rcf3269_-1" class="dropdown-result result-selectable" role="option" dropdown-index="-1" title="— Make a Selection —" aria-label="— Make a Selection —"><span class="dropdown-placeholder">— Make a Selection —</span></li><li id="result-selectable_-1_PersonProfileFields.rcf3269_0" class="dropdown-result result-selectable" role="option" dropdown-index="0" title="Yes" aria-label="Yes">Yes</li><li id="result-selectable_-1_PersonProfileFields.rcf3269_1" class="dropdown-result result-selectable" role="option" dropdown-index="1" title="No" aria-label="No">No</li></ul><div class="dropdown-loading hide" style="width: 0%;"></div><div style="overflow: hidden; display: block; width:0;height:0;" role="status" id="result-summary_-1_PersonProfileFields.rcf3269">3 results available. Use down and up arrow keys to navigate. </div></div></div></div></div><div role="group" aria-labelledby="label_-1_PersonProfileFields.rcf3214" data-collection="rcf3211" data-index="1" class="rcf3211-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3214"><span class="iCIMS_LabelText" name="labelText">Start Date</span></label>&nbsp;<label id="label_-1_PersonProfileFields.rcf3214_desc"><span class="iCIMS_LabelText" name="labelText">(Month / Day / Year)</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><div class="iCIMS_Forms_Global  iCIMS_Forms_DateOnlyField iCIMS_Forms_Qnull  iCIMS_Table"><div class="iCIMS_TableRow"><div class="iCIMS_DateField-Month iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3214_Month" class="iCIMS_508_Label" for="-1_PersonProfileFields.rcf3214_Month">Month</label><select id="-1_PersonProfileFields.rcf3214_Month" name="-1_PersonProfileFields.rcf3214_Month" onchange="pageDirtyFlag=true;" aria-labelledby="label_-1_PersonProfileFields.rcf3214 label_-1_PersonProfileFields.rcf3214_Month" class="iCIMS_Forms_Global iCIMS_Forms_MonthInput iCIMS_Forms_DropDown form-control"><option value="0"></option><option value="01">Jan</option><option value="02">Feb</option><option value="03">Mar</option><option value="04">Apr</option><option value="05">May</option><option value="06">Jun</option><option value="07">Jul</option><option value="08">Aug</option><option value="09">Sep</option><option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option></select></div><div class="iCIMS_DateField-Day iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3214_Date" class="iCIMS_508_Label" for="-1_PersonProfileFields.rcf3214_Date">Day</label><select id="-1_PersonProfileFields.rcf3214_Date" name="-1_PersonProfileFields.rcf3214_Date" onchange="pageDirtyFlag=true;" aria-labelledby="label_-1_PersonProfileFields.rcf3214 label_-1_PersonProfileFields.rcf3214_Date" class="iCIMS_Forms_Global iCIMS_Forms_DayInput iCIMS_Forms_DropDown form-control"><option value="0"></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option></select></div><div class="iCIMS_DateField-Year iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3214_Year" class="iCIMS_508_Label" for="-1_PersonProfileFields.rcf3214_Year">Year</label><input type="text" size="6" maxlength="4" id="-1_PersonProfileFields.rcf3214_Year" name="-1_PersonProfileFields.rcf3214_Year" onchange="pageDirtyFlag=true;" aria-labelledby="label_-1_PersonProfileFields.rcf3214 label_-1_PersonProfileFields.rcf3214_Year" class="iCIMS_Forms_Global iCIMS_Forms_YearInput form-control"></div></div></div></div></div><div role="group" aria-labelledby="label_-1_PersonProfileFields.rcf3215" data-collection="rcf3211" data-index="1" class="rcf3211-1 iCIMS_TableRow iCIMS_FieldRow_Inline"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3215"><span class="iCIMS_LabelText" name="labelText">End Date</span></label>&nbsp;<label id="label_-1_PersonProfileFields.rcf3215_desc"><span class="iCIMS_LabelText" name="labelText">(Month / Day / Year)</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><div class="iCIMS_Forms_Global  iCIMS_Forms_DateOnlyField iCIMS_Forms_Qnull  iCIMS_Table"><div class="iCIMS_TableRow"><div class="iCIMS_DateField-Month iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3215_Month" class="iCIMS_508_Label" for="-1_PersonProfileFields.rcf3215_Month">Month</label><select id="-1_PersonProfileFields.rcf3215_Month" name="-1_PersonProfileFields.rcf3215_Month" onchange="pageDirtyFlag=true;" aria-labelledby="label_-1_PersonProfileFields.rcf3215 label_-1_PersonProfileFields.rcf3215_Month" class="iCIMS_Forms_Global iCIMS_Forms_MonthInput iCIMS_Forms_DropDown form-control"><option value="0"></option><option value="01">Jan</option><option value="02">Feb</option><option value="03">Mar</option><option value="04">Apr</option><option value="05">May</option><option value="06">Jun</option><option value="07">Jul</option><option value="08">Aug</option><option value="09">Sep</option><option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option></select></div><div class="iCIMS_DateField-Day iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3215_Date" class="iCIMS_508_Label" for="-1_PersonProfileFields.rcf3215_Date">Day</label><select id="-1_PersonProfileFields.rcf3215_Date" name="-1_PersonProfileFields.rcf3215_Date" onchange="pageDirtyFlag=true;" aria-labelledby="label_-1_PersonProfileFields.rcf3215 label_-1_PersonProfileFields.rcf3215_Date" class="iCIMS_Forms_Global iCIMS_Forms_DayInput iCIMS_Forms_DropDown form-control"><option value="0"></option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option></select></div><div class="iCIMS_DateField-Year iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3215_Year" class="iCIMS_508_Label" for="-1_PersonProfileFields.rcf3215_Year">Year</label><input type="text" size="6" maxlength="4" id="-1_PersonProfileFields.rcf3215_Year" name="-1_PersonProfileFields.rcf3215_Year" onchange="pageDirtyFlag=true;" aria-labelledby="label_-1_PersonProfileFields.rcf3215 label_-1_PersonProfileFields.rcf3215_Year" class="iCIMS_Forms_Global iCIMS_Forms_YearInput form-control"></div></div></div></div></div><div data-collection="rcf3211" data-index="1" class="rcf3211-1 iCIMS_TableRow"><div class=" iCIMS_InfoField iCIMS_InfoField_Candidate iCIMS_CollectionField iCIMS_TableCell"><label id="label_-1_PersonProfileFields.rcf3219" for="-1_PersonProfileFields.rcf3219"><span class="iCIMS_LabelText" name="labelText">Description</span></label></div><div class="iCIMS_InfoData iCIMS_InfoData_Candidate iCIMS_CollectionField iCIMS_TableCell"><textarea id="-1_PersonProfileFields.rcf3219" name="-1_PersonProfileFields.rcf3219" class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_TextBox iCIMS_Forms_Qnull form-control" onchange="pageDirtyFlag=true;" cols="40" rows="10"></textarea></div></div></fieldset><div class="iCIMS_CollectionButtonsRow"><div class="iCIMS_CollectionButtons iCIMS_OddRow rcf3211-1 rcf3211-1-Button iCIMS_TableRow"><div></div><div class="iCIMS_InfoData iCIMS_TableCell"><a role="button" class="iCIMS_Anchor" href="javascript:void(0)" onclick="pageDirtyFlag=true; showGroup('rcf3211', '-1', '-2', 2, 'recruit')" id="rcf3211Button_-1">Add More (Professional Experience)</a></div></div></div></div>
+
+
+
+
+
+
+</div>
+</div>
+
+<div class="iCIMS_ProfileFormTable iCIMS_Table">
+
+<div class="iCIMS_TableRow">
+<div class="iCIMS_TableCell"></div>
+<div class="iCIMS_TableCell">
+<div class="iCIMS_socialDisclaimer"></div>
+</div>
+</div>
+
+<div class="iCIMS_SubmitButtonRow iCIMS_TableRow iCIMS_MobileButton_1">
+<div class="iCIMS_TableCell"></div>
+<div class="iCIMS_SubmitButtonCell iCIMS_TableCell" id="cp_form_submit_label">
+
+
+
+<input type="submit" id="cp_form_submit_i" class="iCIMS_PrimaryButton" name="profileButton" value="Next" onclick="pageDirtyFlag=false;">
+
+
+
+</div>
+</div>
+</div>
+
+
+
+
+</div>
+<script>
+  // Stand-in for iCIMS's own dropdown script -- see the note at the top.
+  // The country <select> carries an inline onchange calling into their
+  // bundle; without a stub every change event throws in a saved page.
+  function icimsChangeParent() {}
+
+  // The extra entries in FULL_LIST are what its search box would fetch;
+  // the page ships only the first page of each list, exactly as the real
+  // one does.
+  var FULL_LIST = {
+    "-1_CandProfileFields.School": ["State University", "Stanford University", "Yale University"],
+    "-1_PersonProfileFields.AddressState": ["New York", "New Jersey", "California"],
+    "-1_PersonProfileFields.rcf3217": ["New York", "New Jersey", "California"]
+  };
+
+  function widgets() {
+    return Array.from(document.querySelectorAll("select[icimsdropdown-enabled='1']"));
+  }
+
+  function choose(select, text, index) {
+    var option = select.querySelector('option[value="' + index + '"]');
+    if (!option) {
+      option = document.createElement("option");
+      option.value = index;
+      option.textContent = text;
+      select.appendChild(option);
+    }
+    select.value = index;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    var fake = document.getElementById(select.id + "_fakeSelected_icimsDropdown");
+    if (fake) fake.textContent = text;
+    var ctnr = document.getElementById(select.id + "_icimsDropdown_ctnr");
+    if (ctnr) ctnr.classList.add("dropdown-invisible");
+  }
+
+  function bindOption(select, li) {
+    li.addEventListener("click", function () {
+      if (li.getAttribute("dropdown-index") === "-1") return;
+      choose(select, li.getAttribute("title") || li.textContent, li.getAttribute("dropdown-index"));
+    });
+  }
+
+  widgets().forEach(function (select) {
+    var list = document.getElementById(select.id + "_dropdown-results");
+    var anchor = document.getElementById(select.id + "_icimsDropdown");
+    var ctnr = document.getElementById(select.id + "_icimsDropdown_ctnr");
+    if (!list || !anchor) return;
+
+    list.querySelectorAll('[role="option"]').forEach(function (li) { bindOption(select, li); });
+
+    anchor.addEventListener("click", function () {
+      if (ctnr) ctnr.classList.toggle("dropdown-invisible");
+    });
+
+    var search = ctnr && ctnr.querySelector("input.dropdown-search");
+    if (!search) return;
+    search.addEventListener("keyup", function () {
+      var query = search.value.trim().toLowerCase();
+      var pool = FULL_LIST[select.id] || [];
+      var hits = pool.filter(function (t) { return t.toLowerCase().indexOf(query) !== -1; });
+      if (!query || !hits.length) return;
+      // Real iCIMS answers over the network; a task turn is close enough to
+      // make the extension actually have to wait for the list to change.
+      setTimeout(function () {
+        list.querySelectorAll('[role="option"]:not([dropdown-index="-1"])').forEach(function (n) { n.remove(); });
+        hits.forEach(function (text, i) {
+          var li = document.createElement("li");
+          li.id = "result-selectable_" + select.id + "_r" + i;
+          li.className = "dropdown-result result-selectable";
+          li.setAttribute("role", "option");
+          li.setAttribute("dropdown-index", String(i));
+          li.setAttribute("title", text);
+          li.textContent = text;
+          bindOption(select, li);
+          list.appendChild(li);
+        });
+      }, 20);
+    });
+  });
+</script>

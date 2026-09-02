@@ -114,9 +114,19 @@ function _containsWhole(alias, norm) {
   return re.test(norm);
 }
 
+// "Other School", "Other Phone", "Other Name" are escape hatches for the
+// field they name -- they're meant to hold what the main one couldn't, so
+// filling them with the same value fills in the wrong thing twice.
+var _ESCAPE_HATCH_RE = /^other\b/;
+
+function isEscapeHatchLabel(label) {
+  return _ESCAPE_HATCH_RE.test(normalize(label));
+}
+
 function matchField(label, minRatio = 0.72) {
   const norm = normalize(label);
   if (!norm) return null;
+  if (_ESCAPE_HATCH_RE.test(norm)) return null;
 
   let bestField = null;
   let bestKey = [-1, -1];
@@ -150,6 +160,19 @@ function matchField(label, minRatio = 0.72) {
   }
 
   return bestScore >= minRatio ? bestField : null;
+}
+
+// Some forms label a field with a word that means nothing on its own -- an
+// iCIMS phone row labels its boxes just "Type" and "Number" -- while naming
+// it perfectly well in machine terms ("PersonProfileFields.PhoneNumber").
+// Only consulted once the visible label has matched nothing, and only trusted
+// for a whole-word alias hit (minRatio above 1 rules out the fuzzy fallback),
+// since a machine name is not written for a human to read.
+function matchFieldByName(name, elemId = "") {
+  const words = `${elemId || ""} ${name || ""}`
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[-_.]/g, " ");
+  return matchField(words, 1.1);
 }
 
 function bestOption(targetValue, options, minRatio = 0.5) {
@@ -235,13 +258,91 @@ const _EXPERIENCE_NAME_KEYWORDS = [
   ["role", "description"],
 ];
 
-function experienceFieldFor(name, elemId = "") {
+// The mirror image of the case above, seen on iCIMS: the fields inside a
+// work-history block are labelled in plain English ("Employer", "Title",
+// "City") but named opaquely ("rcf3212", "rcf3213"), so there the section
+// heading is the safe signal and the label carries the meaning. Matching on
+// these labels is only ever done inside a section whose <legend> names it as
+// work history -- "City" or "Title" on their own are far too generic.
+var _EXPERIENCE_SECTION_KEYWORDS = [
+  "professional experience", "work experience", "employment history",
+  "work history", "employment experience", "previous employment",
+];
+
+var _EXPERIENCE_LABEL_KEYWORDS = [
+  ["is this your current job", "current_checkbox"],
+  ["currently work here", "current_checkbox"],
+  ["current job", "current_checkbox"],
+  ["start date", "start_date"],
+  ["end date", "end_date"],
+  ["employer", "company"],
+  ["company", "company"],
+  ["job title", "title"],
+  ["title", "title"],
+  ["city", "location"],
+  ["location", "location"],
+  ["description", "description"],
+  ["responsibilities", "description"],
+];
+
+function isExperienceSection(section) {
+  const norm = normalize(section);
+  return !!norm && _EXPERIENCE_SECTION_KEYWORDS.some((kw) => norm.includes(kw));
+}
+
+function experienceFieldFor(name, elemId = "", section = "", label = "") {
   const combined = `${elemId || ""} ${name || ""}`.toLowerCase().replace(/-/g, "_");
-  if (!combined.includes("experience")) return null;
-  for (const [keyword, field] of _EXPERIENCE_NAME_KEYWORDS) {
-    if (combined.includes(keyword)) return field;
+  if (combined.includes("experience")) {
+    for (const [keyword, field] of _EXPERIENCE_NAME_KEYWORDS) {
+      if (combined.includes(keyword)) return field;
+    }
+    return null;
+  }
+
+  if (!isExperienceSection(section)) return null;
+  const normLabel = normalize(label);
+  if (!normLabel) return null;
+  for (const [keyword, field] of _EXPERIENCE_LABEL_KEYWORDS) {
+    if (normLabel.includes(keyword)) return field;
   }
   return null;
+}
+
+// A split date control ("Start Date" broken into Month / Day / Year boxes)
+// needs just its own piece of the saved date, not the whole thing. Matched
+// on the box's own label only, and only as the entire label -- anything
+// looser would read "Graduation Date" as a bare day box.
+function datePartFor(label) {
+  const norm = normalize(label);
+  if (norm === "month" || norm === "mm") return "month";
+  if (norm === "year" || norm === "yyyy" || norm === "yy") return "year";
+  if (norm === "day" || norm === "dd") return "day";
+  return null;
+}
+
+var _MONTH_NAMES = [
+  ["01", "Jan", "January"], ["02", "Feb", "February"], ["03", "Mar", "March"],
+  ["04", "Apr", "April"], ["05", "May", "May"], ["06", "Jun", "June"],
+  ["07", "Jul", "July"], ["08", "Aug", "August"], ["09", "Sep", "September"],
+  ["10", "Oct", "October"], ["11", "Nov", "November"], ["12", "Dec", "December"],
+];
+
+// Returns the candidate spellings for one piece of a "YYYY-MM" (or
+// "YYYY-MM-DD") saved date, most specific first, so a Month box can be set
+// whether its options read "06", "6", "Jun" or "June". Empty when that piece
+// isn't in the saved value at all -- profiles store month precision, so a
+// Day box gets nothing rather than a made-up 1st of the month.
+function datePartCandidates(value, part) {
+  const m = (value || "").trim().match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
+  if (!m) return [];
+  const [, year, month, day] = m;
+  if (part === "year") return [year];
+  if (part === "day") return day ? [day, String(Number(day))] : [];
+  if (part === "month") {
+    const names = _MONTH_NAMES[Number(month) - 1] || [];
+    return [month, String(Number(month)), ...names.slice(1)];
+  }
+  return [];
 }
 
 function semanticBool(choiceText) {

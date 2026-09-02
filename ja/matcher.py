@@ -94,6 +94,9 @@ def _contains_whole(alias: str, norm: str) -> bool:
     return re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", norm) is not None
 
 
+_ESCAPE_HATCH_RE = re.compile(r"^other\\b")
+
+
 def match_field(label: str, min_ratio: float = 0.72) -> str | None:
     """Return the canonical profile field name a form label most likely refers to.
 
@@ -106,6 +109,11 @@ def match_field(label: str, min_ratio: float = 0.72) -> str | None:
     """
     norm = normalize(label)
     if not norm:
+        return None
+    # "Other School", "Other Phone", "Other Name" are escape hatches for the
+    # field they name -- meant to hold what the main one couldn't, so filling
+    # them with the same value fills in the wrong thing twice.
+    if _ESCAPE_HATCH_RE.match(norm):
         return None
 
     best_field = None

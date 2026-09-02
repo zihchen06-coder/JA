@@ -11,7 +11,10 @@ var FIELD_ALIASES = {
   email: ["email", "e mail", "email address"],
   phone: ["phone", "phone number", "mobile", "mobile number", "telephone", "cell phone", "cell number"],
   address_line1: ["address", "street address", "address line 1", "home address"],
-  address_line2: ["address line 2", "apt suite", "apartment unit", "unit number"],
+  address_line2: [
+    "address line 2", "address 2", "street address 2",
+    "apt suite", "apartment unit", "unit number",
+  ],
   city: ["city", "town"],
   state: ["state", "province", "state province", "region"],
   postal_code: ["zip", "zip code", "postal", "postal code", "postcode"],
@@ -154,6 +157,7 @@ var FIELD_ALIASES = {
   previously_employed_here: [
     "previously employed", "ever worked for", "former employee",
     "worked here before", "previously worked for",
+    "worked with us before", "worked for us before", "worked for us",
   ],
 };
 

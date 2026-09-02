@@ -1,6 +1,9 @@
 // Scans the current page's DOM for fillable fields and tags each one so it
-// can be reliably re-selected. Ported verbatim from the Playwright-injected
-// script in ja/extractor.py -- keep the two in sync.
+// can be reliably re-selected. Ported from the Playwright-injected script in
+// ja/extractor.py -- keep the two in sync, except for the custom-widget
+// dropdown handling below (iCIMS/Workday), which is browser-extension only:
+// driving those needs click-and-wait interaction the Python side's
+// one-shot extract-then-fill pipeline has no place for.
 "use strict";
 
 function extractFields() {
@@ -169,6 +172,74 @@ function extractFields() {
     return "";
   }
 
+  // The nearest enclosing fieldset's <legend>. iCIMS wraps a whole
+  // work-history or education block in one <fieldset> whose <legend>
+  // ("Professional Experience (1)") is the only place that phrase appears --
+  // the fields inside it carry opaque machine names (rcf3212, rcf3213) and
+  // bare labels ("Employer", "Title", "City"), so the section is the only
+  // signal that "City" means the employer's city and not the applicant's.
+  function sectionLabel(el) {
+    const fs = el.closest("fieldset");
+    if (!fs) return "";
+    const legend = fs.querySelector("legend");
+    return legend ? cleanText(legend.innerText || legend.textContent) : "";
+  }
+
+  // iCIMS hides the real <select> (class dropdown-hide, holding nothing but
+  // an empty placeholder <option>) and paints its own widget in its place:
+  // an <a class="dropdown-select"> showing the current choice, and a
+  // <ul class="dropdown-results"> of <li role="option"> holding the real
+  // options. So the choices are never <option> elements, and the <select>
+  // itself is display:none -- without this the field isn't even seen, and
+  // there'd be nothing to match a value against if it were. Its own click
+  // handler on the <li> is what writes the answer back, so the widget is
+  // what has to be driven, not the <select>.
+  function icimsWidget(el) {
+    if (!el.id || el.getAttribute("icimsdropdown-enabled") !== "1") return null;
+    const list = document.getElementById(el.id + "_dropdown-results");
+    const anchor = document.getElementById(el.id + "_icimsDropdown");
+    if (!list || !anchor) return null;
+    const items = Array.from(list.querySelectorAll('[role="option"]'));
+    if (!items.length) return null;
+    return { anchor, items };
+  }
+
+  function icimsHasValue(el) {
+    const fake = document.getElementById(el.id + "_fakeSelected_icimsDropdown");
+    if (!fake) return false;
+    // Its placeholder state is a <span class="dropdown-placeholder">
+    // reading "- Make a Selection -", which is text like any other.
+    if (fake.querySelector(".dropdown-placeholder")) return false;
+    return !!cleanText(fake.textContent);
+  }
+
+  // aria-haspopup="listbox" is a contract: activating the control renders a
+  // [role="listbox"] whose [role="option"] children are the choices.
+  // Workday's questionnaire dropdowns are built that way -- a <button> with
+  // no <select> anywhere and no options in the DOM at all until it's
+  // clicked -- so they can only be read by opening them (see filler.js).
+  function listboxButtonLabel(el) {
+    const group = groupLabelFor(el, "");
+    if (group) return group;
+    const aria = cleanText(el.getAttribute("aria-label"));
+    // Workday's own aria-label on these is the placeholder text
+    // (" Select One Required"), which says nothing about the question.
+    return /^select one\b/i.test(aria) ? "" : aria;
+  }
+
+  function listboxButtonHasValue(el) {
+    const text = cleanText(el.textContent);
+    if (!text || /^select( one|\.\.\.)?$/i.test(text)) return false;
+    return true;
+  }
+
+  function listboxButtonRequired(el) {
+    if (el.getAttribute("aria-required") === "true") return true;
+    if (/\brequired\b/i.test(el.getAttribute("aria-label") || "")) return true;
+    const fs = el.closest("fieldset");
+    return !!(fs && fs.querySelector('abbr[title="required"], .requiredAsterisk'));
+  }
+
   // Clear ids AND the colored outline from any previous run -- a field
   // that's now already_filled is never revisited to redraw its outline,
   // so last run's red/amber/green ring would otherwise persist even after
@@ -181,15 +252,58 @@ function extractFields() {
   });
 
   const SKIP_TYPES = new Set(["hidden", "submit", "button", "image", "reset"]);
-  const nodes = Array.from(document.querySelectorAll("input, select, textarea"));
+  const nodes = Array.from(
+    document.querySelectorAll('input, select, textarea, button[aria-haspopup="listbox"]')
+  );
   const results = [];
   let idx = 0;
 
   for (const el of nodes) {
     const tag = el.tagName.toLowerCase();
+
+    if (tag === "button") {
+      if (!isVisible(el)) continue;
+      const jaId = "ja-" + idx++;
+      el.setAttribute("data-ja-id", jaId);
+      results.push({
+        ja_id: jaId,
+        // Reported as a select because that is what it is to the applicant
+        // and to every downstream decision -- pick one of a list of
+        // options -- with `widget` saying how it has to be driven.
+        tag: "select",
+        type: "select",
+        widget: "listbox_button",
+        name: el.getAttribute("name") || "",
+        id: el.id || "",
+        required: listboxButtonRequired(el),
+        label: listboxButtonLabel(el),
+        section: sectionLabel(el),
+        context: wideContext(el),
+        // Genuinely unknown until the popup is opened.
+        options: [],
+        has_value: listboxButtonHasValue(el),
+      });
+      continue;
+    }
+
     const type = (el.getAttribute("type") || (tag === "select" ? "select" : "text")).toLowerCase();
     if (tag === "input" && SKIP_TYPES.has(type)) continue;
-    if (!isVisible(el)) continue;
+    // Workday pairs each listbox button with a bare sibling text input used
+    // as its typeahead proxy. It has no label of its own, so it would match
+    // on the button's placeholder text and add a phantom field to the
+    // report for every question on the page.
+    if (
+      tag === "input" &&
+      el.previousElementSibling &&
+      el.previousElementSibling.matches('button[aria-haspopup="listbox"]')
+    ) {
+      continue;
+    }
+
+    const widget = tag === "select" ? icimsWidget(el) : null;
+    // The real <select> behind an iCIMS widget is display:none by design;
+    // what the applicant sees and clicks is the widget's own anchor.
+    if (!isVisible(el) && !(widget && isVisible(widget.anchor))) continue;
 
     const jaId = "ja-" + idx++;
     el.setAttribute("data-ja-id", jaId);
@@ -200,7 +314,15 @@ function extractFields() {
       type,
       name: el.getAttribute("name") || "",
       id: el.id || "",
-      required: !!(el.required || el.getAttribute("aria-required") === "true"),
+      // i_required is iCIMS's own flag; its forms set nothing else, so
+      // without it every required field there reads as optional and none of
+      // the ones left blank get the red outline that asks to be looked at.
+      required: !!(
+        el.required ||
+        el.getAttribute("aria-required") === "true" ||
+        el.getAttribute("i_required") === "true"
+      ),
+      section: sectionLabel(el),
     };
 
     if (type === "radio" || type === "checkbox") {
@@ -208,8 +330,22 @@ function extractFields() {
       item.group_label = groupLabelFor(el, item.label);
       item.context = wideContext(el);
       item.checked = !!el.checked;
+    } else if (tag === "select" && widget) {
+      item.widget = "icims";
+      item.label = labelFor(el);
+      item.aria_label = ariaLabelledBy(el);
+      item.context = wideContext(el);
+      // The widget's own first <li> is a "- Make a Selection -" placeholder,
+      // so this list lines up with a plain <select>'s options including its
+      // leading placeholder <option>. The id is the handle to click.
+      item.options = widget.items.map((li) => ({
+        value: li.id,
+        text: cleanText(li.getAttribute("title") || li.textContent),
+      }));
+      item.has_value = icimsHasValue(el);
     } else if (tag === "select") {
       item.label = labelFor(el);
+      item.aria_label = ariaLabelledBy(el);
       item.context = wideContext(el);
       item.options = Array.from(el.options).map((o) => ({ value: o.value, text: cleanText(o.text) }));
       // See ja/extractor.py's matching comment: some templated forms
@@ -223,6 +359,10 @@ function extractFields() {
       item.has_value = !!(el.files && el.files.length);
     } else {
       item.label = labelFor(el);
+      // A split date control labels each box "Month"/"Day"/"Year" via
+      // <label for>, and names the question it belongs to only in
+      // aria-labelledby -- so both halves are needed to place the box.
+      item.aria_label = ariaLabelledBy(el);
       item.context = wideContext(el);
       item.is_datepicker = /datepicker/i.test(el.className || "");
       item.has_value = !!el.value;

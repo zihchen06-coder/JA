@@ -1,0 +1,229 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Workday-style application questions</title>
+<!--
+  Frozen snapshot of a real Workday "Application Questions" step. Every
+  question here is a <button aria-haspopup="listbox"> with no <select>
+  anywhere and no options in the DOM -- the choices only exist once the
+  button is clicked and Workday's own script renders the popup.
+
+  The closed markup below is verbatim (only the decorative caret <svg> was
+  dropped). The script at the bottom stands in for Workday's own bundle,
+  which obviously isn't in a saved page: it implements the ARIA contract
+  that aria-haspopup="listbox" declares -- activating the control renders a
+  [role="listbox"] of [role="option"], picking one puts its text on the
+  button -- because that contract, not any one vendor's class names, is
+  what extension/filler.js drives. The option lists are the ones the real
+  form offers.
+-->
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 24px; }
+  fieldset { border: 1px solid #ccc; margin: 0 0 16px; padding: 12px; }
+  button[aria-haspopup="listbox"] { display: block; width: 280px; text-align: left; padding: 6px 8px; }
+  input.css-77hcv { width: 280px; }
+  ul[role="listbox"] { position: absolute; z-index: 10; background: #fff;
+    border: 1px solid #999; list-style: none; margin: 2px 0 0; padding: 4px 0; width: 280px; }
+  li[role="option"] { padding: 4px 8px; cursor: pointer; }
+</style>
+<div class="css-g7hkny">
+<h3 tabindex="-1" class="css-1ylcaf3">Application Questions</h3>
+<div class="css-1qmlawl">
+<abbr class="css-f40pqd">*</abbr> Indicates a required field</div>
+<div data-automation-id="applyFlowPrimaryQuestionsPage">
+<div role="group" aria-labelledby="primaryQuestionnaire-section">
+<div data-fkit-id="primaryQuestionnaire--null" class="css-1obf64m">
+<div data-automation-id="formField-b09b00a7abb31001b104a36719980001" data-fkit-id="primaryQuestionnaire--b09b00a7abb31001b104a36719980001" class="css-gvoll6">
+<fieldset class="css-1s9yhc">
+<legend>
+<div id="rich-label109" class="css-f6y8ld">
+<div data-automation-id="richText" class="css-1aa4n36">
+<p>
+<b>Have you worked with us before?</b>
+<abbr title="required" class="requiredAsterisk">*</abbr>
+</p>
+</div>
+</div>
+</legend>
+<div class="css-15rz5ap">
+<div style="width: 100%; max-width: 344px; min-width: 280px;">
+<div class="css-12zup1l">
+<button aria-haspopup="listbox" type="button" value="" aria-label=" Select One Required" name="b09b00a7abb31001b104a36719980001" id="primaryQuestionnaire--b09b00a7abb31001b104a36719980001" class="css-1qglsev">Select One</button>
+<input type="text" class="css-77hcv" value="">
+</div>
+</div>
+<div class="css-18szrho">
+</div>
+</div>
+</fieldset>
+</div>
+<div data-automation-id="formField-b09b00a7abb31001b104a36719980004" data-fkit-id="primaryQuestionnaire--b09b00a7abb31001b104a36719980004" class="css-gvoll6">
+<fieldset class="css-1s9yhc">
+<legend>
+<div id="rich-label110" class="css-f6y8ld">
+<div data-automation-id="richText" class="css-1aa4n36">
+<p>
+<b>Are you 18 years of age or older?</b>
+<abbr title="required" class="requiredAsterisk">*</abbr>
+</p>
+</div>
+</div>
+</legend>
+<div class="css-15rz5ap">
+<div style="width: 100%; max-width: 344px; min-width: 280px;">
+<div class="css-12zup1l">
+<button aria-haspopup="listbox" type="button" value="" aria-label=" Select One Required" name="b09b00a7abb31001b104a36719980004" id="primaryQuestionnaire--b09b00a7abb31001b104a36719980004" class="css-1qglsev">Select One</button>
+<input type="text" class="css-77hcv" value="">
+</div>
+</div>
+<div class="css-18szrho">
+</div>
+</div>
+</fieldset>
+</div>
+<div data-automation-id="formField-b09b00a7abb31001b104a40111c50001" data-fkit-id="primaryQuestionnaire--b09b00a7abb31001b104a40111c50001" class="css-gvoll6">
+<fieldset class="css-1s9yhc">
+<legend>
+<div id="rich-label111" class="css-f6y8ld">
+<div data-automation-id="richText" class="css-1aa4n36">
+<p>
+<b>Highest level of education?</b>
+<abbr title="required" class="requiredAsterisk">*</abbr>
+</p>
+</div>
+</div>
+</legend>
+<div class="css-15rz5ap">
+<div style="width: 100%; max-width: 344px; min-width: 280px;">
+<div class="css-12zup1l">
+<button aria-haspopup="listbox" type="button" value="" aria-label=" Select One Required" name="b09b00a7abb31001b104a40111c50001" id="primaryQuestionnaire--b09b00a7abb31001b104a40111c50001" class="css-1qglsev">Select One</button>
+<input type="text" class="css-77hcv" value="">
+</div>
+</div>
+<div class="css-18szrho">
+</div>
+</div>
+</fieldset>
+</div>
+<div data-automation-id="formField-b09b00a7abb31001b104a49acbca0003" data-fkit-id="primaryQuestionnaire--b09b00a7abb31001b104a49acbca0003" class="css-gvoll6">
+<fieldset class="css-1s9yhc">
+<legend>
+<div id="rich-label112" class="css-f6y8ld">
+<div data-automation-id="richText" class="css-1aa4n36">
+<p>
+<b>Are you eligible to work in the US?</b>
+<abbr title="required" class="requiredAsterisk">*</abbr>
+</p>
+</div>
+</div>
+</legend>
+<div class="css-15rz5ap">
+<div style="width: 100%; max-width: 344px; min-width: 280px;">
+<div class="css-12zup1l">
+<button aria-haspopup="listbox" type="button" value="" aria-label=" Select One Required" name="b09b00a7abb31001b104a49acbca0003" id="primaryQuestionnaire--b09b00a7abb31001b104a49acbca0003" class="css-1qglsev">Select One</button>
+<input type="text" class="css-77hcv" value="">
+</div>
+</div>
+<div class="css-18szrho">
+</div>
+</div>
+</fieldset>
+</div>
+<div data-automation-id="formField-b09b00a7abb31001b104a49acbca0006" data-fkit-id="primaryQuestionnaire--b09b00a7abb31001b104a49acbca0006" class="css-gvoll6">
+<fieldset class="css-1s9yhc">
+<legend>
+<div id="rich-label113" class="css-f6y8ld">
+<div data-automation-id="richText" class="css-1aa4n36">
+<p>
+<b>Do you currently require visa sponsorship to work in the country in which the job you wish to be employed is located?</b>
+<abbr title="required" class="requiredAsterisk">*</abbr>
+</p>
+</div>
+</div>
+</legend>
+<div class="css-15rz5ap">
+<div style="width: 100%; max-width: 344px; min-width: 280px;">
+<div class="css-12zup1l">
+<button aria-haspopup="listbox" type="button" value="" aria-label=" Select One Required" name="b09b00a7abb31001b104a49acbca0006" id="primaryQuestionnaire--b09b00a7abb31001b104a49acbca0006" class="css-1qglsev">Select One</button>
+<input type="text" class="css-77hcv" value="">
+</div>
+</div>
+<div class="css-18szrho">
+</div>
+</div>
+</fieldset>
+</div>
+<div data-automation-id="formField-b09b00a7abb31001b104a5346ebf0001" data-fkit-id="primaryQuestionnaire--b09b00a7abb31001b104a5346ebf0001" class="css-gvoll6">
+<fieldset class="css-1s9yhc">
+<legend>
+<div id="rich-label114" class="css-f6y8ld">
+<div data-automation-id="richText" class="css-1aa4n36">
+<p>
+<b>Will you require visa sponsorship in the future to work in the country in which the job you wish to be employed is located?</b>
+<abbr title="required" class="requiredAsterisk">*</abbr>
+</p>
+</div>
+</div>
+</legend>
+<div class="css-15rz5ap">
+<div style="width: 100%; max-width: 344px; min-width: 280px;">
+<div class="css-12zup1l">
+<button aria-haspopup="listbox" type="button" value="" aria-label=" Select One Required" name="b09b00a7abb31001b104a5346ebf0001" id="primaryQuestionnaire--b09b00a7abb31001b104a5346ebf0001" class="css-1qglsev">Select One</button>
+<input type="text" class="css-77hcv" value="">
+</div>
+</div>
+<div class="css-18szrho">
+</div>
+</div>
+</fieldset>
+</div>
+</div>
+</div>
+</div>
+</div>
+<script>
+  // Stand-in for Workday's own dropdown script -- see the note at the top.
+  var CHOICES = {
+    "b09b00a7abb31001b104a36719980001": ["Yes", "No"],
+    "b09b00a7abb31001b104a36719980004": ["Yes", "No"],
+    "b09b00a7abb31001b104a40111c50001": [
+      "High School Diploma / GED", "Associate's Degree", "Bachelor's Degree",
+      "Master's Degree", "Doctorate (PhD)", "Other"
+    ],
+    "b09b00a7abb31001b104a49acbca0003": ["Yes", "No"],
+    "b09b00a7abb31001b104a49acbca0006": ["Yes", "No"],
+    "b09b00a7abb31001b104a5346ebf0001": ["Yes", "No"]
+  };
+
+  var openList = null;
+
+  function close() {
+    if (openList) { openList.remove(); openList = null; }
+  }
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") close();
+  });
+
+  document.querySelectorAll('button[aria-haspopup="listbox"]').forEach(function (button) {
+    button.addEventListener("click", function () {
+      if (openList && openList.dataset.owner === button.name) { close(); return; }
+      close();
+      var list = document.createElement("ul");
+      list.setAttribute("role", "listbox");
+      list.dataset.owner = button.name;
+      (CHOICES[button.name] || []).forEach(function (text) {
+        var li = document.createElement("li");
+        li.setAttribute("role", "option");
+        li.textContent = text;
+        li.addEventListener("click", function () {
+          button.textContent = text;
+          button.value = text;
+          close();
+        });
+        list.appendChild(li);
+      });
+      button.parentElement.appendChild(list);
+      openList = list;
+    });
+  });
+</script>

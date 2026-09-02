@@ -60,7 +60,7 @@ function _showBanner(html, tone) {
     creds = await getOrCreate(hostname, profile.email);
   }
 
-  const report = fillForm(profile, creds);
+  const report = await fillForm(profile, creds);
 
   const filled = report.results.filter((r) => r.action === "filled").length;
   const review = report.results.filter((r) => r.action === "needs_review").length;

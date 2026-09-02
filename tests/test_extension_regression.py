@@ -52,6 +52,7 @@ EXPECTED = {
     "experience_repeater.html": {"filled": 9, "review": 0},
     "false_positive_check.html": {"filled": 0, "review": 0},
     "icims.html": {"filled": 3, "review": 0},
+    "icims_profile.html": {"filled": 24, "review": 1},
     "jazzhr_eeo.html": {"filled": 4, "review": 0},
     "jazzlike.html": {"filled": 7, "review": 0},
     "ldg_form.html": {"filled": 12, "review": 0},
@@ -61,6 +62,7 @@ EXPECTED = {
     "select2_state.html": {"filled": 1, "review": 0},
     "test_form.html": {"filled": 12, "review": 1},
     "unknowns.html": {"filled": 1, "review": 0},
+    "workday_questions.html": {"filled": 6, "review": 0},
 }
 
 
@@ -164,3 +166,122 @@ def test_experience_repeater_fields(browser):
     assert work_start == "06/2023"  # "2023-06" -> MM/YYYY
     assert work_end == ""  # left blank; the checkbox represents "Present" instead
     assert degree_text == "Bachelors Degree"  # falls back to education_level, not the stored "B.S."
+
+
+def test_workday_listbox_buttons(browser):
+    """Workday asks its questionnaire with <button aria-haspopup="listbox">:
+    no <select> anywhere, and no options in the DOM at all until the button
+    is clicked and its popup renders. Every one of them was invisible to a
+    scan of `input, select, textarea`, so the whole step filled nothing.
+
+    The fixture's open-state behaviour is a stand-in for Workday's own
+    bundle, written to the ARIA contract that aria-haspopup="listbox"
+    declares (see the note at the top of the fixture) -- which is what
+    filler.js drives, rather than any vendor's class names.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'workday_questions.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        page.evaluate("(profile) => fillForm(profile, null)", PROFILE)
+        answers = page.evaluate(
+            """() => Object.fromEntries(
+                Array.from(document.querySelectorAll('button[aria-haspopup=\"listbox\"]'))
+                     .map((b) => [b.closest('fieldset').querySelector('b').textContent,
+                                  b.textContent.trim()])
+            )"""
+        )
+        # Nothing may be left hanging open over the rest of the form.
+        still_open = page.evaluate(
+            "() => document.querySelectorAll('[role=\"listbox\"]').length"
+        )
+    finally:
+        page.close()
+
+    assert answers["Are you 18 years of age or older?"] == "Yes"  # over_18
+    assert answers["Are you eligible to work in the US?"] == "Yes"  # work_authorized
+    assert answers["Highest level of education?"] == "Bachelor's Degree"
+    assert answers["Have you worked with us before?"] == "No"  # previously_employed_here
+    assert (
+        answers["Do you currently require visa sponsorship to work in the country in "
+                "which the job you wish to be employed is located?"] == "No"
+    )
+    assert still_open == 0
+
+
+def test_icims_custom_dropdowns_and_work_history(browser):
+    """iCIMS hides the real <select> (display:none, holding only an empty
+    placeholder <option>) behind its own widget, and keeps the actual choices
+    in a sibling <ul> of <li role="option"> -- so these fields were never
+    even extracted, and there were no options to match a value against if
+    they had been. Its work-history block is the other half of the problem:
+    the fields there are named opaquely (rcf3212) and labelled generically
+    ("Employer", "City", "Month"), so they only make sense relative to the
+    section they sit in.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'icims_profile.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        report = page.evaluate("(profile) => fillForm(profile, null)", PROFILE)
+        shown = page.evaluate(
+            """() => {
+                const text = (id) => {
+                    const el = document.getElementById(id + '_fakeSelected_icimsDropdown');
+                    return el ? el.textContent.trim() : null;
+                };
+                const val = (id) => document.getElementById(id).value;
+                return {
+                    country: text('-1_PersonProfileFields.AddressCountry'),
+                    state: text('-1_PersonProfileFields.AddressState'),
+                    school: text('-1_CandProfileFields.School'),
+                    degree: text('-1_CandProfileFields.Degree'),
+                    current_job: text('-1_PersonProfileFields.rcf3269'),
+                    employer: val('-1_PersonProfileFields.rcf3212'),
+                    title: val('-1_PersonProfileFields.rcf3213'),
+                    city: val('-1_PersonProfileFields.rcf3216'),
+                    start_month: val('-1_PersonProfileFields.rcf3214_Month'),
+                    start_year: val('-1_PersonProfileFields.rcf3214_Year'),
+                    end_year: val('-1_PersonProfileFields.rcf3215_Year'),
+                    employer_state: val('-1_PersonProfileFields.rcf3217'),
+                    other_school: val('-1_CandProfileFields.OtherSchool'),
+                    sms_consent: val('rcf3553'),
+                };
+            }"""
+        )
+    finally:
+        page.close()
+
+    entry = PROFILE["experience"][0]
+    assert shown["country"] == "United States"
+    # Both of these only exist on the widget's second page of results, which
+    # it fetches through its own search box.
+    assert shown["state"] == "New York"
+    assert shown["school"] == "State University"
+    assert shown["degree"] == "BS"  # closest listed spelling of the saved "B.S."
+
+    assert shown["employer"] == entry["company"]
+    assert shown["title"] == entry["title"]
+    # "Springfield, NY" belongs in a Location box, not in a City box that has
+    # its own State box beside it.
+    assert shown["city"] == "Springfield"
+    assert shown["start_month"] == "06"
+    assert shown["start_year"] == "2023"
+    # end_date is "Present", so the end boxes stay empty and the block's own
+    # "Is this your current job?" dropdown carries that instead.
+    assert shown["end_year"] == ""
+    assert shown["current_job"] == "Yes"
+
+    # The employer's State is not the applicant's.
+    assert shown["employer_state"] in ("", "-999")
+    # "Other School" is the escape hatch for a school the list doesn't have.
+    assert shown["other_school"] == ""
+    # An SMS-consent question is never answered automatically.
+    assert shown["sms_consent"] == ""
+    consent = next(
+        r for r in report["results"] if "consent to receive text" in r["label"].lower()
+    )
+    assert consent["action"] == "skipped_no_match"
+    assert consent["required"] is True

@@ -19,8 +19,19 @@ function _el(jaId) {
   return document.querySelector(_sel(jaId));
 }
 
+// An iCIMS <select> is display:none behind its own widget, so an outline
+// drawn on it would be invisible -- the anchor the applicant actually looks
+// at is what has to be highlighted.
+function _displayEl(el) {
+  if (el && el.tagName === "SELECT" && el.id) {
+    const anchor = document.getElementById(el.id + "_icimsDropdown");
+    if (anchor) return anchor;
+  }
+  return el;
+}
+
 function _mark(jaId, color) {
-  const el = _el(jaId);
+  const el = _displayEl(_el(jaId));
   if (!el) return;
   el.style.outline = `2px solid ${color}`;
   el.style.outlineOffset = "1px";
@@ -62,6 +73,137 @@ function _setSelectValue(el, value) {
 function _setChecked(el, checked) {
   if (el.checked === checked) return;
   el.click();
+}
+
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function _waitFor(fn, timeout = 1500, step = 50) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const value = fn();
+    if (value) return value;
+    if (Date.now() >= deadline) return null;
+    await _sleep(step);
+  }
+}
+
+function _isShown(el) {
+  if (!el) return false;
+  const style = getComputedStyle(el);
+  if (style.display === "none" || style.visibility === "hidden") return false;
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function _listboxOptions(listbox) {
+  return Array.from(listbox.querySelectorAll('[role="option"]')).filter(_isShown);
+}
+
+// aria-haspopup="listbox" promises that activating the control renders a
+// [role="listbox"] whose [role="option"] children are the real choices.
+// Workday's questionnaire dropdowns are built exactly that way -- a plain
+// <button>, no <select>, and nothing in the DOM naming the choices until the
+// popup exists -- so opening it is the only way to see what can be picked.
+// Written against that ARIA contract rather than any one vendor's markup:
+// prefer whatever the button says it owns, else whatever listbox appeared
+// that wasn't on the page a moment ago.
+async function _openListbox(button) {
+  const before = new Set(Array.from(document.querySelectorAll('[role="listbox"]')).filter(_isShown));
+
+  const owned = () => {
+    const id = button.getAttribute("aria-controls") || button.getAttribute("aria-owns");
+    const el = id ? document.getElementById(id) : null;
+    return el && _isShown(el) && _listboxOptions(el).length ? el : null;
+  };
+  const appeared = () =>
+    Array.from(document.querySelectorAll('[role="listbox"]')).find(
+      (l) => !before.has(l) && _isShown(l) && _listboxOptions(l).length
+    ) || null;
+
+  button.click();
+  const listbox = await _waitFor(() => owned() || appeared());
+  if (!listbox) return null;
+  const optionEls = _listboxOptions(listbox);
+  return {
+    listbox,
+    optionEls,
+    // Indexes into optionEls, so the same option-choosing logic a real
+    // <select> goes through applies unchanged.
+    options: optionEls.map((el, i) => ({
+      value: String(i),
+      text: (el.getAttribute("aria-label") || el.textContent || "").replace(/\s+/g, " ").trim(),
+    })),
+  };
+}
+
+function _closeListbox(button, opened) {
+  const esc = () =>
+    new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true });
+  opened.listbox.dispatchEvent(esc());
+  button.dispatchEvent(esc());
+  if (_isShown(opened.listbox)) button.click();
+}
+
+function _clickListboxOption(button, opened, index) {
+  const before = (button.textContent || "").trim();
+  opened.optionEls[index].click();
+  // The button is the widget's own display of its value; if the page's
+  // handler never ran, it still reads "Select One" and nothing was set.
+  return (button.textContent || "").trim() !== before || !!button.value;
+}
+
+function _icimsOptions(select) {
+  const list = document.getElementById(select.id + "_dropdown-results");
+  if (!list) return [];
+  return Array.from(list.querySelectorAll('[role="option"]')).map((li) => ({
+    value: li.id,
+    text: (li.getAttribute("title") || li.textContent || "").replace(/\s+/g, " ").trim(),
+  }));
+}
+
+// Long iCIMS lists (schools, countries) are paged: the widget ships with
+// only the first couple of dozen entries and fetches the rest as you type
+// into its search box. Best-effort, and only ever a fallback after matching
+// what's already loaded has failed -- if their search doesn't respond the
+// way this expects, the options simply don't change and the field ends up
+// reported for review rather than filled with the wrong thing.
+async function _icimsSearch(select, text) {
+  const container = document.getElementById(select.id + "_icimsDropdown_ctnr");
+  const search = container && container.querySelector("input.dropdown-search");
+  if (!search) return null;
+
+  const before = _icimsOptions(select).map((o) => o.text).join("|");
+  _setNativeValue(search, text);
+  search.dispatchEvent(new KeyboardEvent("keyup", { key: text.slice(-1), bubbles: true }));
+  const changed = await _waitFor(() => {
+    const now = _icimsOptions(select);
+    return now.map((o) => o.text).join("|") !== before ? now : null;
+  }, 1200);
+  return changed;
+}
+
+// iCIMS binds its handler to the <li>, and only while the dropdown is open,
+// so this opens the widget the way a click would before picking. Whether it
+// took is checked rather than assumed: if their script isn't what we think,
+// the field is reported for review instead of being called filled.
+function _openIcims(select) {
+  const anchor = document.getElementById(select.id + "_icimsDropdown");
+  if (anchor) anchor.click();
+  return anchor;
+}
+
+function _setIcimsValue(select, optionId, optionText) {
+  const li = document.getElementById(optionId);
+  if (!li) return false;
+  const before = select.value;
+  li.click();
+
+  if (select.value && select.value !== before) return true;
+  const fake = document.getElementById(select.id + "_fakeSelected_icimsDropdown");
+  if (!fake || fake.querySelector(".dropdown-placeholder")) return false;
+  return normalize(fake.textContent) === normalize(optionText);
 }
 
 function makeReport(platform) {
@@ -138,7 +280,11 @@ function _matchCustomAnswer(label, profile) {
 // profile: plain object shaped like ja/profile.py's Profile dataclass.
 // creds: [login, password] tuple already resolved for this hostname, or
 // null when account auto-creation is off or this page has no password field.
-function fillForm(profile, creds) {
+//
+// Async because a custom-widget dropdown (Workday's listbox buttons) only
+// reveals its options once opened, which means clicking and then waiting for
+// the page's own script to render them.
+async function fillForm(profile, creds) {
   const report = makeReport(detectPlatform(location.href));
   const fieldsData = extractFields();
 
@@ -146,7 +292,7 @@ function fillForm(profile, creds) {
   const radios = fieldsData.filter((f) => f.type === "radio");
 
   for (const f of simpleFields) {
-    _handleSimpleField(profile, report, f, creds);
+    await _handleSimpleField(profile, report, f, creds);
   }
 
   const byName = new Map();
@@ -161,7 +307,7 @@ function fillForm(profile, creds) {
   return report;
 }
 
-function _handleSimpleField(profile, report, f, creds) {
+async function _handleSimpleField(profile, report, f, creds) {
   let label = f.label || "";
   const required = f.required || false;
   const ftype = f.type;
@@ -187,9 +333,25 @@ function _handleSimpleField(profile, report, f, creds) {
     }
   }
 
-  const expField = experienceFieldFor(f.name || "", f.id || "");
-  if (expField && expField !== "current_checkbox") {
+  // Both halves of the label matter inside a work-history block: a split
+  // date control names each box "Month"/"Day"/"Year" via <label for> and
+  // names the question it belongs to only in aria-labelledby.
+  const expLabel = [label, f.aria_label || ""].filter(Boolean).join(" ");
+  const expField = experienceFieldFor(f.name || "", f.id || "", f.section || "", expLabel);
+  if (expField === "current_checkbox") {
+    _fillCurrentJobSelect(profile, report, f, required);
+    return;
+  }
+  if (expField) {
     _fillExperienceField(profile, report, f, expField, required);
+    return;
+  }
+  if (isExperienceSection(f.section || "")) {
+    // The Address/City/State/Country boxes in a work-history block are the
+    // employer's, not the applicant's -- matching them against the personal
+    // profile would confidently fill in the wrong thing.
+    addResult(report, label || f.name || f.ja_id, null, "skipped_no_match",
+      "Inside a work-history block -- not filled from your personal details.", required);
     return;
   }
 
@@ -233,6 +395,11 @@ function _handleSimpleField(profile, report, f, creds) {
     }
 
     canonical = matchField(label);
+    // The machine-name fallback must not undo an escape-hatch label:
+    // "Other School" is named OtherSchool, which reads as a plain school.
+    if (canonical === null && !isEscapeHatchLabel(label)) {
+      canonical = matchFieldByName(f.name || "", f.id || "");
+    }
     if (canonical === null) {
       const customAnswer = _matchCustomAnswer(label, profile);
       if (customAnswer !== null && ftype !== "select") {
@@ -267,42 +434,7 @@ function _handleSimpleField(profile, report, f, creds) {
 
   try {
     if (f.tag === "select") {
-      const options = f.options || [];
-      let optionValue, detail;
-      if (BOOLEAN_FIELDS.has(canonical) && typeof value === "boolean") {
-        const match = options.find((o) => semanticBool(o.text || "") === value);
-        optionValue = match ? match.value : null;
-        detail = match ? match.text || "" : "";
-      } else {
-        const realOptions = options.length > 1 ? options.slice(1) : options;
-        const allBoolShaped = realOptions.length > 0 && realOptions.every((o) => semanticBool(o.text || "") !== null);
-        if (allBoolShaped) {
-          if (required) _mark(f.ja_id, MARK_BLANK);
-          addResult(
-            report, label, canonical, "skipped_no_match",
-            "This looks like a yes/no question with no matching saved answer.", required
-          );
-          return;
-        }
-        optionValue = bestOption(String(value), options);
-        detail = String(value);
-        // A "Degree" dropdown almost always lists coarse categories
-        // ("Bachelors Degree", "Masters Degree"), not the applicant's own
-        // abbreviation for their degree ("B.S.") -- education_level is
-        // shaped for exactly this and is worth trying before giving up.
-        if ((optionValue === null || optionValue === undefined) && canonical === "degree" && profile.education_level) {
-          optionValue = bestOption(profile.education_level, options);
-          detail = profile.education_level;
-        }
-      }
-      if (optionValue === null || optionValue === undefined) {
-        if (required) _mark(f.ja_id, MARK_BLANK);
-        addResult(report, label, canonical, "skipped_no_match", `No option matched '${value}'.`, required);
-        return;
-      }
-      _setSelectValue(el, optionValue);
-      _mark(f.ja_id, MARK_FILLED);
-      addResult(report, label, canonical, "filled", detail, required);
+      await _fillSelectLike(profile, report, f, el, canonical, value, label, required);
     } else {
       let fillValue;
       if (ftype === "date") {
@@ -319,6 +451,107 @@ function _handleSimpleField(profile, report, f, creds) {
   } catch (exc) {
     addResult(report, label, canonical, "error", String(exc), required);
   }
+}
+
+// Picks an option for a select-shaped field. `options` is [{value, text}]
+// whichever widget it came from -- a real <select>'s <option>s, an iCIMS
+// widget's <li>s, or the popup a Workday listbox button just rendered --
+// so the decision is made the same way for all three.
+function _optionText(options, optionValue) {
+  const match = options.find((o) => o.value === optionValue);
+  return match ? match.text || "" : "";
+}
+
+function _isExactChoice(decision, options, value) {
+  if (decision.skip) return false;
+  return normalize(_optionText(options, decision.value)) === normalize(String(value));
+}
+
+function _chooseOption(profile, canonical, value, options) {
+  if (BOOLEAN_FIELDS.has(canonical) && typeof value === "boolean") {
+    const match = options.find((o) => semanticBool(o.text || "") === value);
+    if (!match) return { skip: `No option matched '${value}'.` };
+    return { value: match.value, detail: match.text || "" };
+  }
+
+  const realOptions = options.length > 1 ? options.slice(1) : options;
+  const allBoolShaped = realOptions.length > 0 && realOptions.every((o) => semanticBool(o.text || "") !== null);
+  if (allBoolShaped) {
+    return { skip: "This looks like a yes/no question with no matching saved answer." };
+  }
+
+  let optionValue = bestOption(String(value), options);
+  // A "Degree" dropdown almost always lists coarse categories ("Bachelors
+  // Degree", "Masters Degree"), not the applicant's own abbreviation for
+  // their degree ("B.S.") -- education_level is shaped for exactly this and
+  // is worth trying before giving up.
+  if ((optionValue === null || optionValue === undefined) && canonical === "degree" && profile.education_level) {
+    optionValue = bestOption(profile.education_level, options);
+  }
+  if (optionValue === null || optionValue === undefined) {
+    return { skip: `No option matched '${value}'.` };
+  }
+  return { value: optionValue, detail: _optionText(options, optionValue) || String(value) };
+}
+
+async function _fillSelectLike(profile, report, f, el, canonical, value, label, required) {
+  let options = f.options || [];
+  let opened = null;
+
+  if (f.widget === "listbox_button") {
+    opened = await _openListbox(el);
+    if (!opened) {
+      _mark(f.ja_id, MARK_REVIEW);
+      addResult(report, label, canonical, "needs_review",
+        "Could not open this dropdown automatically -- pick an answer here yourself.", required);
+      return;
+    }
+    options = opened.options;
+  } else if (f.widget === "icims") {
+    _openIcims(el);
+  }
+
+  let decision = _chooseOption(profile, canonical, value, options);
+  // On a paged list the right answer is often not on the first page at all,
+  // and a so-so fuzzy match against the page that did load would quietly win
+  // over it -- "Aalto University" is a 0.6 match for "State University".
+  // Anything short of an exact hit is worth searching for first.
+  if (
+    f.widget === "icims" &&
+    typeof value !== "boolean" &&
+    !_isExactChoice(decision, options, value)
+  ) {
+    const refreshed = await _icimsSearch(el, String(value));
+    if (refreshed && refreshed.length) {
+      options = refreshed;
+      decision = _chooseOption(profile, canonical, value, options);
+    }
+  }
+  if (decision.skip) {
+    if (opened) _closeListbox(el, opened);
+    if (required) _mark(f.ja_id, MARK_BLANK);
+    addResult(report, label, canonical, "skipped_no_match", decision.skip, required);
+    return;
+  }
+
+  let applied;
+  if (opened) {
+    applied = _clickListboxOption(el, opened, Number(decision.value));
+  } else if (f.widget === "icims") {
+    applied = _setIcimsValue(el, decision.value, _optionText(options, decision.value));
+  } else {
+    _setSelectValue(el, decision.value);
+    applied = true;
+  }
+
+  if (!applied) {
+    _mark(f.ja_id, MARK_REVIEW);
+    addResult(report, label, canonical, "needs_review",
+      "This dropdown is a custom widget that did not take the answer -- set it here yourself.", required);
+    return;
+  }
+  _mark(f.ja_id, MARK_FILLED);
+  addResult(report, label, canonical, "filled", decision.detail, required);
 }
 
 const EXPERIENCE_ATTR = {
@@ -340,7 +573,7 @@ function _fillExperienceField(profile, report, f, expField, required) {
 
   if (expField === "end_date" && ["present", "current", "ongoing"].includes(value.trim().toLowerCase())) {
     addResult(report, label, canonical, "filled",
-      'Left blank -- checked "I currently work here" instead.', required);
+      "Left blank -- this job is marked as your current one.", required);
     return;
   }
 
@@ -350,8 +583,113 @@ function _fillExperienceField(profile, report, f, expField, required) {
     return;
   }
 
-  const fillValue = ["start_date", "end_date"].includes(expField) ? formatMonthYear(String(value), "%m/%Y") : String(value);
+  const datePart = ["start_date", "end_date"].includes(expField) ? datePartFor(label) : null;
+  if (datePart) {
+    _fillDatePart(report, f, canonical, value, datePart, required);
+    return;
+  }
+
+  // "Milwaukee, WI" is the right answer for a "Location" box and the wrong
+  // one for a "City" box sitting next to its own State box.
+  let fillValue = String(value);
+  if (expField === "location" && /\bcity\b/.test(normalize(label))) {
+    fillValue = fillValue.split(",")[0].trim();
+  } else if (["start_date", "end_date"].includes(expField)) {
+    fillValue = formatMonthYear(fillValue, "%m/%Y");
+  }
   _fillText(report, f, canonical, fillValue, required);
+}
+
+// One box of a split Month / Day / Year date control.
+function _fillDatePart(report, f, canonical, value, part, required) {
+  const label = f.label || f.name || "";
+  const candidates = datePartCandidates(String(value), part);
+  if (!candidates.length) {
+    addResult(report, label, canonical, "skipped_no_data",
+      "Only the month and year are saved for this job.", required);
+    return;
+  }
+
+  const el = _el(f.ja_id);
+  if (!el) {
+    addResult(report, label, canonical, "error", "Field disappeared from the page.", required);
+    return;
+  }
+
+  if (f.tag !== "select") {
+    _setNativeValue(el, candidates[0]);
+    _mark(f.ja_id, MARK_FILLED);
+    addResult(report, label, canonical, "filled", candidates[0], required);
+    return;
+  }
+
+  // Month boxes spell themselves "06", "6", "Jun" or "June" depending on the
+  // form, so try each spelling against both the option values and their text
+  // before giving up.
+  const options = f.options || [];
+  for (const candidate of candidates) {
+    const norm = normalize(candidate);
+    const match = options.find(
+      (o) => o.value === candidate || (o.text && normalize(o.text) === norm)
+    );
+    if (!match) continue;
+    _setSelectValue(el, match.value);
+    _mark(f.ja_id, MARK_FILLED);
+    addResult(report, label, canonical, "filled", match.text || match.value, required);
+    return;
+  }
+
+  if (required) _mark(f.ja_id, MARK_BLANK);
+  addResult(report, label, canonical, "skipped_no_match",
+    `No option matched '${candidates[0]}'.`, required);
+}
+
+// Some forms ask "Is this your current job?" as a Yes/No dropdown rather
+// than the checkbox _handleCurrentWorkCheckbox covers.
+function _fillCurrentJobSelect(profile, report, f, required) {
+  const label = f.label || f.name || "";
+  const canonical = "experience_end_date";
+
+  if (f.tag !== "select") {
+    _handleCurrentWorkCheckbox(profile, report, f);
+    return;
+  }
+  if (!profile.experience || !profile.experience.length) {
+    addResult(report, label, canonical, "skipped_no_data", "No work experience saved in your profile.", required);
+    return;
+  }
+
+  const isCurrent = ["present", "current", "ongoing"].includes(
+    (profile.experience[0].end_date || "").trim().toLowerCase()
+  );
+  const match = (f.options || []).find((o) => semanticBool(o.text || "") === isCurrent);
+  if (!match) {
+    if (required) _mark(f.ja_id, MARK_BLANK);
+    addResult(report, label, canonical, "skipped_no_match", "No Yes/No option found.", required);
+    return;
+  }
+
+  const el = _el(f.ja_id);
+  if (!el) {
+    addResult(report, label, canonical, "error", "Field disappeared from the page.", required);
+    return;
+  }
+  let applied;
+  if (f.widget === "icims") {
+    _openIcims(el);
+    applied = _setIcimsValue(el, match.value, match.text);
+  } else {
+    _setSelectValue(el, match.value);
+    applied = true;
+  }
+  if (!applied) {
+    _mark(f.ja_id, MARK_REVIEW);
+    addResult(report, label, canonical, "needs_review",
+      "This dropdown is a custom widget that did not take the answer -- set it here yourself.", required);
+    return;
+  }
+  _mark(f.ja_id, MARK_FILLED);
+  addResult(report, label, canonical, "filled", match.text || "", required);
 }
 
 function _handleCurrentWorkCheckbox(profile, report, f) {
@@ -389,7 +727,7 @@ function _handleCheckbox(profile, report, f) {
   const groupLabel = f.group_label || "";
   const required = f.required || false;
 
-  if (experienceFieldFor(f.name || "", f.id || "") === "current_checkbox") {
+  if (experienceFieldFor(f.name || "", f.id || "", f.section || "", label) === "current_checkbox") {
     _handleCurrentWorkCheckbox(profile, report, f);
     return;
   }

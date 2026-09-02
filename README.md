@@ -404,7 +404,10 @@ with a clear message if Chromium isn't available rather than failing.
 If you hit a new real-site bug, the fix belongs in **both**
 `ja/extractor.py`/`ja/matcher.py`/`ja/filler.py` (the Python/Playwright
 side) **and** their `extension/*.js` ports — the two are kept in sync by
-hand, not shared code. Add (or extend) a fixture under `tests/fixtures/`
+hand, not shared code. The one standing exception is custom-widget dropdown
+support (below), which is extension-only: driving those needs
+click-open-and-wait interaction that the Python side's one-shot
+extract-then-fill pipeline has no place for. Add (or extend) a fixture under `tests/fixtures/`
 and an assertion in `test_extension_regression.py` so the fix stays fixed;
 these are frozen snapshots of forms at a point in time, not a live check
 against the real site, so a company changing their form later won't be
@@ -414,8 +417,26 @@ caught by a still-green test — the safety net only knows what it's shown.
 
 - Multi-page forms need a manual `r` press per step (see above); the tool
   doesn't click "Next" for you, by design.
-- Highly custom React/JS form widgets that don't use real `<input>`/
-  `<select>` elements (e.g. custom dropdowns) may not be detected.
+- Custom dropdown widgets are handled in the **extension only**, and only
+  the two patterns that have actually turned up:
+  - **Workday** asks its questionnaire with `<button aria-haspopup="listbox">`
+    — no `<select>`, and no options anywhere in the DOM until the button is
+    clicked. The extension opens each one, reads the popup it renders, picks,
+    and closes anything it didn't answer. Driven off the ARIA contract, not
+    Workday's class names, so it should hold for other `aria-haspopup`
+    dropdowns too.
+  - **iCIMS** keeps a real `<select>` that is `display:none` and empty, and
+    puts the real choices in a sibling `<ul>` of `<li role="option">`. Long
+    lists (schools, countries) ship only their first page and fetch the rest
+    through the widget's own search box, which the extension types into when
+    nothing on the loaded page matches exactly.
+
+  Any other custom widget that doesn't use real `<input>`/`<select>` elements
+  is still invisible to both sides.
+- Inside a work-history block the fields are matched by section and label
+  ("Employer", "City", "Start Date"), and anything in there that isn't
+  recognised is deliberately left alone rather than filled from your personal
+  details — the Address/City/State boxes in that block are the employer's.
 - This is a heuristic label matcher, not a guarantee — always check the
   report and the form itself before submitting.
 
