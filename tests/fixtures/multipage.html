@@ -1,0 +1,21 @@
+<!doctype html>
+<html><body>
+<div id="step1">
+  <h2>Step 1</h2>
+  <label for="fn">First Name *</label><input id="fn" name="fn" required>
+  <label for="ln">Last Name *</label><input id="ln" name="ln" required>
+  <label for="em">Email *</label><input id="em" name="em" type="email" required>
+  <button type="button" id="next" onclick="document.getElementById('step1').style.display='none';document.getElementById('step2').style.display='block';">Next</button>
+</div>
+<div id="step2" style="display:none">
+  <h2>Step 2</h2>
+  <label for="ph">Phone Number *</label><input id="ph" name="ph" required>
+  <label for="ct">City</label><input id="ct" name="ct">
+  <label for="li">LinkedIn Profile</label><input id="li" name="li">
+  <fieldset>
+    <legend>Are you legally authorized to work in the US?</legend>
+    <input type="radio" id="ay" name="auth" value="yes"><label for="ay">Yes</label>
+    <input type="radio" id="an" name="auth" value="no"><label for="an">No</label>
+  </fieldset>
+</div>
+</body></html>

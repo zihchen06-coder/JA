@@ -387,6 +387,29 @@ If a field on a specific site isn't being recognized, add its phrasing to
 code changes needed. `tests/test_matcher.py` has examples of the matching
 behavior.
 
+## Testing
+
+`pytest tests/` runs the whole suite. Most of it (`test_matcher.py`,
+`test_filler.py`, `test_profile.py`, `test_credentials.py`) drives the
+Python matching/filling logic against hand-built field data, no browser
+needed. `test_extension_regression.py` is different: it runs the
+**browser extension's** JS logic against saved copies of real job
+application forms (`tests/fixtures/*.html`, personal data scrubbed) in a
+real headless Chromium via Playwright, since bugs there tend to be DOM
+behavior quirks (a `<select>`'s `selectedIndex`, computed-style visibility)
+that hand-built field data can't reproduce. It needs
+`playwright install chromium` first, same as the CLI, and skips cleanly
+with a clear message if Chromium isn't available rather than failing.
+
+If you hit a new real-site bug, the fix belongs in **both**
+`ja/extractor.py`/`ja/matcher.py`/`ja/filler.py` (the Python/Playwright
+side) **and** their `extension/*.js` ports — the two are kept in sync by
+hand, not shared code. Add (or extend) a fixture under `tests/fixtures/`
+and an assertion in `test_extension_regression.py` so the fix stays fixed;
+these are frozen snapshots of forms at a point in time, not a live check
+against the real site, so a company changing their form later won't be
+caught by a still-green test — the safety net only knows what it's shown.
+
 ## Limitations
 
 - Multi-page forms need a manual `r` press per step (see above); the tool

@@ -1,0 +1,24 @@
+<!doctype html><html><body><form>
+  <div class="q"><label for="p">Postal</label><input id="p" name="p"></div>
+  <div class="q"><label for="cl">Cover Letter</label><textarea id="cl" name="cl"></textarea></div>
+  <div class="q"><label for="lg">What languages do you speak fluently?</label><input id="lg" name="lg"></div>
+  <div class="q"><label for="rf">References: Please enter names and contact information:</label>
+    <textarea id="rf" name="rf"></textarea></div>
+  <!-- yes/no as checkbox pairs, question in a plain wrapper div (no fieldset) -->
+  <div class="q">
+    <p>Are you legally authorized to work in the United States?</p>
+    <label for="w1"><input type="checkbox" id="w1" name="auth_yes"> Yes</label>
+    <label for="w2"><input type="checkbox" id="w2" name="auth_no"> No</label>
+  </div>
+  <div class="q">
+    <p>Are you willing to relocate?</p>
+    <label for="r1"><input type="checkbox" id="r1" name="rel_yes"> Yes</label>
+    <label for="r2"><input type="checkbox" id="r2" name="rel_no"> No</label>
+  </div>
+  <!-- radios with the question in a sibling div, no fieldset -->
+  <div class="q">
+    <div class="lbl">Do you have a valid driver's license?</div>
+    <input type="radio" id="d1" name="dl" value="y"><label for="d1">Yes</label>
+    <input type="radio" id="d2" name="dl" value="n"><label for="d2">No</label>
+  </div>
+</form></body></html>

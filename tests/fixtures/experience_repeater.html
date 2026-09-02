@@ -1,0 +1,27 @@
+<!doctype html><html><body>
+<div class="experience-block">
+  <input type="text" id="experience_job_title" name="experience[0][job_title]" aria-required="true">
+  <input type="text" id="experience_company" name="experience[0][company]" aria-required="true">
+  <input type="text" id="experience_location" name="experience[0][location]" aria-required="false">
+  <input type="checkbox" id="experience[0][current_work]" name="experience[0][current_work]" aria-required="false">
+  <label for="experience[0][current_work]">I currently work here</label>
+  <input type="text" name="experience[0][work_start]" placeholder="MM/YYYY" aria-required="true" class="hasDatepicker">
+  <input type="text" name="experience[0][work_end]" placeholder="MM/YYYY" aria-required="true" class="hasDatepicker">
+  <textarea class="role_description" name="experience[0][role]" aria-required="false"></textarea>
+</div>
+<div class="education-block">
+  <label for="edu_school">School or University</label>
+  <input type="text" id="edu_school" name="education[0][school_name]" aria-required="true">
+  <label for="edu_degree">Degree</label>
+  <select id="education[0][degree]" name="education[0][degree]" aria-required="true">
+    <option value="" selected>Choose</option>
+    <option value="DEGREE-6-3">Some College, no degree</option>
+    <option value="DEGREE-6-2">High School GED / Diploma or equivalent</option>
+    <option value="DEGREE-6-5">Associates Degree</option>
+    <option value="DEGREE-3-15">Bachelors Degree</option>
+    <option value="DEGREE-3-14">Doctorate, PhD or Professional Degree</option>
+    <option value="DEGREE-3-18">Masters Degree</option>
+    <option value="DEGREE-6-10">None of the Above</option>
+  </select>
+</div>
+</body></html>

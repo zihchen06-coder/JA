@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<body>
+<form>
+  <label for="fn">First Name *</label>
+  <input id="fn" name="fn" type="text" required>
+
+  <label for="ln">Last Name *</label>
+  <input id="ln" name="ln" type="text" required>
+
+  <label for="em">E-mail Address *</label>
+  <input id="em" name="em" type="email" required>
+
+  <label for="ph">Phone Number</label>
+  <input id="ph" name="ph" type="tel">
+
+  <label for="addr">Street Address</label>
+  <input id="addr" name="addr" type="text">
+
+  <label for="ct">City</label>
+  <input id="ct" name="ct" type="text">
+
+  <label for="cc">Country</label>
+  <select id="cc" name="cc">
+    <option value="">Select...</option>
+    <option value="us">United States</option>
+    <option value="ca">Canada</option>
+  </select>
+
+  <label for="li">LinkedIn Profile</label>
+  <input id="li" name="li" type="url">
+
+  <label for="resume">Resume/CV *</label>
+  <input id="resume" name="resume" type="file" required>
+
+  <fieldset>
+    <legend>Are you legally authorized to work in the US?</legend>
+    <input type="radio" id="auth_yes" name="auth" value="yes"><label for="auth_yes">Yes</label>
+    <input type="radio" id="auth_no" name="auth" value="no"><label for="auth_no">No</label>
+  </fieldset>
+
+  <label for="relocate">
+    <input type="checkbox" id="relocate" name="relocate"> Willing to relocate
+  </label>
+
+  <label for="gender">Gender</label>
+  <select id="gender" name="gender">
+    <option value="">Select...</option>
+    <option value="m">Male</option>
+    <option value="f">Female</option>
+    <option value="decline">Decline to answer</option>
+  </select>
+
+  <label for="why">Why do you want to work here? *</label>
+  <textarea id="why" name="why" required></textarea>
+
+  <label for="mystery">Describe a challenging project *</label>
+  <textarea id="mystery" name="mystery" required></textarea>
+
+  <button type="submit">Submit Application</button>
+</form>
+</body>
+</html>
