@@ -99,13 +99,28 @@ var LLM_OUTPUT_SCHEMA = {
   additionalProperties: false,
 };
 
+// The saved written answers are by far the largest thing in a profile -- a
+// filled-in Answers tab runs to several thousand tokens -- and they exist to
+// supply the applicant's own voice for open-ended questions. A page of
+// contact boxes and dropdowns has no such question on it, so sending them
+// there is most of the request's cost buying nothing.
+function _needsWrittenVoice(fields) {
+  return (fields || []).some((f) => {
+    if (f.type === "textarea") return true;
+    if (f.type === "select") return false;
+    const label = `${f.label || ""} ${f.group_label || ""}`.trim();
+    return label.includes("?") || label.length > 40;
+  });
+}
+
 // The saved resume and cover letter are stored as base64 data URLs and can
 // be megabytes; they are for attaching to upload fields, and have no
 // business in a prompt.
-function _promptProfile(profile) {
+function _promptProfile(profile, withAnswers) {
   const copy = { ...profile };
   delete copy.resume_file;
   delete copy.cover_letter_file;
+  if (!withAnswers) delete copy.custom_answers;
   return copy;
 }
 
@@ -155,7 +170,7 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl }) {
       {
         type: "text",
         text: `${LLM_SYSTEM_RULES}\n\nThe applicant's profile:\n${JSON.stringify(
-          _promptProfile(profile),
+          _promptProfile(profile, _needsWrittenVoice(fields)),
           null,
           1
         )}`,

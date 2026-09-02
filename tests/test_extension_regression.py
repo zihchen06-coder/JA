@@ -537,3 +537,57 @@ def test_llm_blank_values_become_skips_not_empty_fills(browser):
     )
     assert out["result"]["answers"] == {}
     assert out["result"]["skipped"] == {"ja-1": "sensitive"}
+
+
+def _llm_call_with_fields(browser, fields):
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        return page.evaluate(
+            """async ({profile, fields}) => {
+                let sent = null;
+                window.fetch = async (url, init) => {
+                    sent = JSON.parse(init.body);
+                    return {ok: true, status: 200, text: async () => JSON.stringify({
+                        content: [{type: "text", text: JSON.stringify({answers: []})}],
+                        stop_reason: "end_turn",
+                    })};
+                };
+                await resolveWithClaude({
+                    apiKey: "sk-ant-test", profile, fields,
+                    pageUrl: "https://example.com/apply",
+                });
+                return sent.system[0].text;
+            }""",
+            {"profile": PROFILE, "fields": fields},
+        )
+    finally:
+        page.close()
+
+
+def test_written_answers_are_only_sent_when_a_page_asks_an_open_question(browser):
+    """A filled-in Answers tab is several thousand tokens and exists to supply
+    the applicant's voice on essay questions. A page of contact boxes and
+    dropdowns has none, so sending them there is most of the request's cost
+    buying nothing.
+    """
+    answer_text = PROFILE["custom_answers"]["why do you want to work"]
+
+    dropdowns_only = _llm_call_with_fields(browser, [
+        {"ja_id": "ja-1", "label": "Country", "type": "select", "options": ["United States"]},
+        {"ja_id": "ja-2", "label": "City", "type": "text", "options": []},
+    ])
+    assert answer_text not in dropdowns_only
+    assert PROFILE["first_name"] in dropdowns_only  # the rest of the profile still goes
+
+    with_textarea = _llm_call_with_fields(browser, [
+        {"ja_id": "ja-1", "label": "Tell us about yourself", "type": "textarea", "options": []},
+    ])
+    assert answer_text in with_textarea
+
+    # A one-line box can still hold a real question.
+    with_question = _llm_call_with_fields(browser, [
+        {"ja_id": "ja-1", "label": "Why do you want to work here?", "type": "text", "options": []},
+    ])
+    assert answer_text in with_question
