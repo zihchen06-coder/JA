@@ -182,10 +182,16 @@
       </div>
 
       <h3>Import education, work history &amp; answers</h3>
-      <p class="note">Paste a JSON snippet shaped like <code>{"education": [...], "experience": [...], "custom_answers": {...}}</code> (any of the three keys is optional) — ask Claude to generate this from your resume or your own written answers — and it's added to the Education &amp; Work and Answers tabs (existing rows aren't touched, so review for duplicates after importing).</p>
+      <p class="note">Paste a JSON snippet shaped like <code>{"education": [...], "experience": [...], "custom_answers": {...}}</code> (any of the three keys is optional) — ask Claude to generate this from your resume or your own written answers — and it's added to the Education &amp; Work and Answers tabs. Anything already there is matched up rather than duplicated (schools by school+degree, jobs by company+title, answers by keyword) and left as-is unless you tick Replace existing.</p>
       <textarea id="import-json" rows="4" placeholder='{"education": [...], "experience": [...], "custom_answers": {"why do you want to work": "..."}}'></textarea>
       <div class="row" style="margin-top:8px;">
         <button class="ghost" id="import-json-btn" type="button">Import</button>
+        <label class="row note" style="gap:6px; cursor:pointer;">
+          <input type="checkbox" id="import-overwrite" style="width:16px;height:16px;">
+          Replace existing (update entries and answers that are already filled in, instead of leaving them alone)
+        </label>
+      </div>
+      <div class="row" style="margin-top:6px;">
         <span id="import-status" class="note"></span>
       </div>
     </div>

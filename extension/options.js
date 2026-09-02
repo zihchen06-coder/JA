@@ -437,39 +437,82 @@ function initTabs() {
       status.textContent = "That's not valid JSON.";
       return;
     }
+    const overwrite = document.getElementById("import-overwrite").checked;
     const eduList = document.getElementById("edu-list");
     const expList = document.getElementById("exp-list");
     const answersList = document.getElementById("answers-list");
-    (data.education || []).forEach((e) => eduList.appendChild(eduRow(e)));
-    (data.experience || []).forEach((e) => expList.appendChild(expRow(e)));
+
+    const counts = { added: 0, updated: 0, skipped: 0 };
+
+    // Education and experience have no single natural key, so identity is
+    // the pair that actually distinguishes one entry from another:
+    // school+degree, company+title. Without this, re-importing the same
+    // snippet just stacks up duplicate rows.
+    const importList = (entries, listEl, rowFactory, keyOf) => {
+      const existing = new Map();
+      listEl.querySelectorAll(".listitem").forEach((row) => {
+        const values = {};
+        row.querySelectorAll("[data-k]").forEach((inp) => (values[inp.getAttribute("data-k")] = inp.value));
+        existing.set(keyOf(values), row);
+      });
+      entries.forEach((entry) => {
+        const row = existing.get(keyOf(entry));
+        if (!row) {
+          listEl.appendChild(rowFactory(entry));
+          counts.added++;
+          return;
+        }
+        if (!overwrite) {
+          counts.skipped++;
+          return;
+        }
+        row.querySelectorAll("[data-k]").forEach((inp) => {
+          const key = inp.getAttribute("data-k");
+          if (key in entry) inp.value = entry[key] ?? "";
+        });
+        counts.updated++;
+      });
+    };
+
+    const norm = (s) => (s ?? "").toString().trim().toLowerCase();
+    importList(data.education || [], eduList, eduRow, (e) => `${norm(e.school)}|${norm(e.degree)}`);
+    importList(data.experience || [], expList, expRow, (e) => `${norm(e.company)}|${norm(e.title)}`);
 
     // Keyed by keyword -> that row's answer textarea, so a row already
     // added (e.g. by "+ Add top 50 common questions") but still blank gets
     // filled in here instead of silently skipped just because the keyword
-    // already exists as a row.
+    // already exists as a row. A row that already has real content is only
+    // replaced when "Replace existing" is ticked -- otherwise something
+    // written by hand would be silently overwritten by an import.
     const existingRows = new Map();
     answersList.querySelectorAll(".listitem").forEach((row) => {
       const kwInput = row.querySelector('[data-k="keyword"]');
-      if (kwInput) existingRows.set(kwInput.value.trim().toLowerCase(), row.querySelector('[data-k="answer"]'));
+      if (kwInput) existingRows.set(norm(kwInput.value), row.querySelector('[data-k="answer"]'));
     });
-    let answersAdded = 0;
-    let answersFilled = 0;
     Object.entries(data.custom_answers || {}).forEach(([keyword, answer]) => {
-      const normKeyword = keyword.trim().toLowerCase();
-      const existingAnswerEl = existingRows.get(normKeyword);
-      if (existingAnswerEl) {
-        if (!existingAnswerEl.value.trim() && answer) {
+      const existingAnswerEl = existingRows.get(norm(keyword));
+      if (!existingAnswerEl) {
+        answersList.appendChild(answerRow(keyword, answer));
+        counts.added++;
+        return;
+      }
+      if (!existingAnswerEl.value.trim() || overwrite) {
+        if (answer) {
           existingAnswerEl.value = answer;
-          answersFilled++;
+          counts.updated++;
         }
         return;
       }
-      answersList.appendChild(answerRow(keyword, answer));
-      answersAdded++;
+      counts.skipped++;
     });
 
     status.style.color = "var(--green)";
-    status.textContent = `Added ${(data.education || []).length} school(s), ${(data.experience || []).length} job(s), ${answersAdded} new answer(s), and filled in ${answersFilled} previously-blank answer(s) -- review them on the Education & Work and Answers tabs, then Save.`;
+    status.textContent =
+      `Added ${counts.added}, updated ${counts.updated}, left ${counts.skipped} alone` +
+      (counts.skipped && !overwrite
+        ? " (already had content -- tick \"Replace existing\" to overwrite those too)."
+        : ".") +
+      " Review the Education & Work and Answers tabs, then Save.";
     document.getElementById("import-json").value = "";
   };
 })();
