@@ -69,10 +69,18 @@ profile, and its answers are filled in. That covers arbitrary phrasings and
 the open-ended essay questions in one step. A typical application costs a
 few cents, billed to your own account.
 
+Your profile is what it works from — not general knowledge, and not a guess.
+Rule one of the prompt is that every answer must be supported by something
+in your profile, and that a field the profile can't answer comes back blank
+with a reason rather than invented.
+
 This is the one part of the tool that leaves your machine. What goes to the
-API: the labels of the unfilled fields on the page, and everything on the
-Options tabs. What does not: your resume and cover letter files, your saved
-site logins, and any field the matcher already handled.
+API: the labels of the unfilled fields on the page, and your Contact,
+Background, Eligibility, Education & Work tabs. Your written Answers go too,
+but only when the page actually asks an open-ended question. What does not
+go: your resume and cover-letter files, your saved site logins, your API
+key, and your Self-ID and criminal-history answers — Claude is never asked
+one of those questions, so no request could need them.
 
 The guarantees don't change, and they are enforced in `filler.js` on the way
 back in rather than merely asked of the model:

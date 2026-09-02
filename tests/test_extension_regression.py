@@ -680,3 +680,25 @@ def test_sms_consent_is_answered_only_when_saved(browser):
 
     report, _ = _fill_with(browser, "icims_profile.html", {"sms_consent": False})
     assert _result_for(report, "consent to receive text")["detail"] == "No"
+
+
+def test_self_id_and_criminal_history_never_leave_the_machine(browser):
+    """Claude is never asked one of those questions -- they are answered from
+    the applicant's own saved answer or not at all -- so there is no request
+    that could need the data, and no reason to send it.
+    """
+    system = _llm_call_with_fields(browser, [
+        {"ja_id": "ja-1", "label": "Tell us about yourself", "type": "textarea", "options": []},
+    ])
+    for field in ("gender", "pronouns", "hispanic_latino", "race_ethnicity",
+                  "veteran_status", "disability_status", "sexual_orientation",
+                  "transgender_status", "criminal_history"):
+        assert f'"{field}"' not in system, field
+    for value in (PROFILE["race_ethnicity"], PROFILE["veteran_status"],
+                  PROFILE["disability_status"], PROFILE["sexual_orientation"]):
+        assert value not in system, value
+
+    # The rest of the profile is still the reference it works from.
+    assert PROFILE["email"] in system
+    assert PROFILE["experience"][0]["company"] in system
+    assert PROFILE["education"][0]["school"] in system

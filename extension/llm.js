@@ -113,6 +113,17 @@ function _needsWrittenVoice(fields) {
   });
 }
 
+// Claude is never asked a self-identification or criminal-history question --
+// those are answered from the applicant's own saved answer or not at all, and
+// are never in the set of fields offered here. So there is no request it
+// could need race, gender, veteran status, disability or a conviction to
+// answer, and no reason for any of it to leave the machine.
+var _WITHHELD_FROM_PROMPT = [
+  "gender", "pronouns", "hispanic_latino", "race_ethnicity", "veteran_status",
+  "disability_status", "sexual_orientation", "transgender_status",
+  "criminal_history",
+];
+
 // The saved resume and cover letter are stored as base64 data URLs and can
 // be megabytes; they are for attaching to upload fields, and have no
 // business in a prompt.
@@ -120,6 +131,7 @@ function _promptProfile(profile, withAnswers) {
   const copy = { ...profile };
   delete copy.resume_file;
   delete copy.cover_letter_file;
+  for (const field of _WITHHELD_FROM_PROMPT) delete copy[field];
   if (!withAnswers) delete copy.custom_answers;
   return copy;
 }
