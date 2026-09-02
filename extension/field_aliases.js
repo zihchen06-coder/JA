@@ -154,6 +154,15 @@ var FIELD_ALIASES = {
     "essential functions", "perform the essential functions",
     "with or without reasonable accommodation",
   ],
+  criminal_history: [
+    "ever been convicted", "convicted of a felony", "convicted of a crime",
+    "criminal conviction", "criminal history", "criminal record",
+    "pleaded guilty", "pled guilty",
+  ],
+  sms_consent: [
+    "consent to receive text", "text message communication", "sms consent",
+    "receive text messages", "receive sms",
+  ],
   previously_employed_here: [
     "previously employed", "ever worked for", "former employee",
     "worked here before", "previously worked for",
@@ -196,7 +205,7 @@ var BOOLEAN_FIELDS = new Set([
   "consent_background_check", "consent_drug_test",
   "can_perform_essential_functions", "previously_employed_here",
   "willing_overtime_varied_schedule", "has_reliable_transportation",
-  "bound_by_noncompete",
+  "bound_by_noncompete", "criminal_history", "sms_consent",
 ]);
 
 var EDUCATION_FIELDS = new Set(["school", "degree", "field_of_study", "graduation_year"]);
@@ -206,6 +215,15 @@ var SELF_ID_FIELDS = new Set([
   "veteran_status", "disability_status", "sexual_orientation",
   "transgender_status",
 ]);
+
+// Questions that are never answered from a guess -- only from an answer the
+// applicant set for that exact thing, by hand, in their profile. Grouped by
+// the sensitive group whose gate they satisfy, so a criminal-history answer
+// can never be used for a demographic question or the other way round.
+var SENSITIVE_ANSWER_FIELDS = {
+  demographic: SELF_ID_FIELDS,
+  criminal: new Set(["criminal_history"]),
+};
 
 var SELF_ID_DISPLAY_NAMES = {
   gender: "Gender",

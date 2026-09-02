@@ -14,6 +14,8 @@ const BOOL_LABELS = {
   willing_overtime_varied_schedule: "Willing to work overtime / varied schedules",
   has_reliable_transportation: "Has reliable transportation",
   bound_by_noncompete: "Currently bound by a non-compete",
+  criminal_history: "Has a criminal conviction to disclose",
+  sms_consent: "Consents to application texts (SMS)",
 };
 
 let state = { profile: {}, settings: {}, credentials: {} };

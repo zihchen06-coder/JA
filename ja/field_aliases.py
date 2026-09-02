@@ -164,6 +164,15 @@ FIELD_ALIASES: dict[str, list[str]] = {
     ],
     # Company-specific: a blanket "no" is wrong at any employer you HAVE
     # worked for, so leave it unset unless you're sure it applies.
+    "criminal_history": [
+        "ever been convicted", "convicted of a felony", "convicted of a crime",
+        "criminal conviction", "criminal history", "criminal record",
+        "pleaded guilty", "pled guilty",
+    ],
+    "sms_consent": [
+        "consent to receive text", "text message communication", "sms consent",
+        "receive text messages", "receive sms",
+    ],
     "previously_employed_here": [
         "previously employed", "ever worked for", "former employee",
         "worked here before", "previously worked for",
@@ -225,7 +234,7 @@ BOOLEAN_FIELDS = {
     "consent_background_check", "consent_drug_test",
     "can_perform_essential_functions", "previously_employed_here",
     "willing_overtime_varied_schedule", "has_reliable_transportation",
-    "bound_by_noncompete",
+    "bound_by_noncompete", "criminal_history", "sms_consent",
 }
 
 # Canonical names that live on the profile's first education entry rather

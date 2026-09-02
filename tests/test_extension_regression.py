@@ -283,7 +283,9 @@ def test_icims_custom_dropdowns_and_work_history(browser):
     consent = next(
         r for r in report["results"] if "consent to receive text" in r["label"].lower()
     )
-    assert consent["action"] == "skipped_no_match"
+    # Nothing saved for it, so nothing is consented to. (With sms_consent set
+    # in the profile it would be answered -- see the sensitive-answers tests.)
+    assert consent["action"] != "filled"
     assert consent["required"] is True
 
 
@@ -591,3 +593,90 @@ def test_written_answers_are_only_sent_when_a_page_asks_an_open_question(browser
         {"ja_id": "ja-1", "label": "Why do you want to work here?", "type": "text", "options": []},
     ])
     assert answer_text in with_question
+
+
+def _fill_with(browser, fname, overrides):
+    profile = {**PROFILE, **overrides}
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, fname)}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        report = page.evaluate("(profile) => fillForm(profile, null)", profile)
+        checked = page.evaluate(
+            """() => Array.from(document.querySelectorAll('input:checked'))
+                        .map((el) => (
+                            document.querySelector(`label[for="${el.id}"]`)?.textContent
+                            || el.closest('label')?.textContent
+                            || el.value
+                        ).trim())"""
+        )
+        return report, checked
+    finally:
+        page.close()
+
+
+def _result_for(report, needle):
+    return next(r for r in report["results"] if needle.lower() in (r["label"] or "").lower())
+
+
+def test_criminal_history_is_flagged_until_the_applicant_answers_it_themselves(browser):
+    """It is never inferred -- not from the profile, not from the resume, and
+    the AI-assist pass never sees it. Unset means flagged on every form.
+    """
+    report, checked = _fill_with(browser, "screening.html", {})
+    felony = _result_for(report, "convicted of a felony")
+    assert felony["action"] == "needs_review"
+    assert "Criminal-history question" in felony["detail"]
+    assert not any("felony" in c.lower() for c in checked)
+
+
+def test_a_saved_criminal_history_answer_is_used(browser):
+    """Having written the answer down under Eligibility, the applicant
+    shouldn't have to retype it on every application.
+    """
+    report, checked = _fill_with(browser, "screening.html", {"criminal_history": False})
+    felony = _result_for(report, "convicted of a felony")
+    assert felony["action"] == "filled"
+    assert felony["canonical"] == "criminal_history"
+    assert felony["detail"].strip().lower() == "no"
+
+    # false is a real answer, and must not be read as "nothing saved".
+    report, _ = _fill_with(browser, "screening.html", {"criminal_history": True})
+    assert _result_for(report, "convicted of a felony")["detail"].strip().lower() == "yes"
+
+
+def test_a_saved_answer_only_satisfies_its_own_kind_of_question(browser):
+    """A criminal-history answer must never be used for a demographic
+    question, or the other way round -- each gate opens only for a profile
+    field that belongs to it.
+    """
+    stripped = {k: "" for k in (
+        "gender", "pronouns", "hispanic_latino", "race_ethnicity",
+        "veteran_status", "disability_status", "sexual_orientation",
+        "transgender_status",
+    )}
+    # A criminal-history answer saved, every self-ID answer cleared.
+    report, _ = _fill_with(browser, "eeo.html", {**stripped, "criminal_history": False})
+    filled = [r for r in report["results"] if r["action"] == "filled"]
+    assert [r["canonical"] for r in filled] == ["criminal_history"]
+    assert filled[0]["detail"] == "No"  # not the raw "false"
+    for r in report["results"]:
+        if r["canonical"] != "criminal_history":
+            assert r["action"] == "needs_review", r
+
+    # And the other way round: self-ID answered, criminal history not.
+    report, _ = _fill_with(browser, "eeo.html", {"criminal_history": ""})
+    felony = _result_for(report, "convicted of a felony")
+    assert felony["action"] == "needs_review"
+    assert sum(1 for r in report["results"] if r["action"] == "filled") >= 4
+
+
+def test_sms_consent_is_answered_only_when_saved(browser):
+    report, _ = _fill_with(browser, "icims_profile.html", {"sms_consent": True})
+    consent = _result_for(report, "consent to receive text")
+    assert consent["action"] == "filled"
+    assert consent["detail"] == "Yes"
+
+    report, _ = _fill_with(browser, "icims_profile.html", {"sms_consent": False})
+    assert _result_for(report, "consent to receive text")["detail"] == "No"

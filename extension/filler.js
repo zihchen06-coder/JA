@@ -260,12 +260,26 @@ function _fillText(report, f, canonical, value, required) {
   addResult(report, label, canonical, "filled", value, required);
 }
 
-function _selfIdAnswer(profile, label, group) {
-  if (group !== "demographic") return null;
+// The answer to a sensitive question, but only ever the one the applicant
+// wrote down for that exact question themselves, under a profile field that
+// belongs to this question's own group. Nothing here is inferred -- not from
+// their name, not from their resume, and not by the AI-assist pass, which
+// never sees these fields at all. Unset means unset: the question is flagged
+// and left for them, on every form, forever.
+function _savedSensitiveAnswer(profile, label, group) {
+  const allowed = SENSITIVE_ANSWER_FIELDS[group];
+  if (!allowed) return null;
   const canonical = matchField(label);
-  if (!canonical || !SELF_ID_FIELDS.has(canonical)) return null;
+  if (!canonical || !allowed.has(canonical)) return null;
   const value = profile[canonical];
-  return value || null;
+  // false is a real answer to "have you ever been convicted"; "" and
+  // undefined are not answers at all.
+  if (value === null || value === undefined || value === "") return null;
+  return value;
+}
+
+function _isAnswered(value) {
+  return value !== null && value !== undefined && value !== "";
 }
 
 function _matchCustomAnswer(label, profile) {
@@ -389,8 +403,8 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
   const group = sensitiveGroup(wideText);
   let canonical, value;
   if (group) {
-    const answer = _selfIdAnswer(profile, wideText, group);
-    if (!answer) {
+    const answer = _savedSensitiveAnswer(profile, wideText, group);
+    if (!_isAnswered(answer)) {
       const guess = matchField(wideText);
       _mark(f.ja_id, MARK_REVIEW);
       addResult(report, _displayLabel(label, guess), null, "needs_review", sensitiveReason(wideText), required);
@@ -399,6 +413,10 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
     canonical = matchField(wideText);
     label = _displayLabel(label, canonical);
     value = answer;
+    if (ftype === "checkbox") {
+      _sensitiveCheckbox(report, f, canonical, label, value, required);
+      return;
+    }
   } else {
     if (ftype === "checkbox") {
       _handleCheckbox(profile, report, f);
@@ -448,6 +466,13 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
       await _fillSelectLike(profile, report, f, el, canonical, value, label, required);
     } else {
       let fillValue;
+      // A yes/no answer landing in a free-text box: "Yes" is what a person
+      // would write there, "true" is what a bug looks like.
+      if (typeof value === "boolean") {
+        fillValue = value ? "Yes" : "No";
+        _fillText(report, f, canonical, fillValue, required);
+        return;
+      }
       if (ftype === "date") {
         fillValue = normalizeDate(String(value), "%Y-%m-%d");
       } else if (f.is_datepicker || canonical === "notice_period") {
@@ -885,8 +910,8 @@ function _handleRadioGroup(profile, report, options) {
 
   const sgroup = sensitiveGroup(wideText);
   if (sgroup) {
-    const answer = _selfIdAnswer(profile, wideText, sgroup);
-    if (!answer) {
+    const answer = _savedSensitiveAnswer(profile, wideText, sgroup);
+    if (!_isAnswered(answer)) {
       const guess = matchField(wideText);
       _markAll(options, MARK_REVIEW);
       addResult(report, _displayLabel(groupLabel, guess), null, "needs_review", sensitiveReason(wideText), required);
@@ -894,7 +919,15 @@ function _handleRadioGroup(profile, report, options) {
     }
     const canonical = matchField(wideText);
     const display = _displayLabel(groupLabel, canonical);
-    const idx = bestChoice(answer, options.map((o) => o.label || ""));
+    // A yes/no answer ("have you ever been convicted") picks the option that
+    // means that; a self-ID answer is the text of the choice itself.
+    let idx;
+    if (typeof answer === "boolean") {
+      idx = options.findIndex((o) => semanticBool(o.label || "") === answer);
+      if (idx < 0) idx = null;
+    } else {
+      idx = bestChoice(answer, options.map((o) => o.label || ""));
+    }
     if (idx === null) {
       if (required) _markAll(options, MARK_BLANK);
       addResult(report, display, canonical, "skipped_no_match", `No option matched '${answer}'.`, required);
@@ -1080,4 +1113,36 @@ async function applyLlmAnswers(report, answers, skipped) {
   }
 
   return filled;
+}
+
+// A sensitive question asked as a checkbox: a yes/no one is ticked or left
+// alone, and a "tick all that apply" one (race is often built this way) is
+// ticked only when this box is the choice the applicant saved.
+function _sensitiveCheckbox(report, f, canonical, label, value, required) {
+  const el = _el(f.ja_id);
+  if (!el) {
+    addResult(report, label, canonical, "error", "Field disappeared from the page.", required);
+    return;
+  }
+
+  let wantChecked;
+  if (typeof value === "boolean") {
+    wantChecked = value;
+  } else {
+    const own = f.label || "";
+    if (!own || bestChoice(String(value), [own]) === null) {
+      // This box isn't the saved choice. Leaving it unticked is the answer.
+      addResult(report, label, canonical, "skipped_no_match", "", required);
+      return;
+    }
+    wantChecked = true;
+  }
+
+  if (f.checked === wantChecked) {
+    if (wantChecked) addResult(report, label, canonical, "already_filled", "Left as-is.", required);
+    return;
+  }
+  _setChecked(el, wantChecked);
+  _mark(f.ja_id, MARK_FILLED);
+  addResult(report, label, canonical, "filled", wantChecked ? "checked" : "unchecked", required);
 }

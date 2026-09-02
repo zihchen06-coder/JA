@@ -363,6 +363,28 @@ Lever, Workday and JazzHR use. Nothing here is ever inferred from your name,
 your resume, or anything else, and any field left blank keeps its question
 flagged for you to answer by hand — which stays the default.
 
+### Questions you answer once, yourself
+
+Self-identification, criminal history and SMS consent are never *guessed* —
+but they are filled from an answer you set by hand, so you don't retype the
+same thing on every application:
+
+- **Self-ID** (race, gender, veteran, disability, pronouns, ...) — the
+  Self-ID tab. Left "Not set", the question stays flagged on every form.
+- **Criminal history** — Eligibility tab, "Has a criminal conviction to
+  disclose". Left unset, flagged every time. Note that these questions are
+  scoped differently from form to form (felony vs. misdemeanour, last seven
+  years, sealed/expunged records, state ban-the-box rules), so a single
+  saved yes/no won't be right for every phrasing — it is outlined like
+  everything else, and worth reading before you submit.
+- **SMS consent** — Eligibility tab.
+
+Each gate only opens for a profile field belonging to that same group: a
+criminal-history answer can never be used for a demographic question, or the
+other way round. The AI-assist pass never sees any of these fields, so
+nothing here is ever inferred from your name, your resume, or the page — it
+is only ever what you wrote down.
+
 ### Never auto-filled
 
 Always flagged, whatever the profile says:
@@ -459,6 +481,8 @@ caught by a still-green test — the safety net only knows what it's shown.
 
 - Multi-page forms need a manual `r` press per step (see above); the tool
   doesn't click "Next" for you, by design.
+- Salary-history questions are still always flagged and have no profile
+  field to set, since most states now bar employers from asking.
 - Fields go to the optional AI assist only if the deterministic matcher
   couldn't place them; with it off, an unrecognised field is simply reported
   as unfilled. It can't fill checkboxes or radios by design (see above), so
