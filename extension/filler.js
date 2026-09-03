@@ -456,6 +456,16 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
         }
         return;
       }
+      // The same question answered on an earlier application. The profile has
+      // no field for "what type of phone is this" or "did you graduate", so
+      // there is nothing to match against -- but the answer doesn't change,
+      // and paying to work it out again on every form is the waste this is
+      // here to stop.
+      const remembered = learnedAnswerFor(label);
+      if (remembered !== null) {
+        _fillRemembered(report, f, label, remembered, required);
+        return;
+      }
       if (required) _mark(f.ja_id, MARK_BLANK);
       addResult(report, label || f.name || f.ja_id, null, "skipped_no_match", "", required);
       return;
@@ -603,6 +613,58 @@ async function _fillSelectLike(profile, report, f, el, canonical, value, label, 
   }
   _mark(f.ja_id, MARK_FILLED);
   addResult(report, label, canonical, "filled", decision.detail, required);
+}
+
+// A remembered answer, put into whichever control the question is asked
+// with this time. A dropdown or radio group gets the option that matches it,
+// not the raw text, so the same saved "Yes" works on a form that spells it
+// "Yes, I did".
+function _fillRemembered(report, f, label, value, required) {
+  const el = _el(f.ja_id);
+  if (!el) {
+    addResult(report, label, "learned", "error", "Field disappeared from the page.", required);
+    return;
+  }
+
+  if (f.tag === "select") {
+    const optionValue = bestOption(value, f.options || []);
+    if (optionValue === null || optionValue === undefined) {
+      if (required) _mark(f.ja_id, MARK_BLANK);
+      addResult(report, label, "learned", "skipped_no_match",
+        `Remembered '${value}', but no option matched it.`, required);
+      return;
+    }
+    if (f.widget === "icims") {
+      _openIcims(el);
+      if (!_setIcimsValue(el, optionValue, _optionText(f.options || [], optionValue))) {
+        _mark(f.ja_id, MARK_REVIEW);
+        addResult(report, label, "learned", "needs_review",
+          "This dropdown didn't take the remembered answer -- set it here yourself.", required);
+        return;
+      }
+    } else {
+      _setSelectValue(el, optionValue);
+    }
+    _mark(f.ja_id, MARK_FILLED);
+    addResult(report, label, "learned", "filled", _optionText(f.options || [], optionValue), required);
+    return;
+  }
+
+  if (f.type === "checkbox") {
+    const want = semanticBool(value);
+    if (want === null) {
+      addResult(report, label, "learned", "skipped_no_match", "", required);
+      return;
+    }
+    _setChecked(el, want);
+    _mark(f.ja_id, MARK_FILLED);
+    addResult(report, label, "learned", "filled", want ? "checked" : "unchecked", required);
+    return;
+  }
+
+  _setNativeValue(el, value);
+  _mark(f.ja_id, MARK_FILLED);
+  addResult(report, label, "learned", "filled", value, required);
 }
 
 const EXPERIENCE_ATTR = {
@@ -967,6 +1029,17 @@ function _handleRadioGroup(profile, report, options) {
 
   const canonical = matchField(groupLabel);
   if (!BOOLEAN_FIELDS.has(canonical)) {
+    const remembered = learnedAnswerFor(groupLabel);
+    if (remembered !== null) {
+      const idx = bestChoice(remembered, options.map((o) => o.label || ""));
+      const el = idx === null ? null : _el(options[idx].ja_id);
+      if (el) {
+        _setChecked(el, true);
+        _mark(options[idx].ja_id, MARK_FILLED);
+        addResult(report, groupLabel, "learned", "filled", options[idx].label || "", required);
+        return;
+      }
+    }
     if (required) _markAll(options, MARK_BLANK);
     addResult(report, groupLabel || options[0].name || "", canonical, "skipped_no_match", "", required);
     return;
@@ -1176,16 +1249,38 @@ function _applyLlmRadio(byId, candidate, value) {
 // worth remembering: next time it matches for free, instantly, with no API
 // call. Only mappings are learned, never the prose -- a cover letter or an
 // essay answer written for one job has no business being reused at another.
-function learnFromAnswers(report, answers, profile) {
+// Free-text prose belongs to the job it was written for. Learning a label as
+// one of these would paste one company's answer into the next one's form.
+var _UNLEARNABLE_FIELDS = new Set(["custom_answers", "cover_letter_text"]);
+
+function learnFromAnswers(report, answers, profile, sources) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
   const learned = {};
+
   for (const [jaId, value] of Object.entries(answers || {})) {
     const f = byId.get(jaId);
     const label = normalize(f && f.label);
     if (!label || !value) continue;
     // Already known by name; nothing to learn.
     if (matchField(f.label)) continue;
+
+    // Which profile field the answer came from, as Claude reported it. This
+    // is the only signal that survives the answer being reshaped to fit the
+    // field: "New York" offered as "NY" is still the state, and comparing
+    // the text alone would never have seen that.
+    const declared = (sources || {})[jaId];
+    if (
+      declared &&
+      !_UNLEARNABLE_FIELDS.has(declared) &&
+      Object.prototype.hasOwnProperty.call(profile || {}, declared)
+    ) {
+      learned[label] = declared;
+      continue;
+    }
+
+    // Nothing declared: fall back to recognising the value outright.
     for (const [key, saved] of Object.entries(profile || {})) {
+      if (_UNLEARNABLE_FIELDS.has(key)) continue;
       if (typeof saved !== "string" && typeof saved !== "number") continue;
       if (String(saved) && String(saved) === String(value)) {
         learned[label] = key;
@@ -1325,4 +1420,122 @@ async function applyLlmAnswers(report, answers, skipped, profile) {
   }
 
   return filled;
+}
+
+// ---------------------------------------------------------------------------
+// Watching the applicant fill in what was left blank.
+//
+// The best source of a remembered answer is not Claude working one out -- it
+// is the applicant typing it. Every field this tool leaves blank gets filled
+// by hand anyway; noticing what went in costs nothing, needs no API call, and
+// is the applicant's own answer rather than anyone's reading of it.
+// ---------------------------------------------------------------------------
+
+// Long enough for a real short answer, short enough that an essay or a cover
+// letter can't get in. Prose belongs to the job it was written for.
+var LEARNABLE_MAX_LENGTH = 120;
+
+function _learnableQuestion(f, groupLabel) {
+  const label = groupLabel || f.label || "";
+  if (!label) return null;
+  if (isEscapeHatchLabel(label)) return null;
+  // Answered from the profile every time, never from a remembered value.
+  const wide = [label, f.label, f.context].filter(Boolean).join(" ");
+  if (sensitiveGroup(wide) || _isConsentLike(wide)) return null;
+  // Values inside a work-history block belong to that job, not to the
+  // applicant in general.
+  if (isExperienceSection(f.section || "")) return null;
+  if (matchField(label)) return null;
+  return label;
+}
+
+// report: the report just produced. onLearn: called with {label: value} each
+// time the applicant answers something that was left to them.
+function watchForCorrections(report, onLearn) {
+  const fields = report.fields || [];
+  const byId = new Map(fields.map((f) => [f.ja_id, f]));
+  const filled = new Set(
+    report.results.filter((r) => r.action === "filled" || r.action === "already_filled")
+      .map((r) => r.ja_id)
+  );
+
+  const radioGroups = new Map();
+  for (const f of fields) {
+    if (f.type !== "radio") continue;
+    const key = f.name || f.ja_id;
+    if (!radioGroups.has(key)) radioGroups.set(key, []);
+    radioGroups.get(key).push(f);
+  }
+
+  const remember = (label, value) => {
+    const text = String(value == null ? "" : value).trim();
+    if (!text || text.length > LEARNABLE_MAX_LENGTH) return;
+    onLearn({ [normalize(label)]: text });
+  };
+
+  const watched = [];
+
+  for (const f of fields) {
+    if (f.type === "radio" || filled.has(f.ja_id)) continue;
+    if (["file", "password", "hidden"].includes(f.type)) continue;
+    const label = _learnableQuestion(f, "");
+    if (!label) continue;
+    const el = _el(f.ja_id);
+    if (!el) continue;
+
+    const handler = () => {
+      if (f.type === "checkbox") return remember(label, el.checked ? "Yes" : "No");
+      if (f.tag === "select") {
+        const opt = el.options && el.options[el.selectedIndex];
+        return remember(label, opt ? opt.text : el.value);
+      }
+      remember(label, el.value);
+    };
+    el.addEventListener("change", handler);
+    watched.push([el, handler]);
+  }
+
+  for (const group of radioGroups.values()) {
+    const head = group[0];
+    if (filled.has(head.ja_id)) continue;
+    const question = group.find((o) => o.group_label)?.group_label || "";
+    const label = _learnableQuestion(
+      { ...head, label: group.map((o) => o.label || "").join(" ") },
+      question
+    );
+    if (!label) continue;
+    for (const option of group) {
+      const el = _el(option.ja_id);
+      if (!el) continue;
+      const handler = () => {
+        if (el.checked) remember(label, option.label || el.value);
+      };
+      el.addEventListener("change", handler);
+      watched.push([el, handler]);
+    }
+  }
+
+  return () => {
+    for (const [el, handler] of watched) el.removeEventListener("change", handler);
+  };
+}
+
+// Claude's answers to questions the profile has no field for: short, factual,
+// and the same on every form. Prose and anything it looked up from a profile
+// field are excluded -- the first belongs to one job, the second is already
+// covered by a learned label.
+function rememberableAnswers(report, answers, sources) {
+  const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
+  const out = {};
+  for (const [jaId, value] of Object.entries(answers || {})) {
+    if ((sources || {})[jaId]) continue;
+    const f = byId.get(jaId);
+    if (!f || f.tag === "textarea") continue;
+    const label = _learnableQuestion(f, f.group_label || "");
+    if (!label) continue;
+    const text = String(value).trim();
+    if (!text || text.length > LEARNABLE_MAX_LENGTH) continue;
+    out[normalize(label)] = text;
+  }
+  return out;
 }

@@ -80,20 +80,32 @@ not deciding, and that is enforced in code rather than asked of the prompt:
   even then they go in the per-page message as the menu to choose from —
   never as background for anything else.
 
-### Learned labels
+### Learning as you apply
 
-Whenever Claude resolves a label to something already in your profile, that
-mapping is remembered: *"Home Telephone" → phone*. The next form using that
-wording matches for free and instantly, with no API call, so the tool gets
-cheaper and faster the more you apply — without you teaching it anything.
+Two things are remembered, both listed on the **Learned** tab.
 
-Only mappings are learned, never written prose. A cover letter or an essay
-answer belongs to the job it was written for, and reusing one at the next
-company is exactly the failure worth avoiding.
+**Remembered answers** — questions your profile has no field for at all
+("what type of phone is this", "did you graduate", "which shift"). These
+recur constantly and used to cost an API call every single time. They come
+from two places: what Claude works out, and — needing no API key and costing
+nothing — **watching what you type into whatever was left blank**. A field
+the tool leaves empty gets filled by you anyway; noticing what went in is
+free, and it is your own answer rather than anyone's reading of it. Each one
+is editable in place on the Learned tab.
 
-Every mapping is listed on the **Learned** tab with a Forget button, plus a
-"Forget everything" button. A mapping you delete is simply worked out again
-the next time it comes up, so deleting one is never destructive.
+**Label mappings** — a wording Claude tied to a field you already have, so
+the value still comes from your profile and only the recognising is
+remembered. Claude reports which profile field it used, which is the only
+thing that survives an answer being reshaped to fit a form: "New York"
+offered as "NY" is still your state, and comparing the text alone would
+never have seen that.
+
+Never remembered: anything longer than a sentence or two, anything inside a
+work-history block, and any self-identification, criminal-history or consent
+question — those are answered from your profile every time or not at all.
+
+Everything has a Forget button, plus "Forget everything". Deleting one is
+never destructive; it is simply worked out again the next time it comes up.
 
 ### AI assist (optional, off by default)
 

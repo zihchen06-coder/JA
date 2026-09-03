@@ -1012,3 +1012,144 @@ def test_saved_answers_reach_the_prompt_only_when_routing_is_on(browser):
     assert PROFILE["disability_status"] in on
     # Still out of the cached system prefix either way.
     assert PROFILE["disability_status"] not in on.split("\n")[0]
+
+
+def test_watching_the_applicant_type_remembers_the_answer(browser):
+    """The source that needs no API call and no key: a field left blank gets
+    filled by hand anyway, so notice what went in.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'routing.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        learned = page.evaluate(
+            """async (profile) => {
+                const report = await fillForm(profile, null, {});
+                const seen = {};
+                watchForCorrections(report, (m) => Object.assign(seen, m));
+
+                // The applicant answers the shift question by hand.
+                const night = document.getElementById('s2');
+                night.checked = true;
+                night.dispatchEvent(new Event('change', {bubbles: true}));
+                return seen;
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+    assert learned == {"which shift are you available for": "Night"}
+
+
+def test_watching_never_picks_up_sensitive_consent_or_prose(browser):
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'routing.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        learned = page.evaluate(
+            """async (profile) => {
+                // Nothing saved for any of them, so all are left to the applicant.
+                const bare = {...profile, disability_status: "", consent_general: "",
+                              sms_consent: ""};
+                const report = await fillForm(bare, null, {});
+                const seen = {};
+                watchForCorrections(report, (m) => Object.assign(seen, m));
+
+                for (const id of ['d1', 'terms', 'sms']) {
+                    const el = document.getElementById(id);
+                    el.checked = true;
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                }
+                return seen;
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+    # A disability declaration, a certification and an SMS consent. None of
+    # these is ever answered from a remembered value.
+    assert learned == {}
+
+
+def test_a_remembered_answer_fills_the_question_next_time(browser):
+    """The whole point: the second form never asks."""
+    first = _evaluate_on(
+        browser, "routing.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const seen = {};
+            watchForCorrections(report, (m) => Object.assign(seen, m));
+            const el = document.getElementById('s3');
+            el.checked = true;
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+            return seen;
+        }""",
+        PROFILE,
+    )
+    assert first == {"which shift are you available for": "Either"}
+
+    second = _evaluate_on(
+        browser, "routing.html",
+        """async ({profile, remembered}) => {
+            setLearnedAnswers(remembered);
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.label.includes('shift'));
+            return {action: r.action, detail: r.detail, canonical: r.canonical,
+                    checked: (document.querySelector('input[name=shift]:checked') || {}).id,
+                    stillOffered: llmFieldsFor(report).map((f) => f.label)};
+        }""",
+        {"profile": PROFILE, "remembered": first},
+    )
+    assert second["action"] == "filled"
+    assert second["canonical"] == "learned"
+    assert second["checked"] == "s3"
+    # Nothing left to pay Claude for on that question.
+    assert "Which shift are you available for?" not in second["stillOffered"]
+
+
+def test_claude_declaring_the_field_it_used_is_what_makes_a_label_learnable(browser):
+    """Comparing the answer text alone never worked: "New York" offered as
+    "NY" to fit a dropdown looks nothing like the saved value.
+    """
+    out = _evaluate_on(
+        browser, "unknowns.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const target = llmFieldsFor(report)[0];
+            const answers = {[target.ja_id]: "NY"};
+            // Without the declaration, the reshaped value is unrecognisable.
+            const blind = learnFromAnswers(report, answers, profile, {});
+            // With it, the label is learned.
+            const declared = learnFromAnswers(
+                report, answers, profile, {[target.ja_id]: "state"});
+            return {label: target.label, blind, declared};
+        }""",
+        PROFILE,
+    )
+    assert out["blind"] == {}
+    assert list(out["declared"].values()) == ["state"]
+
+
+def test_a_declared_field_must_actually_exist_and_never_be_prose(browser):
+    out = _evaluate_on(
+        browser, "unknowns.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const target = llmFieldsFor(report)[0];
+            const answers = {[target.ja_id]: "something"};
+            return {
+                invented: learnFromAnswers(
+                    report, answers, profile, {[target.ja_id]: "not_a_real_field"}),
+                prose: learnFromAnswers(
+                    report, answers, profile, {[target.ja_id]: "cover_letter_text"}),
+                custom: learnFromAnswers(
+                    report, answers, profile, {[target.ja_id]: "custom_answers"}),
+            };
+        }""",
+        PROFILE,
+    )
+    assert out["invented"] == {}
+    assert out["prose"] == {}
+    assert out["custom"] == {}

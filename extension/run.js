@@ -47,7 +47,10 @@ function _showBanner(html, tone) {
     settings,
     credentials: savedCreds,
     learned_aliases: learnedAliases,
-  } = await chrome.storage.local.get(["profile", "settings", "credentials", "learned_aliases"]);
+    learned_answers: learnedAnswers,
+  } = await chrome.storage.local.get([
+    "profile", "settings", "credentials", "learned_aliases", "learned_answers",
+  ]);
 
   if (!profile || REQUIRED_FIELDS.some((f) => !profile[f])) {
     _showBanner(
@@ -72,6 +75,7 @@ function _showBanner(html, tone) {
   // Label phrasings worked out on earlier applications, so they match for
   // free this time instead of costing another API call.
   setLearnedAliases(learnedAliases || {});
+  setLearnedAnswers(learnedAnswers || {});
 
   const useLlm = !!(settings && settings.use_llm);
   const report = await fillForm(profile, creds, {
@@ -84,6 +88,7 @@ function _showBanner(html, tone) {
   // are never fatal -- the deterministic fill already happened and stands.
   let claudeFilled = 0;
   let claudeError = null;
+  let learnedCount = 0;
   if (useLlm) {
     const pending = llmFieldsFor(report);
     if (pending.length) {
@@ -106,9 +111,16 @@ function _showBanner(html, tone) {
           claudeError = reply.error;
         } else if (reply) {
           claudeFilled = await applyLlmAnswers(report, reply.answers, reply.skipped, profile);
-          const learned = learnFromAnswers(report, reply.answers, profile);
-          if (Object.keys(learned).length) {
+          const learned = learnFromAnswers(report, reply.answers, profile, reply.sources);
+          learnedCount = Object.keys(learned).length;
+          if (learnedCount) {
             chrome.runtime.sendMessage({ type: "ja-learned", learned });
+          }
+          // Short answers to questions the profile has no field for -- the
+          // ones that would otherwise cost an API call on every form.
+          const remembered = rememberableAnswers(report, reply.answers, reply.sources);
+          if (Object.keys(remembered).length) {
+            chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: remembered });
           }
         }
       } catch (exc) {
@@ -130,6 +142,11 @@ function _showBanner(html, tone) {
       `<div style="color:#7dd3fc;">&#9679; ${claudeFilled} of those answered by Claude &mdash; read them before you submit</div>`
     );
   }
+  if (learnedCount) {
+    parts.push(
+      `<div style="color:#7dd3fc;">&#9679; ${learnedCount} label(s) remembered &mdash; free next time</div>`
+    );
+  }
   if (claudeError) {
     parts.push(`<div style="color:#fbbf24;">&#9679; Claude step failed: ${claudeError}</div>`);
   }
@@ -139,4 +156,14 @@ function _showBanner(html, tone) {
   _showBanner(parts.join(""), blankRequired ? "warn" : "ok");
 
   chrome.runtime.sendMessage({ type: "ja-fill-done", filled, review, blank: blankRequired, setupNeeded: false });
+
+  // From here on, whatever the applicant types into what was left blank is
+  // noticed and kept, so the same question fills itself next time. No API
+  // call, no prompting, and their own answer rather than anyone's reading
+  // of it.
+  if (!settings || settings.watch_and_learn !== false) {
+    watchForCorrections(report, (learned) => {
+      chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: learned });
+    });
+  }
 })();

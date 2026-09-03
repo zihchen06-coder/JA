@@ -119,6 +119,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "ja-learned-answers") {
+    (async () => {
+      const { learned_answers: existing } = await chrome.storage.local.get(["learned_answers"]);
+      await chrome.storage.local.set({
+        learned_answers: { ...(existing || {}), ...message.answers },
+      });
+    })();
+    return;
+  }
+
   if (message?.type === "ja-learned") {
     (async () => {
       const { learned_aliases: existing } = await chrome.storage.local.get(["learned_aliases"]);

@@ -133,6 +133,25 @@ function setLearnedAliases(map) {
   LEARNED_ALIASES = map || {};
 }
 
+// Short factual answers to questions the profile has no field for at all --
+// "Phone type: Mobile", "Did you graduate? Yes", "Which shift? Either".
+// These recur across applications far more than odd labels for known fields
+// do, and remembering one is the difference between paying to work it out
+// every time and never being asked again. Answers only, never prose.
+var LEARNED_ANSWERS = {};
+
+function setLearnedAnswers(map) {
+  LEARNED_ANSWERS = map || {};
+}
+
+function learnedAnswerFor(label) {
+  const norm = normalize(label);
+  if (!norm) return null;
+  return Object.prototype.hasOwnProperty.call(LEARNED_ANSWERS, norm)
+    ? LEARNED_ANSWERS[norm]
+    : null;
+}
+
 function matchField(label, minRatio = 0.72) {
   const norm = normalize(label);
   if (!norm) return null;

@@ -249,6 +249,17 @@
       </div>
       <div class="toggle-row" style="margin-top:16px;">
         <div>
+          <div><strong>Watch what I type and remember it</strong></div>
+          <div class="desc">After a fill, notice what you put into the fields it left blank, and
+            use the same answer next time that question comes up. Costs nothing and needs no API
+            key. Self-identification, criminal-history and consent questions are never picked up
+            this way, nor is anything longer than a sentence or two, nor anything inside a
+            work-history block. Everything remembered is listed on the Learned tab.</div>
+        </div>
+        <label class="row"><input type="checkbox" id="s-watch-learn" style="width:18px;height:18px;" checked></label>
+      </div>
+      <div class="toggle-row" style="margin-top:16px;">
+        <div>
           <div><strong>Fill automatically on known job sites</strong></div>
           <div class="desc">Fill each page of an application as it loads on Workday, iCIMS,
             Greenhouse, Lever, Ashby, SmartRecruiters and the rest, without clicking the icon.
@@ -278,6 +289,18 @@
         mappings are remembered &mdash; never written answers or cover letters, which belong to the
         job they were written for. Delete any row that looks wrong; it will simply be worked out
         again next time it comes up.</p>
+      <h3 style="margin-top:0;">Remembered answers</h3>
+      <p class="note">Questions your profile has no field for &mdash; "what type of phone is this",
+        "did you graduate", "which shift" &mdash; answered once and kept. Picked up both from what
+        Claude works out and, with no API call at all, from watching what you type into whatever
+        was left blank. Answers only: anything longer than a sentence or two is left alone, because
+        an essay belongs to the job it was written for.</p>
+      <div id="answers-learned-list"></div>
+      <p class="note" id="answers-learned-empty">Nothing remembered yet.</p>
+
+      <h3>Label mappings</h3>
+      <p class="note">Wordings Claude tied to a field you already have, so the value still comes
+        from your profile &mdash; only the recognising is remembered.</p>
       <div id="learned-list"></div>
       <p class="note" id="learned-empty">Nothing learned yet.</p>
       <button class="ghost" id="clear-learned" type="button">Forget everything</button>

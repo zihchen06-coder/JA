@@ -98,6 +98,15 @@ Rules, most important first:
    group asking a self-ID, criminal-history or consent question gets an
    empty value however it is phrased.
 
+8. Set profile_field on every answer you looked up rather than wrote. It is
+   the profile key the value came from -- "phone", "state", "school" -- and
+   naming it is what lets this extension remember the label, so the same
+   question is never sent here again. Name it even when the field's wording
+   is nothing like the key, and even when you had to reshape the value to
+   fit the field's options ("New York" answered as "NY" is still state).
+   Leave it empty for anything you wrote yourself, anything drawn from
+   custom_answers, and for cover letters.
+
 Return exactly one entry for every field you were given, keyed by its
 ja_id.`;
 
@@ -120,8 +129,16 @@ var LLM_OUTPUT_SCHEMA = {
               'Why the field was left blank; "" when a value is given. Use "sensitive" for ' +
               "self-identification, criminal-history, salary-history and consent questions.",
           },
+          profile_field: {
+            type: "string",
+            description:
+              "The exact key in the profile this answer came from, e.g. \"phone\" or " +
+              '"state". Empty string when the answer was written rather than looked up, ' +
+              "or when it came from custom_answers. This is what lets the label be " +
+              "remembered so the same question never has to be asked again.",
+          },
         },
-        required: ["ja_id", "value", "skip_reason"],
+        required: ["ja_id", "value", "skip_reason", "profile_field"],
         additionalProperties: false,
       },
     },
@@ -296,10 +313,15 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeS
 
   const answers = {};
   const skipped = {};
+  const sources = {};
   for (const entry of parsed.answers || []) {
     if (!entry || !entry.ja_id) continue;
-    if (entry.value) answers[entry.ja_id] = entry.value;
-    else skipped[entry.ja_id] = entry.skip_reason || "No saved answer for this.";
+    if (entry.value) {
+      answers[entry.ja_id] = entry.value;
+      if (entry.profile_field) sources[entry.ja_id] = entry.profile_field;
+    } else {
+      skipped[entry.ja_id] = entry.skip_reason || "No saved answer for this.";
+    }
   }
-  return { answers, skipped, usage: message.usage || null };
+  return { answers, skipped, sources, usage: message.usage || null };
 }

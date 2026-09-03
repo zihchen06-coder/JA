@@ -296,6 +296,7 @@ function loadIntoForm() {
   document.getElementById("s-use-llm").checked = !!(state.settings && state.settings.use_llm);
   document.getElementById("s-tailor-cover").checked = !!(state.settings && state.settings.tailor_cover_letter);
   document.getElementById("s-route-saved").checked = !!(state.settings && state.settings.route_saved_answers);
+  document.getElementById("s-watch-learn").checked = !state.settings || state.settings.watch_and_learn !== false;
   document.getElementById("s-auto-fill").checked = !!(state.settings && state.settings.auto_fill_known_sites);
   renderLearned();
   document.getElementById("llm-key").value = state.llmApiKey || "";
@@ -354,6 +355,7 @@ async function save() {
     use_llm: document.getElementById("s-use-llm").checked,
     tailor_cover_letter: document.getElementById("s-tailor-cover").checked,
     route_saved_answers: document.getElementById("s-route-saved").checked,
+    watch_and_learn: document.getElementById("s-watch-learn").checked,
     auto_fill_known_sites: document.getElementById("s-auto-fill").checked,
   };
   // Kept out of `profile` so it is never in anything exported, imported, or
@@ -386,10 +388,11 @@ function initTabs() {
   initTabs();
 
   const stored = await chrome.storage.local.get([
-    "profile", "settings", "credentials", "llm_api_key", "learned_aliases",
+    "profile", "settings", "credentials", "llm_api_key", "learned_aliases", "learned_answers",
   ]);
   state.llmApiKey = stored.llm_api_key || "";
   state.learned = stored.learned_aliases || {};
+  state.learnedAnswers = stored.learned_answers || {};
   state.profile = { ...emptyProfile(), ...(stored.profile || {}) };
   state.settings = stored.settings || {};
   state.credentials = stored.credentials || {};
@@ -567,8 +570,42 @@ function renderLearned() {
   }
 }
 
+function renderLearnedAnswers() {
+  const list = document.getElementById("answers-learned-list");
+  const empty = document.getElementById("answers-learned-empty");
+  const entries = Object.entries(state.learnedAnswers || {}).sort();
+  list.innerHTML = "";
+  empty.style.display = entries.length ? "none" : "";
+
+  for (const [label, value] of entries) {
+    const row = document.createElement("div");
+    row.className = "cred-row";
+    row.style.marginBottom = "8px";
+    row.innerHTML = `
+      <input readonly value="${label.replace(/"/g, "&quot;")}">
+      <input data-answer="1" value="${String(value).replace(/"/g, "&quot;")}">
+      <span></span>
+      <button class="danger" type="button">Forget</button>`;
+    // Editable in place: a remembered answer you would rather phrase
+    // differently is worth correcting once, not deleting and waiting to be
+    // asked it again.
+    row.querySelector("input[data-answer]").onchange = async (e) => {
+      state.learnedAnswers[label] = e.target.value;
+      await chrome.storage.local.set({ learned_answers: state.learnedAnswers });
+    };
+    row.querySelector("button").onclick = async () => {
+      delete state.learnedAnswers[label];
+      await chrome.storage.local.set({ learned_answers: state.learnedAnswers });
+      renderLearnedAnswers();
+    };
+    list.appendChild(row);
+  }
+}
+
 document.getElementById("clear-learned").addEventListener("click", async () => {
   state.learned = {};
-  await chrome.storage.local.set({ learned_aliases: {} });
+  state.learnedAnswers = {};
+  await chrome.storage.local.set({ learned_aliases: {}, learned_answers: {} });
   renderLearned();
+  renderLearnedAnswers();
 });
