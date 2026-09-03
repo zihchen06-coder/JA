@@ -440,3 +440,118 @@ async function chatWithClaude({ apiKey, profile, report, fields, job, history, m
     return { error: `Could not read the reply: ${exc}` };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Reading a resume into the profile.
+//
+// The worst part of setting this up is retyping a document that already says
+// everything: schools, jobs, dates. The resume is already saved in the
+// extension for attaching to upload fields, so it can be read once instead.
+// What comes back is put in the import box for review rather than written
+// straight into the profile -- a parse is a reading of a document, and the
+// applicant should see it before it becomes their answers.
+// ---------------------------------------------------------------------------
+
+var RESUME_SCHEMA = {
+  type: "object",
+  properties: {
+    education: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          school: { type: "string" },
+          degree: { type: "string" },
+          field_of_study: { type: "string" },
+          graduation_year: { type: "string" },
+        },
+        required: ["school", "degree", "field_of_study", "graduation_year"],
+        additionalProperties: false,
+      },
+    },
+    experience: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          company: { type: "string" },
+          title: { type: "string" },
+          location: { type: "string" },
+          start_date: { type: "string", description: "YYYY-MM" },
+          end_date: { type: "string", description: 'YYYY-MM, or "Present"' },
+          description: { type: "string" },
+        },
+        required: ["company", "title", "location", "start_date", "end_date", "description"],
+        additionalProperties: false,
+      },
+    },
+    fields: {
+      type: "object",
+      description: "Scalar profile fields the resume states outright. Omit any it doesn't.",
+      properties: {
+        first_name: { type: "string" }, last_name: { type: "string" },
+        email: { type: "string" }, phone: { type: "string" },
+        city: { type: "string" }, state: { type: "string" },
+        linkedin_url: { type: "string" }, github_url: { type: "string" },
+        portfolio_url: { type: "string" }, gpa: { type: "string" },
+        education_level: { type: "string" }, languages: { type: "string" },
+        current_company: { type: "string" }, current_title: { type: "string" },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  required: ["education", "experience", "fields"],
+  additionalProperties: false,
+};
+
+var RESUME_RULES = `Read this resume and return what it says, as structured
+data for a job-application profile.
+
+Take only what the document actually states. Do not infer a graduation year
+from a date range, do not round a GPA, do not expand an abbreviation into a
+degree name the resume doesn't use, and leave anything absent empty rather
+than filling it with something plausible. This becomes the applicant's
+answers on real applications, and a confident guess here is a wrong answer
+repeated on every form.
+
+Dates as YYYY-MM. A job still held ends "Present". Newest first.
+Each experience description: one or two sentences of what they actually did,
+drawn from the bullets, not a rewrite of them.`;
+
+async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
+  if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
+
+  const content = [];
+  if (fileData && mediaType === "application/pdf") {
+    content.push({
+      type: "document",
+      source: { type: "base64", media_type: "application/pdf", data: fileData },
+    });
+  } else if (text) {
+    content.push({ type: "text", text: `Resume:\n\n${text.slice(0, 60000)}` });
+  } else {
+    return { error: "Could not read any text out of that file." };
+  }
+  content.push({ type: "text", text: RESUME_RULES });
+
+  const result = await _postMessages(
+    apiKey,
+    {
+      model: LLM_MODEL,
+      max_tokens: 8000,
+      output_config: { effort: "medium", format: { type: "json_schema", schema: RESUME_SCHEMA } },
+      messages: [{ role: "user", content }],
+    },
+    false
+  );
+  if (!result.ok) return { error: _apiErrorMessage(result) };
+
+  const block = (result.body.content || []).find((b) => b.type === "text");
+  if (!block) return { error: "Nothing came back." };
+  try {
+    return { parsed: JSON.parse(block.text) };
+  } catch (exc) {
+    return { error: `Could not read the result: ${exc}` };
+  }
+}

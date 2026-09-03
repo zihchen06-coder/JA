@@ -390,11 +390,14 @@ function initTabs() {
   initTabs();
 
   const stored = await chrome.storage.local.get([
-    "profile", "settings", "credentials", "llm_api_key", "learned_aliases", "learned_answers",
+    "profile", "settings", "credentials", "llm_api_key", "learned_aliases",
+    "learned_answers", "misses", "applications",
   ]);
   state.llmApiKey = stored.llm_api_key || "";
   state.learned = stored.learned_aliases || {};
   state.learnedAnswers = stored.learned_answers || {};
+  state.misses = stored.misses || {};
+  state.applications = stored.applications || [];
   state.profile = { ...emptyProfile(), ...(stored.profile || {}) };
   state.settings = stored.settings || {};
   state.credentials = stored.credentials || {};
@@ -503,6 +506,22 @@ function initTabs() {
     };
 
     const norm = (s) => (s ?? "").toString().trim().toLowerCase();
+
+    // Scalar profile fields, as a resume parse returns them. Same rule as
+    // everything else here: a box you have already filled in is left alone
+    // unless you asked for it to be replaced.
+    Object.entries(data.fields || {}).forEach(([key, value]) => {
+      const input = document.querySelector(`[data-f="${CSS.escape(key)}"]`);
+      if (!input || !value) return;
+      if (input.value.trim() && !overwrite) {
+        counts.skipped++;
+        return;
+      }
+      if (input.value.trim()) counts.updated++;
+      else counts.added++;
+      input.value = value;
+    });
+
     importList(data.education || [], eduList, eduRow, (e) => `${norm(e.school)}|${norm(e.degree)}`);
     importList(data.experience || [], expList, expRow, (e) => `${norm(e.company)}|${norm(e.title)}`);
 
@@ -610,4 +629,190 @@ document.getElementById("clear-learned").addEventListener("click", async () => {
   await chrome.storage.local.set({ learned_aliases: {}, learned_answers: {} });
   renderLearned();
   renderLearnedAnswers();
+  renderMisses();
+  renderApplications();
+});
+
+// --- Gaps and applications --------------------------------------------------
+
+function downloadCsv(name, rows) {
+  const escape = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+  const body = rows.map((r) => r.map(escape).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([body], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function missRows() {
+  return Object.values(state.misses || {}).sort((a, b) => b.count - a.count);
+}
+
+function renderMisses() {
+  const list = document.getElementById("misses-list");
+  const empty = document.getElementById("misses-empty");
+  const rows = missRows();
+  list.innerHTML = "";
+  empty.style.display = rows.length ? "none" : "";
+
+  for (const m of rows) {
+    const row = document.createElement("div");
+    row.className = "cred-row";
+    row.style.marginBottom = "8px";
+    row.innerHTML = `
+      <input readonly value="${esc(m.label)}">
+      <input readonly value="${esc(m.host)}">
+      <input readonly value="${m.count}&times; &middot; ${esc(m.type)}${m.required ? " &middot; required" : ""}">
+      <span class="note">${esc(m.action.replace(/_/g, " "))}</span>`;
+    list.appendChild(row);
+  }
+}
+
+function renderApplications() {
+  const list = document.getElementById("applications-list");
+  const empty = document.getElementById("applications-empty");
+  const rows = (state.applications || []).slice().reverse();
+  list.innerHTML = "";
+  empty.style.display = rows.length ? "none" : "";
+
+  for (const a of rows) {
+    const row = document.createElement("div");
+    row.className = "cred-row";
+    row.style.marginBottom = "8px";
+    const when = new Date(a.at).toLocaleString();
+    row.innerHTML = `
+      <input readonly value="${esc(a.title || a.host)}">
+      <input readonly value="${esc(a.host)}">
+      <input readonly value="${when}">
+      <span class="note">${a.filled} filled${a.blank ? ` &middot; ${a.blank} blank` : ""}</span>`;
+    list.appendChild(row);
+  }
+}
+
+document.getElementById("export-misses").addEventListener("click", () => {
+  downloadCsv("autofill-gaps.csv", [
+    ["label", "site", "times", "type", "required", "outcome", "detail"],
+    ...missRows().map((m) => [m.label, m.host, m.count, m.type, m.required, m.action, m.detail]),
+  ]);
+});
+
+document.getElementById("clear-misses").addEventListener("click", async () => {
+  state.misses = {};
+  await chrome.storage.local.set({ misses: {} });
+  renderMisses();
+});
+
+document.getElementById("export-applications").addEventListener("click", () => {
+  downloadCsv("applications.csv", [
+    ["date", "role", "company", "site", "url", "pages", "filled", "flagged", "blank"],
+    ...(state.applications || []).map((a) => [
+      new Date(a.at).toISOString(), a.title, a.company, a.host, a.url,
+      a.pages || 1, a.filled, a.review, a.blank,
+    ]),
+  ]);
+});
+
+document.getElementById("clear-applications").addEventListener("click", async () => {
+  state.applications = [];
+  await chrome.storage.local.set({ applications: [] });
+  renderApplications();
+});
+
+// --- Reading the saved resume ----------------------------------------------
+
+function dataUrlToBytes(dataUrl) {
+  const binary = atob(dataUrl.slice(dataUrl.indexOf(",") + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+// A .docx is a ZIP whose word/document.xml holds the text. Chrome can inflate
+// a raw deflate stream natively, so the whole thing is doable here without a
+// library -- which matters for an extension loaded from a folder with no
+// build step. Only the one entry is needed, so this walks the local file
+// headers rather than parsing the central directory.
+async function docxText(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const decoder = new TextDecoder();
+
+  for (let i = 0; i + 30 < bytes.length; i++) {
+    if (view.getUint32(i, true) !== 0x04034b50) continue; // local file header
+    const method = view.getUint16(i + 8, true);
+    const compressed = view.getUint32(i + 18, true);
+    const nameLength = view.getUint16(i + 26, true);
+    const extraLength = view.getUint16(i + 28, true);
+    const nameStart = i + 30;
+    const name = decoder.decode(bytes.subarray(nameStart, nameStart + nameLength));
+    if (name !== "word/document.xml") continue;
+
+    const start = nameStart + nameLength + extraLength;
+    // A streamed zip writes sizes in a trailing descriptor rather than the
+    // header; the rest of the file is a safe upper bound either way.
+    const body = bytes.subarray(start, compressed ? start + compressed : bytes.length);
+    let xml;
+    if (method === 0) {
+      xml = decoder.decode(body);
+    } else {
+      const stream = new Blob([body]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      xml = await new Response(stream).text();
+    }
+    return xml
+      .replace(/<\/w:p>/g, "\n")
+      .replace(/<w:tab[^>]*\/>/g, "\t")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+  return "";
+}
+
+async function resumeForParsing() {
+  const info = state.profile.resume_file;
+  if (!info || !info.dataUrl) {
+    return { error: "No resume saved -- add one above first." };
+  }
+  const name = (info.name || "").toLowerCase();
+  if (name.endsWith(".pdf")) {
+    return { fileData: info.dataUrl.slice(info.dataUrl.indexOf(",") + 1), mediaType: "application/pdf" };
+  }
+  const bytes = dataUrlToBytes(info.dataUrl);
+  if (name.endsWith(".docx")) {
+    const text = await docxText(bytes);
+    return text ? { text } : { error: "Couldn't read text out of that .docx." };
+  }
+  return { text: new TextDecoder().decode(bytes) };
+}
+
+document.getElementById("parse-resume").addEventListener("click", async () => {
+  const status = document.getElementById("import-status");
+  const button = document.getElementById("parse-resume");
+  status.style.color = "";
+  status.textContent = "Reading your resume…";
+  button.disabled = true;
+  try {
+    const source = await resumeForParsing();
+    if (source.error) throw new Error(source.error);
+    const reply = await chrome.runtime.sendMessage({ type: "ja-parse-resume", request: source });
+    if (!reply) throw new Error("No reply from the extension's background worker.");
+    if (reply.error) throw new Error(reply.error);
+
+    // Into the import box, not straight into the profile: a parse is a
+    // reading of a document, and it should be looked at before it becomes
+    // the answers that go out on applications.
+    document.getElementById("import-json").value = JSON.stringify(reply.parsed, null, 2);
+    status.style.color = "var(--green)";
+    const { education = [], experience = [], fields = {} } = reply.parsed;
+    status.textContent =
+      `Read ${education.length} school(s), ${experience.length} job(s) and ` +
+      `${Object.keys(fields).length} other field(s). Check it below, then Import.`;
+  } catch (exc) {
+    status.style.color = "var(--red)";
+    status.textContent = String(exc.message || exc);
+  } finally {
+    button.disabled = false;
+  }
 });

@@ -104,6 +104,8 @@
     <div class="tab" data-tab="accounts">Accounts</div>
     <div class="tab" data-tab="ai">AI assist</div>
     <div class="tab" data-tab="learned">Learned</div>
+    <div class="tab" data-tab="misses">Gaps</div>
+    <div class="tab" data-tab="applications">Applications</div>
   </div>
 
   <div class="card">
@@ -186,6 +188,13 @@
       <h3>Import education, work history &amp; answers</h3>
       <p class="note">Paste a JSON snippet shaped like <code>{"education": [...], "experience": [...], "custom_answers": {...}}</code> (any of the three keys is optional) — ask Claude to generate this from your resume or your own written answers — and it's added to the Education &amp; Work and Answers tabs. Anything already there is matched up rather than duplicated (schools by school+degree, jobs by company+title, answers by keyword) and left as-is unless you tick Replace existing.</p>
       <textarea id="import-json" rows="4" placeholder='{"education": [...], "experience": [...], "custom_answers": {"why do you want to work": "..."}}'></textarea>
+      <div class="row" style="margin-top:8px;">
+        <button class="ghost" id="parse-resume" type="button">Read my resume with Claude</button>
+      </div>
+      <p class="note">Reads the resume saved above (PDF, .docx or .txt) and puts what it says in
+        the box below for you to check, rather than writing it straight into your profile. Needs an
+        API key under AI assist. Takes only what the document actually states &mdash; anything it
+        doesn't say is left empty rather than guessed at.</p>
       <div class="row" style="margin-top:8px;">
         <button class="ghost" id="import-json-btn" type="button">Import</button>
         <label class="row note" style="gap:6px; cursor:pointer;">
@@ -314,6 +323,32 @@
       <div id="learned-list"></div>
       <p class="note" id="learned-empty">Nothing learned yet.</p>
       <button class="ghost" id="clear-learned" type="button">Forget everything</button>
+    </div>
+
+    <div class="ptab" id="pt-misses">
+      <p class="note">Every question this tool couldn't answer, counted across all your
+        applications. One form's gaps are an anecdote; the same label coming back unfilled thirty
+        times is the thing actually worth fixing. Sorted by how often each has come up &mdash;
+        export this and hand it to Claude, and the top of the list is exactly what to work on
+        next.</p>
+      <div class="row" style="margin-bottom:12px;">
+        <button class="ghost" id="export-misses" type="button">Export as CSV</button>
+        <button class="danger" id="clear-misses" type="button">Clear</button>
+      </div>
+      <div id="misses-list"></div>
+      <p class="note" id="misses-empty">Nothing recorded yet.</p>
+    </div>
+
+    <div class="ptab" id="pt-applications">
+      <p class="note">One row per application, logged automatically when you fill one. Pages of the
+        same multi-page application on the same site within half an hour count as one. Nothing here
+        is sent anywhere &mdash; it is a record for you.</p>
+      <div class="row" style="margin-bottom:12px;">
+        <button class="ghost" id="export-applications" type="button">Export as CSV</button>
+        <button class="danger" id="clear-applications" type="button">Clear</button>
+      </div>
+      <div id="applications-list"></div>
+      <p class="note" id="applications-empty">Nothing logged yet.</p>
     </div>
 
     <div class="ptab" id="pt-accounts">

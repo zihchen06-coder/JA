@@ -132,6 +132,65 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "ja-parse-resume") {
+    (async () => {
+      try {
+        const { llm_api_key: apiKey } = await chrome.storage.local.get(["llm_api_key"]);
+        sendResponse(await parseResumeWithClaude({ ...message.request, apiKey }));
+      } catch (exc) {
+        sendResponse({ error: String(exc) });
+      }
+    })();
+    return true;
+  }
+
+  if (message?.type === "ja-misses") {
+    (async () => {
+      const { misses } = await chrome.storage.local.get(["misses"]);
+      const store = misses || {};
+      for (const miss of message.misses || []) {
+        const key = `${message.host}|${miss.key}`;
+        const prior = store[key];
+        store[key] = {
+          host: message.host,
+          label: miss.label,
+          action: miss.action,
+          detail: miss.detail,
+          required: miss.required,
+          type: miss.type,
+          count: (prior ? prior.count : 0) + 1,
+          last: Date.now(),
+        };
+      }
+      await chrome.storage.local.set({ misses: store });
+    })();
+    return;
+  }
+
+  if (message?.type === "ja-applied") {
+    (async () => {
+      const { applications } = await chrome.storage.local.get(["applications"]);
+      const list = applications || [];
+      const last = list[list.length - 1];
+      // A multi-page application is one application. Same site within half an
+      // hour updates that row rather than adding five more.
+      if (last && last.host === message.entry.host && message.entry.at - last.at < 30 * 60 * 1000) {
+        last.filled += message.entry.filled;
+        last.review += message.entry.review;
+        last.blank += message.entry.blank;
+        last.pages = (last.pages || 1) + 1;
+        last.at = message.entry.at;
+        if (!last.title && message.entry.title) last.title = message.entry.title;
+      } else {
+        list.push({ ...message.entry, pages: 1 });
+      }
+      // Keeping every application ever would grow without limit; the recent
+      // few hundred is what anyone actually looks back over.
+      await chrome.storage.local.set({ applications: list.slice(-500) });
+    })();
+    return;
+  }
+
   if (message?.type === "ja-learned-answers") {
     (async () => {
       const { learned_answers: existing } = await chrome.storage.local.get(["learned_answers"]);

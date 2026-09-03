@@ -1249,3 +1249,114 @@ def test_the_chat_can_only_change_fields_the_fill_would_have(browser):
     assert out["changed"] == 1
     assert out["shiftChosen"] == "s3"
     assert out["ticked"] is False
+
+
+def test_a_value_the_page_clears_is_not_reported_as_filled(browser):
+    """Setting a value and it staying set are different claims. A framework
+    that reverts one on its next render would otherwise leave the report
+    saying filled while the box sits empty -- the worst kind of wrong,
+    because it reads as done.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'test_form.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                const report = await fillForm(profile, null, {});
+                const before = report.results.find(
+                    (r) => r.canonical === 'email' && r.action === 'filled');
+
+                // A form that wipes the field back out, the way a controlled
+                // React input does when it re-renders from its own state.
+                const el = document.querySelector(`[data-ja-id="${before.ja_id}"]`);
+                Object.defineProperty(el, 'value', {
+                    get: () => '', set: () => {}, configurable: true,
+                });
+
+                const lost = await verifyFilled(report, 0);
+                const after = report.results.find((r) => r.ja_id === before.ja_id);
+                return {lost, action: after.action, detail: after.detail};
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    assert out["lost"] == [out["lost"][0]]
+    assert out["action"] == "needs_review"
+    assert "cleared it" in out["detail"]
+
+
+def test_a_deliberate_blank_is_not_mistaken_for_a_lost_value(browser):
+    """An ongoing job's end date is filled by being left empty, on purpose.
+    Verification must not flag its own correct outcome.
+    """
+    out = _evaluate_on(
+        browser, "experience_repeater.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const lost = await verifyFilled(report, 0);
+            // Two results share this canonical: the date box left empty on
+            // purpose, and the "I currently work here" box that says why.
+            const endDate = report.results.find(
+                (r) => r.canonical === 'experience_end_date' && /Left blank/.test(r.detail));
+            return {lost, action: endDate.action, detail: endDate.detail};
+        }""",
+        PROFILE,
+    )
+    assert out["lost"] == []
+    assert out["action"] == "filled"
+    assert "Left blank" in out["detail"]
+
+
+def test_what_a_form_could_not_answer_is_recorded(browser):
+    """One form's gaps are an anecdote; the same label coming back unfilled
+    across thirty applications is the thing worth fixing.
+    """
+    out = _evaluate_on(
+        browser, "unknowns.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            return missedFields(report);
+        }""",
+        PROFILE,
+    )
+    labels = [m["label"] for m in out]
+    assert "What is your spirit animal?" in labels
+    # Every entry carries what it needs to be counted and acted on later.
+    for m in out:
+        assert m["key"] and m["action"] and "type" in m
+
+
+def test_the_docx_reader_gets_the_text_out(browser):
+    """The applicant's resume is a .docx, and a Word file is a ZIP whose
+    word/document.xml holds the text -- readable here without a library
+    because Chrome can inflate a raw deflate stream itself.
+    """
+    with open(os.path.join(FIXTURES_DIR, "sample_resume.docx"), "rb") as f:
+        import base64
+        b64 = base64.b64encode(f.read()).decode()
+
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        # docxText is defined in options.js, which expects the options page's
+        # DOM; the two functions under test are self-contained, so take them
+        # rather than loading the whole page.
+        source = open(os.path.join(EXT_DIR, "options.js"), encoding="utf-8").read()
+        start = source.index("function dataUrlToBytes")
+        end = source.index("async function resumeForParsing")
+        page.add_script_tag(content=source[start:end])
+        text = page.evaluate(
+            "(b64) => docxText(dataUrlToBytes('data:application/octet-stream;base64,' + b64))",
+            b64,
+        )
+    finally:
+        page.close()
+
+    assert "Jamie Rivera" in text
+    assert "Test Engineer at Test Industries" in text
+    # XML entities come back as the characters they stand for.
+    assert "State University & Co" in text

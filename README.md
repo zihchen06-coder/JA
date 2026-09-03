@@ -58,6 +58,36 @@ account, never sent anywhere except the job site being filled. The one
 exception is the optional **AI assist** below, which is off until you turn
 it on.
 
+### Gaps, and what to fix next
+
+Every question the tool couldn't answer is counted across all your
+applications on the **Gaps** tab, sorted by how often it has come up, and
+exportable as CSV. This is the answer to the one thing a commercial filler
+has that this doesn't: they have telemetry from millions of fills, and this
+has whatever forms you have shown it. Export the list and hand it over, and
+the top of it is exactly what to work on — a label that came back unfilled
+thirty times is worth an hour; one that appeared once is not.
+
+### Applications
+
+One row per application, logged automatically: role, company, site, date,
+and how much filled. Pages of the same multi-page application within half an
+hour count as one. Exportable as CSV, kept to the most recent 500, and sent
+nowhere — it is a record for you.
+
+### Reading your resume
+
+**Options → Documents → "Read my resume with Claude"** reads the resume you
+already saved there (PDF, `.docx` or `.txt`) and puts what it says in the
+import box for you to check, rather than writing it into your profile
+directly — a parse is a reading of a document, and it should be looked at
+before it becomes the answers that go out on applications. It is told to take
+only what the document actually states and leave everything else empty.
+
+`.docx` is read in the browser with no library: a Word file is a ZIP whose
+`word/document.xml` holds the text, and Chrome can inflate a raw deflate
+stream itself.
+
 ### The side panel
 
 While a fill runs, a panel opens on the right showing what it is doing as it
@@ -603,6 +633,10 @@ caught by a still-green test — the safety net only knows what it's shown.
   details — the Address/City/State boxes in that block are the employer's.
 - This is a heuristic label matcher, not a guarantee — always check the
   report and the form itself before submitting.
+- Every filled field is re-read a moment later and re-applied if the page
+  cleared it; if it still won't hold, it is downgraded to "left for you"
+  rather than reported as filled. A framework that reverts a value on its
+  next render would otherwise leave the report reading as done.
 
 ## Responsible use
 

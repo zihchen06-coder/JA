@@ -1539,3 +1539,102 @@ function rememberableAnswers(report, answers, sources) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Checking the fill actually took.
+//
+// Setting a value and reporting it filled are two different claims. A React
+// or Angular form can revert a programmatic value on its next render, a
+// custom widget can swallow it, and a page can re-initialise a field a moment
+// after load. Nothing here noticed any of that: the report said filled while
+// the box sat empty, which is the worst kind of wrong -- it reads as done.
+// ---------------------------------------------------------------------------
+
+function _currentValue(el, f) {
+  if (!el) return "";
+  if (f.type === "checkbox" || f.type === "radio") return el.checked ? "checked" : "";
+  if (f.tag === "select") {
+    if (f.widget === "icims") {
+      const fake = document.getElementById(el.id + "_fakeSelected_icimsDropdown");
+      if (!fake || fake.querySelector(".dropdown-placeholder")) return "";
+      return (fake.textContent || "").trim();
+    }
+    if (f.widget === "listbox_button") {
+      const text = (el.textContent || "").trim();
+      return /^select( one|\.\.\.)?$/i.test(text) ? "" : text;
+    }
+    return el.selectedIndex > 0 && el.value !== "" ? el.value : "";
+  }
+  if (f.type === "file") return el.files && el.files.length ? "attached" : "";
+  return el.value || "";
+}
+
+// Run a moment after the fill, so a framework has had its render.
+async function verifyFilled(report, delayMs = 350) {
+  await _sleep(delayMs);
+  const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
+  const lost = [];
+
+  for (const r of report.results) {
+    if (r.action !== "filled" || !r.ja_id) continue;
+    const f = byId.get(r.ja_id);
+    if (!f) continue;
+    // Deliberately-blank outcomes report as filled with an explanation and
+    // no value; an empty box is the correct result for those.
+    if (!r.detail || /^Left blank/i.test(r.detail)) continue;
+    const el = _el(r.ja_id);
+    if (_currentValue(el, f)) continue;
+
+    // One more try before calling it, in case the page was still settling.
+    let recovered = false;
+    try {
+      if (f.tag === "select") {
+        const optionValue = bestOption(r.detail, f.options || []);
+        if (optionValue !== null && optionValue !== undefined && f.widget !== "listbox_button") {
+          _setSelectValue(el, optionValue);
+        }
+      } else if (f.type === "checkbox" || f.type === "radio") {
+        _setChecked(el, true);
+      } else if (el) {
+        _setNativeValue(el, r.detail);
+      }
+      recovered = !!_currentValue(el, f);
+    } catch (exc) {
+      recovered = false;
+    }
+
+    if (!recovered) {
+      r.action = "needs_review";
+      r.detail = `Set to '${r.detail}', but the page cleared it -- fill this one yourself.`;
+      _mark(r.ja_id, MARK_REVIEW);
+      lost.push(r.label || r.ja_id);
+    }
+  }
+  return lost;
+}
+
+// Every field left for the applicant, as a record that outlives this page.
+// One form's misses are an anecdote; the same label coming back unfilled on
+// thirty applications is the thing actually worth fixing, and there was no
+// way to see that from inside a single fill.
+function missedFields(report) {
+  const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
+  const out = [];
+  for (const r of report.results) {
+    if (!["skipped_no_match", "skipped_no_data", "needs_review", "error"].includes(r.action)) {
+      continue;
+    }
+    const label = (r.label || "").trim();
+    if (!label) continue;
+    const f = byId.get(r.ja_id) || {};
+    out.push({
+      label,
+      key: normalize(label),
+      action: r.action,
+      detail: r.detail || "",
+      required: !!r.required,
+      type: f.tag === "select" ? "select" : f.type || "text",
+    });
+  }
+  return out;
+}

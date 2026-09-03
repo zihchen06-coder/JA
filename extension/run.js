@@ -146,6 +146,12 @@ function _showBanner(html, tone) {
     }
   }
 
+  // Setting a value and it staying set are different claims -- check.
+  const lost = await verifyFilled(report);
+  if (lost.length) {
+    panel?.log(`${lost.length} field(s) were cleared by the page after filling.`, "warn");
+  }
+
   const filled = report.results.filter((r) => r.action === "filled").length;
   const review = report.results.filter((r) => r.action === "needs_review").length;
   const blankRequired = report.results.filter(
@@ -175,6 +181,30 @@ function _showBanner(html, tone) {
   if (!panel) _showBanner(parts.join(""), blankRequired ? "warn" : "ok");
 
   chrome.runtime.sendMessage({ type: "ja-fill-done", filled, review, blank: blankRequired, setupNeeded: false });
+
+  // What this form asked that couldn't be answered, kept across applications
+  // so the recurring gaps become visible instead of being re-discovered one
+  // form at a time.
+  const misses = missedFields(report);
+  if (misses.length) {
+    chrome.runtime.sendMessage({ type: "ja-misses", host: location.hostname, misses });
+  }
+
+  // One row per application, from the top frame only -- an embedded form
+  // would otherwise log itself alongside the page hosting it.
+  if (window.top === window) {
+    chrome.runtime.sendMessage({
+      type: "ja-applied",
+      entry: {
+        url: location.href.slice(0, 400),
+        host: location.hostname,
+        title: job.title || document.title.slice(0, 200),
+        company: job.company || "",
+        filled, review, blank: blankRequired,
+        at: Date.now(),
+      },
+    });
+  }
 
   if (panel) {
     if (learnedCount) panel.log(`${learnedCount} label(s) remembered -- free next time.`, "info");
