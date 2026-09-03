@@ -269,6 +269,11 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeS
         cache_control: { type: "ephemeral" },
       },
     ],
+    // Returned so the panel can show why it decided what it did. Thinking
+    // happens and is billed either way; asking for the summary only changes
+    // whether it comes back, and "why was this left blank" is otherwise a
+    // question with no answer.
+    thinking: { type: "adaptive", display: "summarized" },
     output_config: {
       // Field mapping and short drafting -- worth real thought, but the
       // applicant is sitting in front of the form waiting for it.
@@ -301,6 +306,11 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeS
     return { error: "Claude declined to answer these fields." };
   }
 
+  const thinking = (message.content || [])
+    .filter((b) => b.type === "thinking" && b.thinking)
+    .map((b) => b.thinking)
+    .join("\n\n");
+
   const textBlock = (message.content || []).find((b) => b.type === "text");
   if (!textBlock) return { error: "No answer came back." };
 
@@ -323,5 +333,110 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeS
       skipped[entry.ja_id] = entry.skip_reason || "No saved answer for this.";
     }
   }
-  return { answers, skipped, sources, usage: message.usage || null };
+  return { answers, skipped, sources, thinking, usage: message.usage || null };
+}
+
+// ---------------------------------------------------------------------------
+// Asking about the form that was just filled.
+//
+// The panel's chat. It gets the same profile the fill got, plus what the fill
+// actually did, so "why is my phone number blank" and "make the cover letter
+// shorter" are both answerable. It can also change fields -- through exactly
+// the same guarded path as the fill, so nothing it returns can reach a
+// consent box or a self-identification question that the fill wouldn't have.
+// ---------------------------------------------------------------------------
+
+var CHAT_SYSTEM_RULES = `You are the assistant inside a job-application
+autofill extension, talking to the applicant while they look at a form it
+has just filled. You are given their profile, what the fill did to every
+field, and which fields can still be changed.
+
+Answer plainly and briefly -- this is a narrow side panel, not a document.
+Two or three sentences is usually right. No preamble, no restating their
+question back at them.
+
+You can change fields as well as talk about them. Put any field you want to
+set in "answers", keyed by ja_id, and say what you did in your reply. Only
+ja_ids listed as changeable can be set; anything else is ignored, so
+mention it rather than pretending. The same rules the fill runs under still
+hold: never invent anything the profile doesn't support, and never answer a
+self-identification, criminal-history, salary-history or consent question --
+those are the applicant's, and saying so is the right answer.
+
+If they ask why something was left blank, the report tells you: say what it
+says, and what they could put in their profile to fix it for next time.`;
+
+var CHAT_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    reply: { type: "string", description: "What to show the applicant." },
+    answers: {
+      type: "array",
+      description: "Fields to change. Empty when the reply is just an answer.",
+      items: {
+        type: "object",
+        properties: {
+          ja_id: { type: "string" },
+          value: { type: "string" },
+        },
+        required: ["ja_id", "value"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["reply", "answers"],
+  additionalProperties: false,
+};
+
+async function chatWithClaude({ apiKey, profile, report, fields, job, history, message }) {
+  if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
+
+  const turns = (history || []).slice(-8).map((t) => ({
+    role: t.role,
+    content: t.content,
+  }));
+
+  const body = {
+    model: LLM_MODEL,
+    max_tokens: 4000,
+    system: [
+      {
+        type: "text",
+        text: `${CHAT_SYSTEM_RULES}\n\nThe applicant's profile:\n${JSON.stringify(
+          _promptProfile(profile, true),
+          null,
+          1
+        )}`,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    output_config: { effort: "low", format: { type: "json_schema", schema: CHAT_OUTPUT_SCHEMA } },
+    messages: [
+      ...turns,
+      {
+        role: "user",
+        content:
+          (job && job.title ? `Job: ${JSON.stringify(job)}\n\n` : "") +
+          `What the fill did:\n${JSON.stringify(report, null, 1)}\n\n` +
+          `Fields that can still be changed:\n${JSON.stringify(fields, null, 1)}\n\n` +
+          message,
+      },
+    ],
+  };
+
+  let result = await _postMessages(apiKey, body, false);
+  if (!result.ok) return { error: _apiErrorMessage(result) };
+
+  const textBlock = (result.body.content || []).find((b) => b.type === "text");
+  if (!textBlock) return { error: "No reply came back." };
+  try {
+    const parsed = JSON.parse(textBlock.text);
+    const answers = {};
+    for (const entry of parsed.answers || []) {
+      if (entry && entry.ja_id && entry.value) answers[entry.ja_id] = entry.value;
+    }
+    return { reply: parsed.reply || "", answers };
+  } catch (exc) {
+    return { error: `Could not read the reply: ${exc}` };
+  }
 }

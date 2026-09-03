@@ -1153,3 +1153,99 @@ def test_a_declared_field_must_actually_exist_and_never_be_prose(browser):
     assert out["invented"] == {}
     assert out["prose"] == {}
     assert out["custom"] == {}
+
+
+def test_the_panel_lists_every_field_and_can_point_at_one(browser):
+    """The panel exists so "what went wrong" is something you can click,
+    rather than a number that vanishes after fifteen seconds.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'screening.html')}")
+        for js in SCRIPT_FILES + ["panel.js"]:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                const report = await fillForm(profile, null, {});
+                const panel = createPanel();
+                panel.log("Found 20 fields.");
+                panel.showThinking("Left the felony question alone.");
+                panel.showResults(report);
+
+                const root = document.getElementById('ja-autofill-panel').shadowRoot;
+                const rows = Array.from(root.querySelectorAll('.field'));
+                const headings = Array.from(root.querySelectorAll('h4')).map((h) => h.textContent);
+
+                // Clicking a row should reach the real field on the page.
+                rows.find((r) => r.textContent.includes('felony')).click();
+                await new Promise((r) => setTimeout(r, 30));
+                const flashed = Array.from(document.querySelectorAll('input'))
+                    .filter((el) => el.style.boxShadow).length;
+
+                return {rows: rows.length, headings, flashed,
+                        thinking: root.querySelector('.thinking').textContent};
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    assert out["rows"] > 0
+    assert any("Filled" in h for h in out["headings"])
+    assert any("Left for you" in h for h in out["headings"])
+    assert out["thinking"] == "Left the felony question alone."
+    assert out["flashed"] >= 1
+
+
+def test_the_panel_is_isolated_from_the_page_it_is_injected_into(browser):
+    """It lands on whatever job site the applicant is on, and those pages
+    have their own opinions about how a div and a button should look.
+    """
+    page = browser.new_page()
+    try:
+        page.set_content(
+            "<style>div,button,textarea{display:none!important;color:red!important}</style><body>"
+        )
+        for js in SCRIPT_FILES + ["panel.js"]:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """() => {
+                const panel = createPanel();
+                panel.log("still here");
+                const host = document.getElementById('ja-autofill-panel');
+                const wrap = host.shadowRoot.querySelector('.wrap');
+                return {display: getComputedStyle(wrap).display,
+                        text: host.shadowRoot.querySelector('.line').textContent};
+            }"""
+        )
+    finally:
+        page.close()
+    # The page's blanket `display:none` on every div does not reach inside.
+    assert out["display"] == "flex"
+    assert "still here" in out["text"]
+
+
+def test_the_chat_can_only_change_fields_the_fill_would_have(browser):
+    """Its answers go through the same guarded path, so nothing it returns
+    reaches a consent box or a self-identification question.
+    """
+    out = _evaluate_on(
+        browser, "routing.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const shift = llmFieldsFor(report).find((f) => f.label.includes('shift'));
+            const consentBox = (report.fields || []).find(
+                (f) => (f.label || '').includes('certify'));
+            // A reply that tries to set an allowed field and a consent box.
+            const changed = await applyLlmAnswers(report, {
+                [shift.ja_id]: "Either",
+                [consentBox.ja_id]: "Yes",
+            }, {}, profile);
+            return {changed, ticked: document.getElementById('terms').checked,
+                    shiftChosen: (document.querySelector('input[name=shift]:checked') || {}).id};
+        }""",
+        PROFILE,
+    )
+    assert out["changed"] == 1
+    assert out["shiftChosen"] == "s3"
+    assert out["ticked"] is False

@@ -297,6 +297,7 @@ function loadIntoForm() {
   document.getElementById("s-tailor-cover").checked = !!(state.settings && state.settings.tailor_cover_letter);
   document.getElementById("s-route-saved").checked = !!(state.settings && state.settings.route_saved_answers);
   document.getElementById("s-watch-learn").checked = !state.settings || state.settings.watch_and_learn !== false;
+  document.getElementById("s-show-panel").checked = !state.settings || state.settings.show_panel !== false;
   document.getElementById("s-auto-fill").checked = !!(state.settings && state.settings.auto_fill_known_sites);
   renderLearned();
   document.getElementById("llm-key").value = state.llmApiKey || "";
@@ -356,6 +357,7 @@ async function save() {
     tailor_cover_letter: document.getElementById("s-tailor-cover").checked,
     route_saved_answers: document.getElementById("s-route-saved").checked,
     watch_and_learn: document.getElementById("s-watch-learn").checked,
+    show_panel: document.getElementById("s-show-panel").checked,
     auto_fill_known_sites: document.getElementById("s-auto-fill").checked,
   };
   // Kept out of `profile` so it is never in anything exported, imported, or

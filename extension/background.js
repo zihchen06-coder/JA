@@ -11,6 +11,7 @@ const SCRIPT_FILES = [
   "extractor.js",
   "credentials.js",
   "filler.js",
+  "panel.js",
   "run.js",
 ];
 
@@ -112,6 +113,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const { llm_api_key: apiKey } = await chrome.storage.local.get(["llm_api_key"]);
         sendResponse(await resolveWithClaude({ ...message.request, apiKey }));
+      } catch (exc) {
+        sendResponse({ error: String(exc) });
+      }
+    })();
+    return true;
+  }
+
+  if (message?.type === "ja-chat") {
+    (async () => {
+      try {
+        const { llm_api_key: apiKey } = await chrome.storage.local.get(["llm_api_key"]);
+        sendResponse(await chatWithClaude({ ...message.request, apiKey }));
       } catch (exc) {
         sendResponse({ error: String(exc) });
       }

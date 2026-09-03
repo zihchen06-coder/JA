@@ -77,6 +77,14 @@ function _showBanner(html, tone) {
   setLearnedAliases(learnedAliases || {});
   setLearnedAnswers(learnedAnswers || {});
 
+  // Only the top frame draws a panel. This script runs in every frame, and a
+  // panel inside an embedded application iframe would be clipped to that
+  // iframe's box -- and a page with two frames holding forms would get two
+  // panels fighting over the same corner.
+  const wantPanel = window.top === window && !(settings && settings.show_panel === false);
+  const panel = wantPanel ? createPanel() : null;
+  panel?.log(`Found ${fieldsData.length} field(s) on this page.`);
+
   const useLlm = !!(settings && settings.use_llm);
   const report = await fillForm(profile, creds, {
     tailorCoverLetter: useLlm && !!(settings && settings.tailor_cover_letter),
@@ -89,13 +97,16 @@ function _showBanner(html, tone) {
   let claudeFilled = 0;
   let claudeError = null;
   let learnedCount = 0;
+  const job = extractJobContext();
+  panel?.log(
+    `Filled ${report.results.filter((r) => r.action === "filled").length} from your profile.`,
+    "ok"
+  );
+  if (job.title) panel?.log(`Job: ${job.title}`, "muted");
   if (useLlm) {
     const pending = llmFieldsFor(report);
     if (pending.length) {
-      _showBanner(
-        `<strong>Asking Claude</strong><br>${pending.length} field(s) the matcher didn't recognise\u2026`,
-        "info"
-      );
+      panel?.log(`Asking Claude about ${pending.length} field(s) it didn't recognise\u2026`, "info");
       try {
         const reply = await chrome.runtime.sendMessage({
           type: "ja-llm-resolve",
@@ -103,13 +114,15 @@ function _showBanner(html, tone) {
             profile,
             fields: pending,
             pageUrl: location.href,
-            job: extractJobContext(),
+            job,
             routeSavedAnswers: !!(settings && settings.route_saved_answers),
           },
         });
         if (reply && reply.error) {
           claudeError = reply.error;
+          panel?.log(reply.error, "err");
         } else if (reply) {
+          panel?.showThinking(reply.thinking);
           claudeFilled = await applyLlmAnswers(report, reply.answers, reply.skipped, profile);
           const learned = learnFromAnswers(report, reply.answers, profile, reply.sources);
           learnedCount = Object.keys(learned).length;
@@ -122,9 +135,13 @@ function _showBanner(html, tone) {
           if (Object.keys(remembered).length) {
             chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: remembered });
           }
+          panel?.log(`Claude filled ${claudeFilled}.`, claudeFilled ? "ok" : "muted");
+          const declined = Object.keys(reply.skipped || {}).length;
+          if (declined) panel?.log(`${declined} left for you to answer.`, "warn");
         }
       } catch (exc) {
         claudeError = String(exc);
+        panel?.log(claudeError, "err");
       }
     }
   }
@@ -153,9 +170,46 @@ function _showBanner(html, tone) {
   if (review) parts.push(`<div style="color:#fbbf24;">&#9679; ${review} flagged for you to answer</div>`);
   if (blankRequired) parts.push(`<div style="color:#f87171;">&#9679; ${blankRequired} required field(s) left blank</div>`);
   parts.push(`<div style="margin-top:8px; color:#94a3b8; font-size:11px;">Nothing was submitted. Review the highlighted fields, then submit yourself.</div>`);
-  _showBanner(parts.join(""), blankRequired ? "warn" : "ok");
+  // The panel says all this and stays put; the banner is the fallback for
+  // when it has been turned off.
+  if (!panel) _showBanner(parts.join(""), blankRequired ? "warn" : "ok");
 
   chrome.runtime.sendMessage({ type: "ja-fill-done", filled, review, blank: blankRequired, setupNeeded: false });
+
+  if (panel) {
+    if (learnedCount) panel.log(`${learnedCount} label(s) remembered -- free next time.`, "info");
+    if (blankRequired) panel.log(`${blankRequired} required field(s) still blank.`, "err");
+    panel.log("Nothing submitted. Check the highlighted fields, then submit yourself.", "muted");
+    panel.showResults(report);
+
+    // Asking about the form is asking about this exact fill, so the chat
+    // gets the same report the panel is showing -- including why each field
+    // was left the way it was.
+    const history = [];
+    panel.onAsk(async (text) => {
+      const reply = await chrome.runtime.sendMessage({
+        type: "ja-chat",
+        request: {
+          profile,
+          job,
+          message: text,
+          history,
+          report: {
+            results: report.results.map((r) => ({
+              ja_id: r.ja_id, label: r.label, action: r.action, detail: r.detail,
+            })),
+          },
+          fields: llmFieldsFor(report),
+        },
+      });
+      if (!reply) return "No reply came back.";
+      if (reply.error) return reply.error;
+      const changed = await applyLlmAnswers(report, reply.answers, {}, profile);
+      history.push({ role: "user", content: text });
+      history.push({ role: "assistant", content: reply.reply });
+      return changed ? `${reply.reply}\n\n(${changed} field(s) changed.)` : reply.reply;
+    });
+  }
 
   // From here on, whatever the applicant types into what was left blank is
   // noticed and kept, so the same question fills itself next time. No API

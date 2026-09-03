@@ -58,6 +58,25 @@ account, never sent anywhere except the job site being filled. The one
 exception is the optional **AI assist** below, which is off until you turn
 it on.
 
+### The side panel
+
+While a fill runs, a panel opens on the right showing what it is doing as it
+does it, then everything it did:
+
+- each step as it happens, and any error in full rather than a badge colour;
+- **what Claude was thinking**, collapsed — the API returns a summary of its
+  reasoning, so "why was this left blank" has an actual answer;
+- every field grouped into filled / left for you / not filled, and
+  **clicking one scrolls to it and flashes it** on the page;
+- a box to ask about any of it. It can answer ("why is my phone number
+  blank?") and change fields ("make the cover letter shorter") — its changes
+  go through exactly the same guarded path as the fill, so nothing it returns
+  can reach a consent box or a self-identification question.
+
+It is built in a shadow root, so job sites' own CSS can't reshape it and it
+can't disturb the form. Only the top frame draws one. Turn it off under
+Options → AI assist and you get the small corner summary instead.
+
 ### Routing your saved answers (optional, off by default)
 
 Self-ID, criminal-history and consent questions are answered from what you
