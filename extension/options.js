@@ -848,14 +848,40 @@ function renderSuggestions() {
     addBtn.onclick = async () => {
       // Into the form on the tab it belongs to, not straight to storage --
       // it lands where you can see it, and Save is still yours to press.
-      const input = document.querySelector(`[data-f="${CSS.escape(field)}"]`);
+      const value = row.querySelector("[data-suggested]").value;
       const status = document.getElementById("status");
-      if (!input) {
+      const input = document.querySelector(`[data-f="${CSS.escape(field)}"]`);
+      const boolInput = document.querySelector(`[data-bool="${CSS.escape(field)}"]`);
+
+      if (boolInput) {
+        // The yes/no fields on Eligibility -- criminal history, the consents
+        // -- are stored as true/false, whatever the form phrased them as.
+        const yes = /^(yes|y|true|checked|i (do |am |agree|consent|certify))/i.test(value.trim());
+        boolInput.value = String(yes);
+      } else if (input) {
+        // A self-ID dropdown only takes one of its own options, so match the
+        // form's wording to the nearest choice this profile offers.
+        if (input.tagName === "SELECT") {
+          const choice = Array.from(input.options).find(
+            (o) => o.value && (o.value === value || o.text.toLowerCase() === value.toLowerCase())
+          ) || Array.from(input.options).find(
+            (o) => o.value && o.text.toLowerCase().startsWith(value.toLowerCase().slice(0, 12))
+          );
+          if (!choice) {
+            status.className = "err";
+            status.textContent = `No matching choice for "${value}" — set it by hand.`;
+            return;
+          }
+          input.value = choice.value;
+        } else {
+          input.value = value;
+        }
+      } else {
         status.className = "err";
         status.textContent = `No field on these tabs for "${field}".`;
         return;
       }
-      input.value = row.querySelector("[data-suggested]").value;
+
       await forget(field);
       status.className = "ok";
       status.textContent = `Put "${field.replace(/_/g, " ")}" in — press Save to keep it.`;

@@ -178,9 +178,18 @@ entry is empty, is offered on the Learned tab as something to add to your
 profile — identity data is suggested, never written on its own, since a page
 can hold a default nobody chose or someone else's value.
 
-Either way, sensitive and consent questions are exempt: an already-ticked
-consent box or an answered self-ID question is not a remembered answer. And
-worth checking the Learned tab occasionally — if the other tool fills
+Sensitive and consent answers are kept too, but they go somewhere different.
+An answered self-ID, criminal-history or consent question — whether you
+answered it or another tool did — is offered on the Learned tab as something
+to add to **that question's profile field**, never as a remembered answer
+under the label it was asked by. A label-keyed answer is consulted before
+every check, so one holding a disability declaration would pour it into any
+field carrying that label; the profile field goes through the gate that reads
+what is actually being asked. Add it once and it fills everywhere, properly
+gated, from then on. An answer already in your profile is never re-suggested
+from a page's version of it.
+
+And worth checking the Learned tab occasionally — if the other tool fills
 something wrongly, that is what gets remembered, and every entry is editable
 there.
 

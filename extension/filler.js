@@ -852,7 +852,7 @@ function _handleCheckbox(profile, report, f) {
     const groupCanonical = matchField(groupLabel);
     if (BOOLEAN_FIELDS.has(groupCanonical)) {
       const target = profile[groupCanonical];
-      if (target === null || target === undefined) {
+      if (!_isAnswered(target)) {
         addResult(report, groupLabel, groupCanonical, "skipped_no_data", "", required);
         return;
       }
@@ -881,7 +881,9 @@ function _handleCheckbox(profile, report, f) {
   }
 
   const value = profile[canonical];
-  if (value === null || value === undefined) {
+  // "Not set" is not an answer of no. Read as one, a blank profile field
+  // would untick a box the applicant had already ticked themselves.
+  if (!_isAnswered(value)) {
     addResult(report, label, canonical, "skipped_no_data", "", required);
     return;
   }
@@ -1046,7 +1048,7 @@ function _handleRadioGroup(profile, report, options) {
   }
 
   const target = profile[canonical];
-  if (target === null || target === undefined) {
+  if (!_isAnswered(target)) {
     if (required) _markAll(options, MARK_BLANK);
     addResult(report, groupLabel, canonical, "skipped_no_data", "", required);
     return;
@@ -1492,7 +1494,10 @@ function _learnableQuestion(f, groupLabel) {
 
 // report: the report just produced. onLearn: called with {label: value} each
 // time the applicant answers something that was left to them.
-function watchForCorrections(report, onLearn) {
+// onLearn({label: value}) for ordinary questions; onSuggest({field: value})
+// for the sensitive and consent ones, whose answers belong in the profile
+// field for that question rather than under the label they were asked by.
+function watchForCorrections(report, onLearn, onSuggest) {
   const fields = report.fields || [];
   const byId = new Map(fields.map((f) => [f.ja_id, f]));
   const filled = new Set(
@@ -1533,13 +1538,37 @@ function watchForCorrections(report, onLearn) {
     watched.push([el, handler], [el, debounced, "input"]);
   };
 
+  const suggest = (field, value) => {
+    const text = String(value == null ? "" : value).trim();
+    if (!text || !onSuggest) return;
+    onSuggest({ [field]: text });
+  };
+
   for (const f of fields) {
     if (f.type === "radio" || filled.has(f.ja_id)) continue;
     if (["file", "password", "hidden"].includes(f.type)) continue;
-    const label = _learnableQuestion(f, "");
-    if (!label) continue;
     const el = _el(f.ja_id);
     if (!el) continue;
+
+    // Answering a self-ID, criminal-history or consent question by hand is
+    // the applicant stating their own answer. Worth keeping -- in the
+    // profile field for that question, where the gate that reads what is
+    // being asked still applies to it.
+    const sensitive = _sensitiveCanonicalFor(f, f.group_label || "");
+    if (sensitive) {
+      watchBoth(el, () => {
+        if (f.type === "checkbox") return suggest(sensitive, el.checked ? "Yes" : "No");
+        if (f.tag === "select") {
+          const opt = el.options && el.options[el.selectedIndex];
+          return suggest(sensitive, opt ? opt.text : el.value);
+        }
+        suggest(sensitive, el.value);
+      });
+      continue;
+    }
+
+    const label = _learnableQuestion(f, "");
+    if (!label) continue;
 
     const handler = () => {
       if (f.type === "checkbox") return remember(label, el.checked ? "Yes" : "No");
@@ -1556,10 +1585,21 @@ function watchForCorrections(report, onLearn) {
     const head = group[0];
     if (filled.has(head.ja_id)) continue;
     const question = group.find((o) => o.group_label)?.group_label || "";
-    const label = _learnableQuestion(
-      { ...head, label: group.map((o) => o.label || "").join(" ") },
-      question
-    );
+    const asked = { ...head, label: group.map((o) => o.label || "").join(" ") };
+
+    const sensitive = _sensitiveCanonicalFor(asked, question);
+    if (sensitive) {
+      for (const option of group) {
+        const el = _el(option.ja_id);
+        if (!el) continue;
+        watchBoth(el, () => {
+          if (el.checked) suggest(sensitive, option.label || el.value);
+        });
+      }
+      continue;
+    }
+
+    const label = _learnableQuestion(asked, question);
     if (!label) continue;
     for (const option of group) {
       const el = _el(option.ja_id);
@@ -1724,22 +1764,79 @@ function _readableValue(el, f) {
 // remembered answers to keep, and separately the values that belong in the
 // profile itself -- those are identity, so they are suggested rather than
 // written.
+// The canonical profile field a sensitive or consent question is asking
+// about -- gender, disability_status, criminal_history, sms_consent and so
+// on -- or null when it isn't one of those questions.
+function _sensitiveCanonicalFor(f, groupLabel) {
+  const wide = [f.label, groupLabel, f.context].filter(Boolean).join(" ");
+  const group = sensitiveGroup(wide);
+  if (group) {
+    const canonical = matchField(wide);
+    const allowed = SENSITIVE_ANSWER_FIELDS[group];
+    return canonical && allowed && allowed.has(canonical) ? canonical : null;
+  }
+  if (_isConsentLike(wide)) return _consentFieldFor(wide);
+  return null;
+}
+
+// What is actually selected in a radio group, by the label a person reads.
+function _checkedRadioLabel(report, f) {
+  const group = (report.fields || []).filter(
+    (o) => o.type === "radio" && (o.name || o.ja_id) === (f.name || f.ja_id)
+  );
+  for (const option of group) {
+    const el = _el(option.ja_id);
+    if (el && el.checked) return option.label || el.value || "";
+  }
+  return "";
+}
+
 function learnFromPrefilled(report, profile) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
   const answers = {};
   const suggestions = {};
 
   for (const r of report.results) {
-    if (r.action !== "already_filled" || !r.ja_id) continue;
+    if (!r.ja_id) continue;
     const f = byId.get(r.ja_id);
     if (!f || ["file", "password", "hidden"].includes(f.type)) continue;
 
-    const value = _readableValue(_el(r.ja_id), f);
+    // Anything this fill set is its own doing, not something to learn from.
+    // Everything else that holds a value got it from somewhere else: typed
+    // before the click, another extension, or the site's own memory. Tick
+    // boxes and radios never report "already filled" -- the extractor only
+    // tracks has_value for text and selects -- so an answered one arrives
+    // here flagged or skipped, with the answer sitting in it.
+    if (r.action === "filled") continue;
+
+    const value =
+      f.type === "radio"
+        ? _checkedRadioLabel(report, f)
+        : f.type === "checkbox"
+          ? (_el(r.ja_id) || {}).checked
+            ? "Yes"
+            : ""
+          : _readableValue(_el(r.ja_id), f);
     if (!value || value.length > LEARNABLE_MAX_LENGTH) continue;
 
-    // An unrecognised question with an answer sitting in it: exactly what a
-    // remembered answer is for. _learnableQuestion already refuses
-    // sensitive, consent, work-history and already-known labels.
+    // A self-identification, criminal-history or consent question that has
+    // been answered on this page. The answer is the applicant's own, so it
+    // is worth keeping -- but it belongs in the profile field for that
+    // question, not in the per-label answer store. A label-keyed answer is
+    // consulted before every check, so one holding a disability declaration
+    // would pour it into any field carrying that label; the profile field
+    // goes through the gate that reads what is actually being asked.
+    const sensitive = _sensitiveCanonicalFor(f, f.group_label || "");
+    if (sensitive) {
+      const held = profile ? profile[sensitive] : null;
+      if (held === null || held === undefined || held === "") {
+        suggestions[sensitive] = value;
+      }
+      continue;
+    }
+
+    // An unrecognised ordinary question with an answer sitting in it:
+    // exactly what a remembered answer is for.
     const label = _learnableQuestion(f, f.group_label || "");
     if (label) {
       answers[normalize(label)] = value;
@@ -1752,7 +1849,7 @@ function learnFromPrefilled(report, profile) {
     // and a page can hold someone else's value or a default nobody chose.
     const canonical = matchField(f.label || f.group_label || "");
     if (!canonical || _UNLEARNABLE_FIELDS.has(canonical)) continue;
-    if (EDUCATION_FIELDS.has(canonical) || BOOLEAN_FIELDS.has(canonical)) continue;
+    if (EDUCATION_FIELDS.has(canonical)) continue;
     const existing = profile ? profile[canonical] : null;
     if (existing !== null && existing !== undefined && existing !== "") continue;
     suggestions[canonical] = value;

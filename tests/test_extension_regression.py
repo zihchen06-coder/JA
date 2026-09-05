@@ -1540,9 +1540,10 @@ def test_a_page_value_for_a_missing_profile_field_is_suggested_not_saved(browser
     assert "linkedin_url" not in out["suggestedWhenSet"]
 
 
-def test_prefilled_sensitive_and_consent_answers_are_not_learned(browser):
-    """An already-ticked consent box or an answered self-ID question is not a
-    remembered answer -- those come from the profile every time or not at all.
+def test_prefilled_sensitive_answers_never_become_label_keyed_answers(browser):
+    """They are kept, but only ever as the profile field for that question.
+    A label-keyed answer is consulted before every check, so one holding a
+    disability declaration would pour it into any field carrying that label.
     """
     page = browser.new_page()
     try:
@@ -1551,7 +1552,6 @@ def test_prefilled_sensitive_and_consent_answers_are_not_learned(browser):
             page.add_script_tag(path=os.path.join(EXT_DIR, js))
         out = page.evaluate(
             """async (profile) => {
-                // The page arrives with consent ticked and self-ID answered.
                 document.getElementById('terms').checked = true;
                 document.getElementById('sms').checked = true;
                 document.getElementById('d1').checked = true;
@@ -1566,4 +1566,248 @@ def test_prefilled_sensitive_and_consent_answers_are_not_learned(browser):
         page.close()
 
     assert out["answers"] == {}
-    assert out["suggestions"] == {}
+    assert set(out["suggestions"]) <= {"disability_status", "consent_general", "sms_consent"}
+
+
+def test_a_yes_no_answer_is_never_learned_as_a_self_id_field(browser):
+    """The bug this exists to stop: "No" appears verbatim in several profile
+    fields at once, so matching an answer's text against them picked
+    whichever came first -- and every yes/no question on every form ended up
+    learned as hispanic_latino. Worse than a messy list: a learned alias is
+    consulted before anything else in matchField, so those labels would then
+    pull a self-identification answer into an ordinary field, with the
+    sensitive gate never firing because "Did you graduate?" isn't sensitive.
+    """
+    out = _evaluate_on(
+        browser, "unknowns.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const target = llmFieldsFor(report)[0];
+            return {
+                // Short, ambiguous: several profile fields say "No".
+                shortAnswer: learnFromAnswers(report, {[target.ja_id]: "No"}, profile, {}),
+                // Even declared outright, a sensitive field is refused.
+                declaredSensitive: learnFromAnswers(
+                    report, {[target.ja_id]: "No"}, profile,
+                    {[target.ja_id]: "hispanic_latino"}),
+                declaredConsent: learnFromAnswers(
+                    report, {[target.ja_id]: "Yes"}, profile,
+                    {[target.ja_id]: "consent_background_check"}),
+                // Long and unique to one field: still learnable.
+                distinctive: learnFromAnswers(
+                    report, {[target.ja_id]: profile.portfolio_url}, profile, {}),
+            };
+        }""",
+        PROFILE,
+    )
+    assert out["shortAnswer"] == {}
+    assert out["declaredSensitive"] == {}
+    assert out["declaredConsent"] == {}
+    assert list(out["distinctive"].values()) == ["portfolio_url"]
+
+
+def test_mappings_learned_before_these_rules_are_dropped_on_load(browser):
+    """An existing store already holds them, so they have to be cleaned up
+    rather than merely stopped from growing.
+    """
+    out = _evaluate_on(
+        browser, "unknowns.html",
+        """async (profile) => {
+            const polluted = {
+                "did you graduate": "hispanic_latino",
+                "are you willing to relocate": "transgender_status",
+                "consent to a check": "consent_drug_test",
+                "made up field": "not_a_real_profile_key",
+                "personal website": "portfolio_url",
+            };
+            const clean = sanitizeLearnedAliases(polluted, profile);
+
+            // And with the polluted map still in force, an ordinary question
+            // must not pull a self-identification answer.
+            setLearnedAliases(polluted);
+            const bad = matchField("Did you graduate");
+            setLearnedAliases(clean);
+            const good = matchField("Did you graduate");
+            return {clean, bad, good};
+        }""",
+        PROFILE,
+    )
+    assert out["clean"] == {"personal website": "portfolio_url"}
+    assert out["bad"] == "hispanic_latino"   # what the bug did
+    assert out["good"] is None               # what it does once cleaned
+
+
+def test_it_learns_from_fields_that_were_already_filled(browser):
+    """So the order stops mattering. Run another autofill extension first and
+    what it knew is sitting on the page when this one arrives -- it was being
+    stepped over in silence.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'unknowns.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                // Another tool got here first.
+                document.getElementById('q2').value = 'A peregrine falcon';
+                // And a field the matcher knows, that the profile is missing.
+                const bare = {...profile, portfolio_url: ""};
+
+                const report = await fillForm(bare, null, {});
+                const learned = learnFromPrefilled(report, bare);
+                return {
+                    learned,
+                    alreadyFilled: report.results.filter(
+                        (r) => r.action === 'already_filled').length,
+                };
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    assert out["alreadyFilled"] >= 1
+    assert out["learned"]["answers"]["what is your spirit animal"] == "A peregrine falcon"
+
+
+def test_a_page_value_for_a_missing_profile_field_is_suggested_not_saved(browser):
+    """A page can hold a default nobody chose or someone else's value, so
+    this is identity data to be offered, never written on its own.
+    """
+    out = _evaluate_on(
+        browser, "test_form.html",
+        """async (profile) => {
+            const bare = {...profile, linkedin_url: ""};
+            const report = await fillForm(bare, null, {});
+            const first = learnFromPrefilled(report, bare);
+
+            // Same page, but the profile already has an answer: nothing to
+            // suggest, and the page's value must not override it.
+            document.querySelectorAll('[data-ja-id]').forEach((el) => {
+                el.removeAttribute('data-ja-id');
+            });
+            const second = await fillForm(profile, null, {});
+            return {
+                suggestedWhenMissing: first.suggestions,
+                suggestedWhenSet: learnFromPrefilled(second, profile).suggestions,
+            };
+        }""",
+        PROFILE,
+    )
+    # Nothing sensitive, and nothing already answered, ever appears here.
+    for field in out["suggestedWhenMissing"]:
+        assert field not in ("gender", "race_ethnicity", "veteran_status",
+                             "disability_status", "criminal_history")
+    assert "linkedin_url" not in out["suggestedWhenSet"]
+
+
+def test_a_sensitive_answer_on_the_page_is_offered_for_the_profile(browser):
+    """Answering a self-ID or consent question by hand is the applicant
+    stating their own answer, and it was being thrown away. It is kept -- as
+    the profile field for that question, so the gate that reads what is
+    actually being asked still applies to it every time.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'routing.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                document.getElementById('d2').checked = true;   // disability: No
+                document.getElementById('terms').checked = true; // certification
+                document.getElementById('sms').checked = true;   // SMS consent
+                const bare = {...profile, disability_status: "", consent_general: "",
+                              sms_consent: ""};
+                const report = await fillForm(bare, null, {});
+                return learnFromPrefilled(report, bare);
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    # Kept as profile fields, never as label-keyed answers -- a label-keyed
+    # one is consulted before every check and would pour a declaration into
+    # any field carrying that label.
+    assert out["answers"] == {}
+    assert out["suggestions"]["consent_general"] == "Yes"
+    assert out["suggestions"]["sms_consent"] == "Yes"
+    assert "not have a disability" in out["suggestions"]["disability_status"]
+
+
+def test_a_sensitive_answer_typed_by_hand_is_captured_too(browser):
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'routing.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                const bare = {...profile, disability_status: "", consent_general: ""};
+                const report = await fillForm(bare, null, {});
+                const learned = {}, suggested = {};
+                watchForCorrections(report,
+                    (m) => Object.assign(learned, m),
+                    (m) => Object.assign(suggested, m));
+
+                for (const id of ['d3', 'terms']) {
+                    const el = document.getElementById(id);
+                    el.checked = true;
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                }
+                return {learned, suggested};
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    assert out["learned"] == {}
+    assert "do not want to answer" in out["suggested"]["disability_status"]
+    assert out["suggested"]["consent_general"] == "Yes"
+
+
+def test_a_sensitive_answer_already_in_the_profile_is_not_re_suggested(browser):
+    """Their saved answer is the one that counts; a page's version of it is
+    not a correction to be offered back.
+    """
+    out = _evaluate_on(
+        browser, "routing.html",
+        """async (profile) => {
+            document.getElementById('d1').checked = true;  // page says "Yes"
+            const report = await fillForm(profile, null, {});  // profile says "No"
+            return learnFromPrefilled(report, profile).suggestions;
+        }""",
+        PROFILE,
+    )
+    assert "disability_status" not in out
+
+
+def test_an_unset_profile_yes_no_does_not_untick_a_box_you_ticked(browser):
+    """"Not set" is not an answer of no. Read as one, a blank profile field
+    reaches out and unticks a consent box the applicant ticked themselves --
+    and reports it as filled.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'routing.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                document.getElementById('terms').checked = true;
+                const report = await fillForm(
+                    {...profile, consent_general: ""}, null, {});
+                const r = report.results.find((x) => x.canonical === 'consent_general');
+                return {stillTicked: document.getElementById('terms').checked,
+                        action: r.action};
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    assert out["stillTicked"] is True
+    assert out["action"] == "skipped_no_data"

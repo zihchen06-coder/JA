@@ -275,8 +275,11 @@ function _showBanner(html, tone) {
   // call, no prompting, and their own answer rather than anyone's reading
   // of it.
   if (!settings || settings.watch_and_learn !== false) {
-    watchForCorrections(report, (learned) => {
-      chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: learned });
-    });
+    watchForCorrections(
+      report,
+      (learned) => chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: learned }),
+      (suggested) =>
+        chrome.runtime.sendMessage({ type: "ja-profile-suggestions", suggestions: suggested })
+    );
   }
 })();
