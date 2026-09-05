@@ -436,3 +436,128 @@ def test_every_injected_script_loads_together_and_exposes_its_entry_points(load)
         ].filter((name) => typeof window[name] !== 'function')"""
     )
     assert present == [], f"run.js calls these but they aren't defined: {present}"
+
+
+# --- The options page ------------------------------------------------------
+
+SEEDED = {
+    "profile": {**PROFILE},
+    "settings": {"use_llm": True},
+    "learned_aliases": {"home telephone": "phone"},
+    "learned_answers": {"did you graduate": "Yes", "which shift": "Either"},
+    "profile_suggestions": {"linkedin_url": "https://linkedin.com/in/someone"},
+    "misses": {
+        "site.com|weird question": {
+            "host": "site.com", "label": "Weird question", "action": "skipped_no_match",
+            "detail": "", "required": True, "type": "text", "count": 7, "last": 1,
+        }
+    },
+    "applications": [
+        {"url": "https://x/apply", "host": "x.com", "title": "Mech E Intern",
+         "company": "x", "filled": 12, "review": 1, "blank": 0, "at": 1, "pages": 2}
+    ],
+}
+
+
+def _options_page(browser, seed=None):
+    """The real options page, with chrome.storage stubbed under it."""
+    page = browser.new_page()
+    page.add_init_script(
+        """(() => {
+            const store = JSON.parse(SEED_JSON);
+            window.chrome = {
+                storage: {
+                    local: {
+                        get: async (keys) => Object.fromEntries(
+                            (Array.isArray(keys) ? keys : [keys])
+                                .filter((k) => k in store).map((k) => [k, store[k]])),
+                        set: async (obj) => Object.assign(store, obj),
+                    },
+                    onChanged: {addListener: (fn) => (window.__onChanged = fn)},
+                },
+                runtime: {sendMessage: async () => ({})},
+            };
+        })();""".replace("SEED_JSON", repr(json.dumps(seed if seed is not None else SEEDED)))
+    )
+    page.goto(f"file://{os.path.join(EXT_DIR, 'options.html')}")
+    page.wait_for_function("() => typeof renderLearned === 'function'")
+    return page
+
+
+def test_the_options_page_shows_everything_that_was_learned(browser):
+    """It reads storage once when it opens, and every list on it is drawn by
+    its own function. One of those not being called on load is invisible --
+    the page looks fine and simply shows nothing.
+    """
+    page = _options_page(browser)
+    try:
+        page.wait_for_timeout(200)
+        counts = page.evaluate(
+            """() => ({
+                aliases: document.querySelectorAll('#learned-list .cred-row').length,
+                answers: document.querySelectorAll('#answers-learned-list .cred-row').length,
+                suggestions: document.querySelectorAll('#suggestions-list .cred-row').length,
+                misses: document.querySelectorAll('#misses-list .cred-row').length,
+                applications: document.querySelectorAll('#applications-list .cred-row').length,
+            })"""
+        )
+    finally:
+        page.close()
+
+    assert counts["aliases"] == 1, counts
+    assert counts["answers"] == 2, counts
+    assert counts["suggestions"] == 1, counts
+    assert counts["misses"] == 1, counts
+    assert counts["applications"] == 1, counts
+
+
+def test_a_tab_left_open_while_applying_updates_itself(browser):
+    """Everything is learned after the page opened, from the service worker.
+    Without this the tab sits there showing nothing and looks broken.
+    """
+    page = _options_page(browser, seed={"profile": {**PROFILE}, "settings": {}})
+    try:
+        page.wait_for_timeout(200)
+        before = page.evaluate(
+            "() => document.querySelectorAll('#answers-learned-list .cred-row').length"
+        )
+        after = page.evaluate(
+            """() => {
+                window.__onChanged(
+                    {learned_answers: {newValue: {"did you graduate": "Yes"}}}, "local");
+                return document.querySelectorAll('#answers-learned-list .cred-row').length;
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert before == 0
+    assert after == 1
+
+
+def test_the_options_page_renders_hostile_stored_text_as_text(browser):
+    """Labels come from job sites, are stored, and end up here."""
+    hostile = '"><img src=x onerror="window.__pwned=1">'
+    page = _options_page(browser, seed={
+        "profile": {**PROFILE}, "settings": {},
+        "learned_answers": {hostile: hostile},
+        "misses": {f"evil.com|{hostile}": {
+            "host": hostile, "label": hostile, "action": "skipped_no_match",
+            "detail": hostile, "required": False, "type": "text", "count": 1, "last": 1,
+        }},
+    })
+    try:
+        page.wait_for_timeout(200)
+        out = page.evaluate(
+            """() => ({
+                pwned: !!window.__pwned,
+                images: document.querySelectorAll('img').length,
+                shown: document.querySelector('#answers-learned-list input').value,
+            })"""
+        )
+    finally:
+        page.close()
+
+    assert out["pwned"] is False
+    assert out["images"] == 0
+    assert "<img" in out["shown"]

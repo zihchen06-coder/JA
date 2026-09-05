@@ -308,6 +308,10 @@ function loadIntoForm() {
   document.getElementById("s-show-panel").checked = !state.settings || state.settings.show_panel !== false;
   document.getElementById("s-auto-fill").checked = !!(state.settings && state.settings.auto_fill_known_sites);
   renderLearned();
+  renderLearnedAnswers();
+  renderSuggestions();
+  renderMisses();
+  renderApplications();
   document.getElementById("llm-key").value = state.llmApiKey || "";
 
   renderCredentials();
@@ -638,9 +642,6 @@ document.getElementById("clear-learned").addEventListener("click", async () => {
   await chrome.storage.local.set({ learned_aliases: {}, learned_answers: {} });
   renderLearned();
   renderLearnedAnswers();
-  renderSuggestions();
-  renderMisses();
-  renderApplications();
 });
 
 // --- Gaps and applications --------------------------------------------------
@@ -898,3 +899,21 @@ function renderSuggestions() {
     list.appendChild(row);
   }
 }
+
+// The options page reads storage once when it opens. Everything the fill
+// learns is written afterwards, from the service worker, so a tab left open
+// while applying would sit there showing nothing and look broken.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  const redraw = {
+    learned_aliases: () => (state.learned = changes.learned_aliases.newValue || {}, renderLearned()),
+    learned_answers: () =>
+      (state.learnedAnswers = changes.learned_answers.newValue || {}, renderLearnedAnswers()),
+    profile_suggestions: () =>
+      (state.suggestions = changes.profile_suggestions.newValue || {}, renderSuggestions()),
+    misses: () => (state.misses = changes.misses.newValue || {}, renderMisses()),
+    applications: () =>
+      (state.applications = changes.applications.newValue || [], renderApplications()),
+  };
+  for (const key of Object.keys(changes)) redraw[key]?.();
+});
