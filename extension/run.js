@@ -247,6 +247,29 @@ function _showBanner(html, tone) {
     });
   }
 
+  // Whatever arrived already filled -- typed before clicking, put there by
+  // another autofill extension, or remembered by the site -- is an answer
+  // too, and was being stepped over in silence.
+  if (!settings || settings.watch_and_learn !== false) {
+    const prefilled = learnFromPrefilled(report, profile);
+    const learnedNow = Object.keys(prefilled.answers).length;
+    if (learnedNow) {
+      chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: prefilled.answers });
+      panel?.log(`Remembered ${learnedNow} answer(s) already on this page.`, "info");
+    }
+    const gaps = Object.keys(prefilled.suggestions).length;
+    if (gaps) {
+      chrome.runtime.sendMessage({
+        type: "ja-profile-suggestions",
+        suggestions: prefilled.suggestions,
+      });
+      panel?.log(
+        `${gaps} value(s) here aren't in your profile -- see Options, Learned tab.`,
+        "info"
+      );
+    }
+  }
+
   // From here on, whatever the applicant types into what was left blank is
   // noticed and kept, so the same question fills itself next time. No API
   // call, no prompting, and their own answer rather than anyone's reading

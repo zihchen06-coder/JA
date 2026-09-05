@@ -201,6 +201,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
+  if (message?.type === "ja-profile-suggestions") {
+    (async () => {
+      const { profile_suggestions: existing } = await chrome.storage.local.get([
+        "profile_suggestions",
+      ]);
+      await chrome.storage.local.set({
+        profile_suggestions: { ...(existing || {}), ...message.suggestions },
+      });
+    })();
+    return;
+  }
+
   if (message?.type === "ja-learned-replace") {
     chrome.storage.local.set({ learned_aliases: message.learned });
     return;

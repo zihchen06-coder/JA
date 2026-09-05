@@ -163,18 +163,26 @@ that today's rules would refuse are dropped when the extension next runs.
 
 ### Working alongside another autofill extension
 
-They compose, in this order: **run this one first, then the other.** Fields
-this tool fills are left alone by anything sensible afterwards, and the
-fields it leaves blank are exactly the ones it is watching — so when the
-other extension fills one, its answer is remembered here. Any tool filling a
-field programmatically has to dispatch `input`/`change` or framework-driven
-forms would never register the value, and both are watched.
+They compose in either order.
 
-Run it the other way round and there is nothing to learn: this tool sees
-those fields already filled and leaves them as they are, which is correct but
-teaches it nothing. Worth checking the Learned tab either way — if the other
-tool fills something wrongly, that is what gets remembered, and each entry is
-editable there.
+**This one first, then the other:** the fields it leaves blank are exactly the
+ones it is watching, so when the other extension fills one, its answer is
+remembered here. Any tool filling a field programmatically has to dispatch
+`input`/`change` or framework-driven forms would never register the value,
+and both are watched.
+
+**The other first, then this one:** the values are sitting on the page when
+it arrives, and it reads them. A field it can't place but that has an answer
+in it becomes a remembered answer. A field it *can* place, whose profile
+entry is empty, is offered on the Learned tab as something to add to your
+profile — identity data is suggested, never written on its own, since a page
+can hold a default nobody chose or someone else's value.
+
+Either way, sensitive and consent questions are exempt: an already-ticked
+consent box or an answered self-ID question is not a remembered answer. And
+worth checking the Learned tab occasionally — if the other tool fills
+something wrongly, that is what gets remembered, and every entry is editable
+there.
 
 Everything has a Forget button, plus "Forget everything". Deleting one is
 never destructive; it is simply worked out again the next time it comes up.

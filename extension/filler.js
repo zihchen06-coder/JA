@@ -1695,3 +1695,68 @@ function missedFields(report) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Learning from what was already on the page.
+//
+// A field can arrive filled for three reasons: the applicant typed it before
+// clicking, another autofill extension got there first, or the site
+// remembered it. All three are answers, and all three were being stepped
+// over silently -- the fill leaves an already-filled field alone, correctly,
+// and then learned nothing from it. That made the order matter: run this
+// first and watchForCorrections sees what the other tool does, run it second
+// and the same information is sitting right there and ignored.
+// ---------------------------------------------------------------------------
+
+// What a person would read in the field, rather than what the form submits.
+// A native <select> answers "NY" through .value while showing "New York",
+// and the readable one is what matches a differently-coded list next time.
+function _readableValue(el, f) {
+  if (!el) return "";
+  if (f.tag === "select" && !f.widget) {
+    const option = el.options && el.options[el.selectedIndex];
+    return option ? (option.text || "").trim() : "";
+  }
+  return _currentValue(el, f);
+}
+
+// Fields the profile has no answer for, but the page does. Returns the
+// remembered answers to keep, and separately the values that belong in the
+// profile itself -- those are identity, so they are suggested rather than
+// written.
+function learnFromPrefilled(report, profile) {
+  const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
+  const answers = {};
+  const suggestions = {};
+
+  for (const r of report.results) {
+    if (r.action !== "already_filled" || !r.ja_id) continue;
+    const f = byId.get(r.ja_id);
+    if (!f || ["file", "password", "hidden"].includes(f.type)) continue;
+
+    const value = _readableValue(_el(r.ja_id), f);
+    if (!value || value.length > LEARNABLE_MAX_LENGTH) continue;
+
+    // An unrecognised question with an answer sitting in it: exactly what a
+    // remembered answer is for. _learnableQuestion already refuses
+    // sensitive, consent, work-history and already-known labels.
+    const label = _learnableQuestion(f, f.group_label || "");
+    if (label) {
+      answers[normalize(label)] = value;
+      continue;
+    }
+
+    // A question the matcher does know, answered on the page but blank in
+    // the profile -- a gap, and worth filling permanently rather than
+    // remembering per-label. Not written automatically: this is identity,
+    // and a page can hold someone else's value or a default nobody chose.
+    const canonical = matchField(f.label || f.group_label || "");
+    if (!canonical || _UNLEARNABLE_FIELDS.has(canonical)) continue;
+    if (EDUCATION_FIELDS.has(canonical) || BOOLEAN_FIELDS.has(canonical)) continue;
+    const existing = profile ? profile[canonical] : null;
+    if (existing !== null && existing !== undefined && existing !== "") continue;
+    suggestions[canonical] = value;
+  }
+
+  return { answers, suggestions };
+}

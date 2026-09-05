@@ -1473,3 +1473,97 @@ def test_mappings_learned_before_these_rules_are_dropped_on_load(browser):
     assert out["clean"] == {"personal website": "portfolio_url"}
     assert out["bad"] == "hispanic_latino"   # what the bug did
     assert out["good"] is None               # what it does once cleaned
+
+
+def test_it_learns_from_fields_that_were_already_filled(browser):
+    """So the order stops mattering. Run another autofill extension first and
+    what it knew is sitting on the page when this one arrives -- it was being
+    stepped over in silence.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'unknowns.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                // Another tool got here first.
+                document.getElementById('q2').value = 'A peregrine falcon';
+                // And a field the matcher knows, that the profile is missing.
+                const bare = {...profile, portfolio_url: ""};
+
+                const report = await fillForm(bare, null, {});
+                const learned = learnFromPrefilled(report, bare);
+                return {
+                    learned,
+                    alreadyFilled: report.results.filter(
+                        (r) => r.action === 'already_filled').length,
+                };
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    assert out["alreadyFilled"] >= 1
+    assert out["learned"]["answers"]["what is your spirit animal"] == "A peregrine falcon"
+
+
+def test_a_page_value_for_a_missing_profile_field_is_suggested_not_saved(browser):
+    """A page can hold a default nobody chose or someone else's value, so
+    this is identity data to be offered, never written on its own.
+    """
+    out = _evaluate_on(
+        browser, "test_form.html",
+        """async (profile) => {
+            const bare = {...profile, linkedin_url: ""};
+            const report = await fillForm(bare, null, {});
+            const first = learnFromPrefilled(report, bare);
+
+            // Same page, but the profile already has an answer: nothing to
+            // suggest, and the page's value must not override it.
+            document.querySelectorAll('[data-ja-id]').forEach((el) => {
+                el.removeAttribute('data-ja-id');
+            });
+            const second = await fillForm(profile, null, {});
+            return {
+                suggestedWhenMissing: first.suggestions,
+                suggestedWhenSet: learnFromPrefilled(second, profile).suggestions,
+            };
+        }""",
+        PROFILE,
+    )
+    # Nothing sensitive, and nothing already answered, ever appears here.
+    for field in out["suggestedWhenMissing"]:
+        assert field not in ("gender", "race_ethnicity", "veteran_status",
+                             "disability_status", "criminal_history")
+    assert "linkedin_url" not in out["suggestedWhenSet"]
+
+
+def test_prefilled_sensitive_and_consent_answers_are_not_learned(browser):
+    """An already-ticked consent box or an answered self-ID question is not a
+    remembered answer -- those come from the profile every time or not at all.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'routing.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                // The page arrives with consent ticked and self-ID answered.
+                document.getElementById('terms').checked = true;
+                document.getElementById('sms').checked = true;
+                document.getElementById('d1').checked = true;
+                const bare = {...profile, disability_status: "", consent_general: "",
+                              sms_consent: ""};
+                const report = await fillForm(bare, null, {});
+                return learnFromPrefilled(report, bare);
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    assert out["answers"] == {}
+    assert out["suggestions"] == {}

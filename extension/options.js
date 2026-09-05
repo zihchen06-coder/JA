@@ -391,12 +391,13 @@ function initTabs() {
 
   const stored = await chrome.storage.local.get([
     "profile", "settings", "credentials", "llm_api_key", "learned_aliases",
-    "learned_answers", "misses", "applications",
+    "learned_answers", "misses", "applications", "profile_suggestions",
   ]);
   state.llmApiKey = stored.llm_api_key || "";
   state.learned = stored.learned_aliases || {};
   state.learnedAnswers = stored.learned_answers || {};
   state.misses = stored.misses || {};
+  state.suggestions = stored.profile_suggestions || {};
   state.applications = stored.applications || [];
   state.profile = { ...emptyProfile(), ...(stored.profile || {}) };
   state.settings = stored.settings || {};
@@ -629,6 +630,7 @@ document.getElementById("clear-learned").addEventListener("click", async () => {
   await chrome.storage.local.set({ learned_aliases: {}, learned_answers: {} });
   renderLearned();
   renderLearnedAnswers();
+  renderSuggestions();
   renderMisses();
   renderApplications();
 });
@@ -816,3 +818,49 @@ document.getElementById("parse-resume").addEventListener("click", async () => {
     button.disabled = false;
   }
 });
+
+// --- Values found on a page that the profile is missing ---------------------
+
+function renderSuggestions() {
+  const list = document.getElementById("suggestions-list");
+  const empty = document.getElementById("suggestions-empty");
+  const entries = Object.entries(state.suggestions || {}).sort();
+  list.innerHTML = "";
+  empty.style.display = entries.length ? "none" : "";
+
+  const forget = async (field) => {
+    delete state.suggestions[field];
+    await chrome.storage.local.set({ profile_suggestions: state.suggestions });
+    renderSuggestions();
+  };
+
+  for (const [field, value] of entries) {
+    const row = document.createElement("div");
+    row.className = "cred-row";
+    row.style.marginBottom = "8px";
+    row.innerHTML = `
+      <input readonly value="${esc(field.replace(/_/g, " "))}">
+      <input data-suggested value="${esc(value)}">
+      <button type="button">Add</button>
+      <button class="danger" type="button">Dismiss</button>`;
+
+    const [addBtn, dismissBtn] = row.querySelectorAll("button");
+    addBtn.onclick = async () => {
+      // Into the form on the tab it belongs to, not straight to storage --
+      // it lands where you can see it, and Save is still yours to press.
+      const input = document.querySelector(`[data-f="${CSS.escape(field)}"]`);
+      const status = document.getElementById("status");
+      if (!input) {
+        status.className = "err";
+        status.textContent = `No field on these tabs for "${field}".`;
+        return;
+      }
+      input.value = row.querySelector("[data-suggested]").value;
+      await forget(field);
+      status.className = "ok";
+      status.textContent = `Put "${field.replace(/_/g, " ")}" in — press Save to keep it.`;
+    };
+    dismissBtn.onclick = () => forget(field);
+    list.appendChild(row);
+  }
+}
