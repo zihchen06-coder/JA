@@ -74,7 +74,13 @@ function _showBanner(html, tone) {
 
   // Label phrasings worked out on earlier applications, so they match for
   // free this time instead of costing another API call.
-  setLearnedAliases(learnedAliases || {});
+  // Anything a previous version learned that today's rules would refuse is
+  // dropped here rather than left to keep doing damage.
+  const safeAliases = sanitizeLearnedAliases(learnedAliases || {}, profile);
+  setLearnedAliases(safeAliases);
+  if (Object.keys(safeAliases).length !== Object.keys(learnedAliases || {}).length) {
+    chrome.runtime.sendMessage({ type: "ja-learned-replace", learned: safeAliases });
+  }
   setLearnedAnswers(learnedAnswers || {});
 
   // Only the top frame draws a panel. This script runs in every frame, and a

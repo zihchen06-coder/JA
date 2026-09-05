@@ -1249,9 +1249,55 @@ function _applyLlmRadio(byId, candidate, value) {
 // worth remembering: next time it matches for free, instantly, with no API
 // call. Only mappings are learned, never the prose -- a cover letter or an
 // essay answer written for one job has no business being reused at another.
-// Free-text prose belongs to the job it was written for. Learning a label as
-// one of these would paste one company's answer into the next one's form.
-var _UNLEARNABLE_FIELDS = new Set(["custom_answers", "cover_letter_text"]);
+// Fields a label must never be learned as.
+//
+// Prose, because it belongs to the job it was written for. And every
+// sensitive one, for a much sharper reason: a learned alias is consulted
+// before anything else in matchField, so a label learned as
+// "hispanic_latino" would pull that answer into any field carrying that
+// label -- and the self-ID gate would never fire, because it keys off the
+// question's own wording and "Did you graduate?" isn't sensitive. A mapping
+// is a shortcut past every check, so it may only ever point somewhere
+// ordinary.
+var _UNLEARNABLE_FIELDS = new Set([
+  "custom_answers", "cover_letter_text",
+  ...SELF_ID_FIELDS, ...CONSENT_FIELDS, "criminal_history",
+]);
+
+// A remembered mapping is only as good as the evidence for it. "No" appears
+// verbatim in several profile fields at once, so matching an answer's text
+// against them picked whichever came first -- which is how every yes/no
+// question on a form ended up learned as a self-identification field. Text
+// is only evidence when it is long enough to mean something and belongs to
+// exactly one field.
+var _MIN_LEARNABLE_VALUE = 8;
+
+function _uniqueProfileFieldFor(profile, value) {
+  const text = String(value);
+  if (text.length < _MIN_LEARNABLE_VALUE) return null;
+  let found = null;
+  for (const [key, saved] of Object.entries(profile || {})) {
+    if (_UNLEARNABLE_FIELDS.has(key)) continue;
+    if (typeof saved !== "string" && typeof saved !== "number") continue;
+    if (!String(saved) || String(saved) !== text) continue;
+    if (found) return null; // ambiguous -- two fields hold this same value
+    found = key;
+  }
+  return found;
+}
+
+// Existing stores were written before the rules above, so they hold mappings
+// that would now be refused. Dropped on load rather than left to keep doing
+// damage quietly.
+function sanitizeLearnedAliases(map, profile) {
+  const clean = {};
+  for (const [label, field] of Object.entries(map || {})) {
+    if (_UNLEARNABLE_FIELDS.has(field)) continue;
+    if (profile && !Object.prototype.hasOwnProperty.call(profile, field)) continue;
+    clean[label] = field;
+  }
+  return clean;
+}
 
 function learnFromAnswers(report, answers, profile, sources) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
@@ -1278,15 +1324,10 @@ function learnFromAnswers(report, answers, profile, sources) {
       continue;
     }
 
-    // Nothing declared: fall back to recognising the value outright.
-    for (const [key, saved] of Object.entries(profile || {})) {
-      if (_UNLEARNABLE_FIELDS.has(key)) continue;
-      if (typeof saved !== "string" && typeof saved !== "number") continue;
-      if (String(saved) && String(saved) === String(value)) {
-        learned[label] = key;
-        break;
-      }
-    }
+    // Nothing declared: fall back to recognising the value outright, but
+    // only when the text is distinctive enough to be evidence of anything.
+    const guessed = _uniqueProfileFieldFor(profile, value);
+    if (guessed) learned[label] = guessed;
   }
   return learned;
 }
@@ -1475,6 +1516,23 @@ function watchForCorrections(report, onLearn) {
 
   const watched = [];
 
+  // `change` is the reliable signal -- it fires when a box is left, and any
+  // other tool filling a field programmatically has to dispatch it or React
+  // and Angular forms would never see the value. But a tool that dispatches
+  // only `input` would go unnoticed, so watch that too, debounced: `input`
+  // fires on every keystroke, and storing on each one would keep half-typed
+  // answers.
+  const watchBoth = (el, handler) => {
+    el.addEventListener("change", handler);
+    let timer = null;
+    const debounced = () => {
+      clearTimeout(timer);
+      timer = setTimeout(handler, 700);
+    };
+    el.addEventListener("input", debounced);
+    watched.push([el, handler], [el, debounced, "input"]);
+  };
+
   for (const f of fields) {
     if (f.type === "radio" || filled.has(f.ja_id)) continue;
     if (["file", "password", "hidden"].includes(f.type)) continue;
@@ -1491,8 +1549,7 @@ function watchForCorrections(report, onLearn) {
       }
       remember(label, el.value);
     };
-    el.addEventListener("change", handler);
-    watched.push([el, handler]);
+    watchBoth(el, handler);
   }
 
   for (const group of radioGroups.values()) {
@@ -1516,7 +1573,7 @@ function watchForCorrections(report, onLearn) {
   }
 
   return () => {
-    for (const [el, handler] of watched) el.removeEventListener("change", handler);
+    for (const [el, handler, type] of watched) el.removeEventListener(type || "change", handler);
   };
 }
 

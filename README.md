@@ -153,6 +153,29 @@ Never remembered: anything longer than a sentence or two, anything inside a
 work-history block, and any self-identification, criminal-history or consent
 question — those are answered from your profile every time or not at all.
 
+A mapping may never point at a sensitive field either. A learned alias is
+consulted before everything else, so one pointing at `hispanic_latino` would
+pull that answer into any field carrying that label, with the self-ID gate
+never firing — the gate keys off the question's wording, and "Did you
+graduate?" isn't sensitive. A mapping is a shortcut past every check, so it
+may only ever point somewhere ordinary. Mappings stored by earlier versions
+that today's rules would refuse are dropped when the extension next runs.
+
+### Working alongside another autofill extension
+
+They compose, in this order: **run this one first, then the other.** Fields
+this tool fills are left alone by anything sensible afterwards, and the
+fields it leaves blank are exactly the ones it is watching — so when the
+other extension fills one, its answer is remembered here. Any tool filling a
+field programmatically has to dispatch `input`/`change` or framework-driven
+forms would never register the value, and both are watched.
+
+Run it the other way round and there is nothing to learn: this tool sees
+those fields already filled and leaves them as they are, which is correct but
+teaches it nothing. Worth checking the Learned tab either way — if the other
+tool fills something wrongly, that is what gets remembered, and each entry is
+editable there.
+
 Everything has a Forget button, plus "Forget everything". Deleting one is
 never destructive; it is simply worked out again the next time it comes up.
 

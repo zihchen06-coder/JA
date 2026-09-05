@@ -1360,3 +1360,116 @@ def test_the_docx_reader_gets_the_text_out(browser):
     assert "Test Engineer at Test Industries" in text
     # XML entities come back as the characters they stand for.
     assert "State University & Co" in text
+
+
+def test_it_learns_from_another_extension_filling_the_same_form(browser):
+    """Running this first and a second autofill extension after it: the
+    fields left blank here are exactly the ones being watched, and any tool
+    filling one has to dispatch input/change or React forms would never see
+    the value. So what the other tool knows ends up remembered here.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'unknowns.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                const report = await fillForm(profile, null, {});
+                const seen = {};
+                watchForCorrections(report, (m) => Object.assign(seen, m));
+
+                // Stand in for another extension: set the value through the
+                // native setter and dispatch, which is what any of them must
+                // do for a framework-controlled input to register it.
+                const fillLike = (id, value, events) => {
+                    const el = document.getElementById(id);
+                    const setter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value').set;
+                    setter.call(el, value);
+                    for (const type of events) {
+                        el.dispatchEvent(new Event(type, {bubbles: true}));
+                    }
+                };
+
+                fillLike('q2', 'A peregrine falcon', ['input', 'change']);
+                // A tool that only dispatches input, never change.
+                fillLike('q4', 'Available from May 2027', ['input']);
+                await new Promise((r) => setTimeout(r, 900));
+                return seen;
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    assert out["what is your spirit animal"] == "A peregrine falcon"
+    assert out["anything else we should know"] == "Available from May 2027"
+
+
+def test_a_yes_no_answer_is_never_learned_as_a_self_id_field(browser):
+    """The bug this exists to stop: "No" appears verbatim in several profile
+    fields at once, so matching an answer's text against them picked
+    whichever came first -- and every yes/no question on every form ended up
+    learned as hispanic_latino. Worse than a messy list: a learned alias is
+    consulted before anything else in matchField, so those labels would then
+    pull a self-identification answer into an ordinary field, with the
+    sensitive gate never firing because "Did you graduate?" isn't sensitive.
+    """
+    out = _evaluate_on(
+        browser, "unknowns.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const target = llmFieldsFor(report)[0];
+            return {
+                // Short, ambiguous: several profile fields say "No".
+                shortAnswer: learnFromAnswers(report, {[target.ja_id]: "No"}, profile, {}),
+                // Even declared outright, a sensitive field is refused.
+                declaredSensitive: learnFromAnswers(
+                    report, {[target.ja_id]: "No"}, profile,
+                    {[target.ja_id]: "hispanic_latino"}),
+                declaredConsent: learnFromAnswers(
+                    report, {[target.ja_id]: "Yes"}, profile,
+                    {[target.ja_id]: "consent_background_check"}),
+                // Long and unique to one field: still learnable.
+                distinctive: learnFromAnswers(
+                    report, {[target.ja_id]: profile.portfolio_url}, profile, {}),
+            };
+        }""",
+        PROFILE,
+    )
+    assert out["shortAnswer"] == {}
+    assert out["declaredSensitive"] == {}
+    assert out["declaredConsent"] == {}
+    assert list(out["distinctive"].values()) == ["portfolio_url"]
+
+
+def test_mappings_learned_before_these_rules_are_dropped_on_load(browser):
+    """An existing store already holds them, so they have to be cleaned up
+    rather than merely stopped from growing.
+    """
+    out = _evaluate_on(
+        browser, "unknowns.html",
+        """async (profile) => {
+            const polluted = {
+                "did you graduate": "hispanic_latino",
+                "are you willing to relocate": "transgender_status",
+                "consent to a check": "consent_drug_test",
+                "made up field": "not_a_real_profile_key",
+                "personal website": "portfolio_url",
+            };
+            const clean = sanitizeLearnedAliases(polluted, profile);
+
+            // And with the polluted map still in force, an ordinary question
+            // must not pull a self-identification answer.
+            setLearnedAliases(polluted);
+            const bad = matchField("Did you graduate");
+            setLearnedAliases(clean);
+            const good = matchField("Did you graduate");
+            return {clean, bad, good};
+        }""",
+        PROFILE,
+    )
+    assert out["clean"] == {"personal website": "portfolio_url"}
+    assert out["bad"] == "hispanic_latino"   # what the bug did
+    assert out["good"] is None               # what it does once cleaned

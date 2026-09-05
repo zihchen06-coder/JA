@@ -201,6 +201,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
+  if (message?.type === "ja-learned-replace") {
+    chrome.storage.local.set({ learned_aliases: message.learned });
+    return;
+  }
+
   if (message?.type === "ja-learned") {
     (async () => {
       const { learned_aliases: existing } = await chrome.storage.local.get(["learned_aliases"]);
