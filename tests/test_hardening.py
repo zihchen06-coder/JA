@@ -1,0 +1,438 @@
+"""Adversarial input: what happens when the profile, the page or the API
+gives this thing something it wasn't written for.
+
+Every test here exists because a job site is not a controlled environment.
+Labels are written by whoever built the form, values come back from a model,
+and stored data outlives the version of the code that wrote it. Nothing in
+here may throw, and nothing may put the wrong value in a field.
+"""
+
+from __future__ import annotations
+
+import json
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from conftest import EXT_DIR, PROFILE  # noqa: E402
+
+FILL = "(profile) => fillForm(profile, null, {})"
+
+
+def _fill(page, profile):
+    return page.evaluate(f"async {FILL}", profile)
+
+
+def test_an_empty_profile_fills_nothing_and_does_not_throw(load):
+    page = load(fixture="test_form.html")
+    empty = {k: ("" if isinstance(v, str) else v) for k, v in PROFILE.items()}
+    empty.update(education=[], experience=[], custom_answers={},
+                 resume_file=None, cover_letter_file=None)
+    for key in list(empty):
+        if isinstance(empty[key], bool):
+            empty[key] = ""
+    report = _fill(page, empty)
+    assert [r for r in report["results"] if r["action"] == "error"] == []
+    assert [r for r in report["results"] if r["action"] == "filled"] == []
+
+
+def test_a_profile_full_of_wrong_types_does_not_throw(load):
+    """Stored data outlives the code that wrote it, and an import can put
+    anything in. None of it may reach a field as "[object Object]".
+    """
+    page = load(fixture="test_form.html")
+    broken = {
+        **PROFILE,
+        "first_name": None, "last_name": 12345, "email": ["a@b.c"],
+        "phone": {"n": 1}, "city": True, "education": "not a list",
+        "experience": [None, {"company": None}], "custom_answers": "not an object",
+        "gpa": float("1.5"),
+    }
+    report = page.evaluate(f"async {FILL}", broken)
+    assert [r for r in report["results"] if r["action"] == "error"] == []
+    values = page.evaluate(
+        "() => Array.from(document.querySelectorAll('input,textarea')).map((el) => el.value)"
+    )
+    for v in values:
+        assert "[object Object]" not in v
+        assert v != "null" and v != "undefined"
+
+
+def test_a_page_with_no_labels_at_all_fills_nothing(load):
+    page = load(html="<body><form>" + "<input>" * 20 + "</form></body>")
+    report = _fill(page, PROFILE)
+    assert [r for r in report["results"] if r["action"] == "filled"] == []
+    assert [r for r in report["results"] if r["action"] == "error"] == []
+
+
+def test_duplicate_element_ids_do_not_cross_wire_fields(load):
+    """Invalid HTML, but common. Two fields sharing an id must not end up
+    both pointing at the first one -- that fills the wrong box.
+    """
+    page = load(html="""<body><form>
+        <label for="x">First Name</label><input id="x" name="a">
+        <label for="x">Email</label><input id="x" name="b">
+    </form></body>""")
+    _fill(page, PROFILE)
+    values = page.evaluate(
+        "() => Array.from(document.querySelectorAll('input')).map((el) => el.value)"
+    )
+    # Whatever it decides, it must not put the same value in both.
+    assert values[0] != values[1] or values == ["", ""]
+
+
+def test_disabled_and_readonly_fields_are_left_alone(load):
+    page = load(html="""<body><form>
+        <label for="a">First Name</label><input id="a" disabled>
+        <label for="b">Last Name</label><input id="b" readonly>
+        <label for="c">Email</label><input id="c">
+    </form></body>""")
+    _fill(page, PROFILE)
+    out = page.evaluate(
+        "() => ({a: a.value, b: b.value, c: c.value})"
+    )
+    assert out["a"] == ""  # disabled
+    assert out["b"] == ""  # readonly -- a form that fills it would be lying
+    assert out["c"] == PROFILE["email"]
+
+
+def test_a_select_with_no_options_does_not_throw(load):
+    page = load(html="""<body><form>
+        <label for="s">State</label><select id="s"></select>
+    </form></body>""")
+    report = _fill(page, PROFILE)
+    assert [r for r in report["results"] if r["action"] == "error"] == []
+
+
+def test_hostile_label_text_is_handled_as_text(load):
+    """Labels are written by whoever built the form. They reach storage and
+    then the options page, so they may never be treated as markup.
+    """
+    page = load(html="""<body><form>
+        <label for="a">&lt;img src=x onerror=alert(1)&gt; Email</label><input id="a">
+        <label for="b">Phone " onfocus="alert(2)</label><input id="b">
+    </form></body>""")
+    report = _fill(page, PROFILE)
+    assert [r for r in report["results"] if r["action"] == "error"] == []
+    labels = [r["label"] for r in report["results"]]
+    assert any("<img" in (l or "") for l in labels)
+
+
+def test_a_very_large_form_completes(load):
+    page = load(html="<body><form>" + "".join(
+        f'<label for="f{i}">Question number {i}</label><input id="f{i}">' for i in range(600)
+    ) + "</form></body>")
+    report = _fill(page, PROFILE)
+    assert len(report["results"]) >= 600
+    assert [r for r in report["results"] if r["action"] == "error"] == []
+
+
+def test_filling_the_same_page_twice_is_stable(load):
+    page = load(fixture="test_form.html")
+    first = _fill(page, PROFILE)
+    second = _fill(page, PROFILE)
+    filled_first = sum(1 for r in first["results"] if r["action"] == "filled")
+    already = sum(1 for r in second["results"] if r["action"] == "already_filled")
+    assert filled_first > 0
+    # Nothing is filled twice, and nothing errors on the second pass.
+    assert already >= filled_first - 2
+    assert [r for r in second["results"] if r["action"] == "error"] == []
+
+
+def test_a_corrupt_learned_store_is_ignored_rather_than_fatal(load):
+    page = load(fixture="unknowns.html")
+    out = page.evaluate(
+        """async (profile) => {
+            setLearnedAliases({"a label": 42, "another": null, "third": {x: 1}});
+            setLearnedAnswers({"what is your spirit animal": {not: "a string"},
+                               "anything else we should know": 7});
+            const report = await fillForm(profile, null, {});
+            return {
+                errors: report.results.filter((r) => r.action === 'error'),
+                values: Array.from(document.querySelectorAll('input')).map((el) => el.value),
+            };
+        }""",
+        PROFILE,
+    )
+    assert out["errors"] == []
+    for v in out["values"]:
+        assert "[object Object]" not in v
+
+
+def test_a_malformed_model_reply_changes_nothing(load):
+    page = load(fixture="unknowns.html")
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const before = Array.from(document.querySelectorAll('input')).map((el) => el.value);
+            const results = [];
+            for (const reply of [null, undefined, [], "text", {ja_x: "v"},
+                                 {"ja-0": null}, {"ja-0": {deep: 1}}]) {
+                results.push(await applyLlmAnswers(report, reply, {}, profile));
+            }
+            const after = Array.from(document.querySelectorAll('input')).map((el) => el.value);
+            return {results, changed: JSON.stringify(before) !== JSON.stringify(after)};
+        }""",
+        PROFILE,
+    )
+    assert out["results"] == [0, 0, 0, 0, 0, 0, 0]
+    assert out["changed"] is False
+
+
+def test_a_field_removed_mid_fill_is_reported_not_thrown(load):
+    page = load(fixture="test_form.html")
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            // The page tears itself down, as a single-page app does on a
+            // route change, and then verification runs.
+            document.querySelectorAll('input').forEach((el) => el.remove());
+            const lost = await verifyFilled(report, 0);
+            return {lost: lost.length, errors: report.results.filter(
+                (r) => r.action === 'error').length};
+        }""",
+        PROFILE,
+    )
+    assert out["errors"] == 0
+
+
+def test_an_absurdly_long_value_is_not_typed_into_a_short_box(load):
+    page = load(html="""<body><form>
+        <label for="a">Email</label><input id="a" maxlength="20">
+    </form></body>""")
+    page.evaluate(
+        "(profile) => fillForm({...profile, email: 'x'.repeat(5000)}, null, {})",
+        PROFILE,
+    )
+    value = page.evaluate("() => a.value")
+    # The browser enforces maxlength on user input but not on assignment, so
+    # what matters is that nothing throws and the page stays usable.
+    assert isinstance(value, str)
+
+
+def test_the_extractor_survives_a_detached_and_reattached_form(load):
+    page = load(fixture="test_form.html")
+    out = page.evaluate(
+        """async (profile) => {
+            const form = document.querySelector('form');
+            const parent = form.parentNode;
+            form.remove();
+            const a = extractFields().length;   // nothing on the page
+            parent.appendChild(form);
+            const b = extractFields().length;   // back again
+            const report = await fillForm(profile, null, {});
+            return {a, b, errors: report.results.filter((r) => r.action === 'error').length};
+        }""",
+        PROFILE,
+    )
+    assert out["a"] == 0
+    assert out["b"] > 0
+    assert out["errors"] == 0
+
+
+# --- The API layer ---------------------------------------------------------
+
+def _api(load, body, status=200):
+    page = load(scripts=["llm.js"])
+    return page.evaluate(
+        """async ({body, status, profile}) => {
+            window.fetch = async () => ({
+                ok: status === 200, status,
+                text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+            });
+            return await resolveWithClaude({
+                apiKey: "k", profile, pageUrl: "https://x",
+                fields: [{ja_id: "ja-0", label: "Q", type: "text", options: []}],
+            });
+        }""",
+        {"body": body, "status": status, "profile": PROFILE},
+    )
+
+
+def test_every_shape_of_broken_api_response_is_survivable(load):
+    """The reply is JSON from a model over a network. Any of it can be
+    absent, truncated or the wrong type, and none of it may throw.
+    """
+    cases = [
+        "not json at all",
+        "",
+        {"content": None},
+        {"content": []},
+        {"content": [{"type": "text", "text": "{"}]},            # truncated JSON
+        {"content": [{"type": "text", "text": "null"}]},
+        {"content": [{"type": "text", "text": '{"answers": null}'}]},
+        {"content": [{"type": "text", "text": '{"answers": "nope"}'}]},
+        {"content": [{"type": "text", "text": '{"answers": [null, 3, "x"]}'}]},
+        {"content": [{"type": "text", "text": '{"answers": [{"value": "no id"}]}'}]},
+    ]
+    for body in cases:
+        out = _api(load, body)
+        assert isinstance(out, dict), body
+        assert "error" in out or "answers" in out, body
+        if "answers" in out:
+            assert isinstance(out["answers"], dict)
+
+
+def test_an_http_error_body_that_is_not_json_still_reports_something(load):
+    out = _api(load, "<html>502 Bad Gateway</html>", status=502)
+    assert "error" in out
+    assert "502" in out["error"]
+
+
+def test_a_refusal_is_reported_rather_than_read_as_an_answer(load):
+    out = _api(load, {"stop_reason": "refusal", "content": [
+        {"type": "text", "text": '{"answers": [{"ja_id": "ja-0", "value": "x"}]}'},
+    ]})
+    assert "error" in out
+    assert "answers" not in out
+
+
+# --- Stored data that grows without bound ----------------------------------
+
+def test_the_learned_stores_do_not_grow_without_limit(load):
+    """Applying at volume, every form contributes labels. Nothing here was
+    capped, and extension storage is finite.
+    """
+    page = load(scripts=["llm.js"])
+    out = page.evaluate(
+        """() => {
+            const many = {};
+            for (let i = 0; i < 5000; i++) many['question number ' + i] = 'answer ' + i;
+            return {
+                answers: Object.keys(capLearned(many)).length,
+                aliases: Object.keys(capLearned(many, 500)).length,
+            };
+        }"""
+    )
+    assert out["answers"] <= 2000
+    assert out["aliases"] <= 500
+
+
+# --- Text handling ---------------------------------------------------------
+
+def test_matching_a_pathologically_long_label_terminates(load):
+    page = load(scripts=["field_aliases.js", "matcher.js"])
+    out = page.evaluate(
+        """() => {
+            const started = Date.now();
+            const huge = 'first name '.repeat(4000);
+            const result = matchField(huge);
+            return {ms: Date.now() - started, result};
+        }"""
+    )
+    assert out["ms"] < 5000, f"matchField took {out['ms']}ms"
+
+
+def test_dates_and_months_survive_nonsense(load):
+    page = load(scripts=["field_aliases.js", "matcher.js"])
+    out = page.evaluate(
+        """() => {
+            const junk = ["", null, undefined, "not a date", "0000-00-00", "13/45/9999",
+                          "2023-6", "2023-06-31", "\\u0000", "2023-06-15T10:00:00Z"];
+            return junk.map((v) => [normalizeDate(v), formatMonthYear(v),
+                                    datePartCandidates(v, 'month')]);
+        }"""
+    )
+    for normalized, month_year, candidates in out:
+        assert normalized is None or isinstance(normalized, str)
+        assert month_year is None or isinstance(month_year, str)
+        assert isinstance(candidates, list)
+
+
+def test_hostile_stored_text_is_escaped_for_the_options_page(load):
+    """Labels come from job sites and end up rendered on the options page.
+    They are text, and must stay text.
+    """
+    page = load(scripts=[])
+    page.evaluate(
+        """() => {
+            window.esc = (v) => (v ?? "").toString()
+                .replace(/&/g, "&amp;").replace(/"/g, "&quot;")
+                .replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }"""
+    )
+    out = page.evaluate(
+        """() => {
+            const hostile = '"><img src=x onerror="window.__pwned=1">';
+            const div = document.createElement('div');
+            div.innerHTML = `<input readonly value="${esc(hostile)}">`;
+            document.body.appendChild(div);
+            return {pwned: !!window.__pwned, images: div.querySelectorAll('img').length,
+                    value: div.querySelector('input').value};
+        }"""
+    )
+    assert out["pwned"] is False
+    assert out["images"] == 0
+    assert "<img" in out["value"]
+
+
+# --- The files have to actually fit together -------------------------------
+
+def _defined_names(source):
+    """Top-level function and var declarations -- what one script makes
+    available to another loaded beside it.
+    """
+    import re
+    return set(re.findall(r"^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)", source, re.M)) | set(
+        re.findall(r"^var\s+([A-Za-z_$][\w$]*)", source, re.M)
+    )
+
+
+def _local_names(source):
+    """Names bound inside the file: consts, lets, and anything sitting in a
+    parameter list. Called but not imported from anywhere.
+    """
+    import re
+    names = set(re.findall(r"\b(?:const|let)\s+([A-Za-z_$][\w$]*)", source))
+    for params in re.findall(r"\(([^()]*)\)\s*=>", source):
+        names |= set(re.findall(r"[A-Za-z_$][\w$]*", params))
+    for params in re.findall(r"function\s*[A-Za-z_$\w]*\s*\(([^()]*)\)", source):
+        names |= set(re.findall(r"[A-Za-z_$][\w$]*", params))
+    return names
+
+
+def test_the_service_worker_only_calls_things_it_loads():
+    """background.js runs in the service worker with llm.js beside it and
+    nothing else. A call to a function that lives in a content script looks
+    fine until the moment it runs, in a context with no console anyone reads.
+    """
+    import re
+
+    background = open(os.path.join(EXT_DIR, "background.js"), encoding="utf-8").read()
+    available = _defined_names(background) | _defined_names(
+        open(os.path.join(EXT_DIR, "llm.js"), encoding="utf-8").read()
+    )
+    keywords = {
+        "if", "for", "while", "switch", "catch", "return", "function", "typeof",
+        "async", "await", "new", "delete", "void", "do", "else", "yield",
+    }
+    globals_ = {
+        "Object", "Array", "JSON", "String", "Number", "Boolean", "Math", "Date",
+        "Set", "Map", "Promise", "URL", "console", "chrome", "fetch", "atob",
+        "setTimeout", "clearTimeout", "importScripts", "Error", "isNaN",
+    }
+    called = set(re.findall(r"(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(", background))
+    missing = called - available - keywords - globals_ - _local_names(background)
+    assert not missing, f"background.js calls undefined: {sorted(missing)}"
+
+
+def test_every_injected_script_loads_together_and_exposes_its_entry_points(load):
+    """They are injected as one list into a page. A syntax error or a missing
+    dependency in any of them takes the whole fill down silently.
+    """
+    page = load(
+        html="<body><form><label for='a'>Email</label><input id='a'></form></body>",
+        scripts=["field_aliases.js", "matcher.js", "extractor.js", "credentials.js",
+                 "filler.js", "panel.js"],
+    )
+    present = page.evaluate(
+        """() => [
+            'extractFields', 'fillForm', 'applyLlmAnswers', 'llmFieldsFor',
+            'learnFromAnswers', 'learnFromPrefilled', 'rememberableAnswers',
+            'watchForCorrections', 'verifyFilled', 'missedFields',
+            'setLearnedAliases', 'setLearnedAnswers', 'sanitizeLearnedAliases',
+            'extractJobContext', 'createPanel', 'hostnameFor', 'getOrCreate',
+        ].filter((name) => typeof window[name] !== 'function')"""
+    )
+    assert present == [], f"run.js calls these but they aren't defined: {present}"

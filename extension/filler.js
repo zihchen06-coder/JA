@@ -206,6 +206,29 @@ function _setIcimsValue(select, optionId, optionText) {
   return normalize(fake.textContent) === normalize(optionText);
 }
 
+// A profile or a stored answer can hold anything -- an import, an older
+// version of this code, a hand-edited JSON blob. Only something that reads
+// as a value may reach a field; an object stringifies to "[object Object]",
+// which is worse than leaving the box empty.
+function _scalar(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value;
+  return null;
+}
+
+// A read-only field is the site saying this is not typed into -- it is set
+// by the page's own control, or not at all. Writing anyway is at best
+// ignored and at worst reverted after the applicant stops looking, so say so
+// instead, but only when there was something to put in it.
+function _refuseReadonly(report, f, canonical, label, required) {
+  if (!f.readonly) return false;
+  _mark(f.ja_id, MARK_REVIEW);
+  addResult(report, label, canonical, "needs_review",
+    "This field is read-only -- set it with the page's own control.", required);
+  return true;
+}
+
 function makeReport(platform) {
   return { platform, results: [] };
 }
@@ -250,6 +273,7 @@ function _isSignatureContext(wideText) {
 
 function _fillText(report, f, canonical, value, required) {
   const label = f.label || "";
+  if (_refuseReadonly(report, f, canonical, label, required)) return;
   const el = _el(f.ja_id);
   if (!el) {
     addResult(report, label, canonical, "error", "Field disappeared from the page.", required);
@@ -473,11 +497,13 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
     value = _profileValue(profile, canonical);
   }
 
+  value = _scalar(value);
   if (value === null || value === undefined || value === "") {
     if (required) _mark(f.ja_id, MARK_BLANK);
     addResult(report, label, canonical, "skipped_no_data", "Profile has no value for this field.", required);
     return;
   }
+  if (_refuseReadonly(report, f, canonical, label, required)) return;
 
   const el = _el(f.ja_id);
   if (!el) {
@@ -620,6 +646,13 @@ async function _fillSelectLike(profile, report, f, el, canonical, value, label, 
 // not the raw text, so the same saved "Yes" works on a form that spells it
 // "Yes, I did".
 function _fillRemembered(report, f, label, value, required) {
+  value = _scalar(value);
+  if (value === null || value === "") {
+    addResult(report, label, "learned", "skipped_no_data", "", required);
+    return;
+  }
+  value = String(value);
+  if (_refuseReadonly(report, f, "learned", label, required)) return;
   const el = _el(f.ja_id);
   if (!el) {
     addResult(report, label, "learned", "error", "Field disappeared from the page.", required);
@@ -682,7 +715,7 @@ function _fillExperienceField(profile, report, f, expField, required) {
     return;
   }
 
-  const value = profile.experience[0][EXPERIENCE_ATTR[expField]] || "";
+  const value = _scalar(profile.experience[0][EXPERIENCE_ATTR[expField]]) || "";
 
   if (expField === "end_date" && ["present", "current", "ongoing"].includes(value.trim().toLowerCase())) {
     addResult(report, label, canonical, "filled",

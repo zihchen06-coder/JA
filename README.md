@@ -629,6 +629,13 @@ that hand-built field data can't reproduce. It needs
 `playwright install chromium` first, same as the CLI, and skips cleanly
 with a clear message if Chromium isn't available rather than failing.
 
+`test_hardening.py` is the adversarial half: an empty profile, a profile full
+of wrong types, pages with no labels or duplicate ids, six hundred fields,
+hostile label text, corrupt stored data, every shape of broken API reply, and
+a static check that the service worker only calls functions it actually
+loads. Every test in it was written to break something, and most of them
+did.
+
 If you hit a new real-site bug, the fix belongs in **both**
 `ja/extractor.py`/`ja/matcher.py`/`ja/filler.py` (the Python/Playwright
 side) **and** their `extension/*.js` ports — the two are kept in sync by

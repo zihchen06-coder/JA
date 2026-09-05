@@ -23,9 +23,14 @@ function extractFields() {
     return cleanText(clone.innerText || clone.textContent || "");
   }
 
-  function labelForById(id) {
+  // `for` resolves to the *first* element with that id, so on a page that
+  // repeats one -- invalid HTML, but common -- every later field inherits
+  // the first one's label, and with it the first one's value. Only trust the
+  // label when this element is the one the id actually reaches.
+  function labelForById(id, owner) {
     if (!id) return "";
     try {
+      if (owner && document.getElementById(id) !== owner) return "";
       const el = document.querySelector(`label[for="${CSS.escape(id)}"]`);
       return el ? stripControlsText(el) : "";
     } catch (e) {
@@ -76,7 +81,7 @@ function extractFields() {
   function labelFor(el) {
     return (
       cleanText(el.getAttribute("aria-label")) ||
-      labelForById(el.id) ||
+      labelForById(el.id, el) ||
       ariaLabelledBy(el) ||
       closestLabelWrap(el) ||
       cleanText(el.getAttribute("placeholder")) ||
@@ -317,6 +322,7 @@ function extractFields() {
       // i_required is iCIMS's own flag; its forms set nothing else, so
       // without it every required field there reads as optional and none of
       // the ones left blank get the red outline that asks to be looked at.
+      readonly: !!el.readOnly,
       required: !!(
         el.required ||
         el.getAttribute("aria-required") === "true" ||

@@ -162,7 +162,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           last: Date.now(),
         };
       }
-      await chrome.storage.local.set({ misses: store });
+      await chrome.storage.local.set({ misses: capMisses(store) });
     })();
     return;
   }
@@ -195,7 +195,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       const { learned_answers: existing } = await chrome.storage.local.get(["learned_answers"]);
       await chrome.storage.local.set({
-        learned_answers: { ...(existing || {}), ...message.answers },
+        learned_answers: capLearned({ ...(existing || {}), ...message.answers }),
       });
     })();
     return;
@@ -207,7 +207,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         "profile_suggestions",
       ]);
       await chrome.storage.local.set({
-        profile_suggestions: { ...(existing || {}), ...message.suggestions },
+        profile_suggestions: capLearned({ ...(existing || {}), ...message.suggestions }, 200),
       });
     })();
     return;
@@ -222,7 +222,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       const { learned_aliases: existing } = await chrome.storage.local.get(["learned_aliases"]);
       await chrome.storage.local.set({
-        learned_aliases: { ...(existing || {}), ...message.learned },
+        learned_aliases: capLearned({ ...(existing || {}), ...message.learned }, 1000),
       });
     })();
     return;

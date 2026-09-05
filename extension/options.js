@@ -228,8 +228,16 @@ function answerRow(keyword = "", answer = "") {
   return div;
 }
 
+// Labels and values here come from job sites and from a model. They are
+// text, and every one of them is interpolated into markup below, so escape
+// the lot -- & first, or the escapes themselves get mangled.
 function esc(v) {
-  return (v ?? "").toString().replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return (v ?? "")
+    .toString()
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function renderCredentials() {
@@ -579,8 +587,8 @@ function renderLearned() {
     row.className = "cred-row";
     row.style.marginBottom = "8px";
     row.innerHTML = `
-      <input readonly value="${label.replace(/"/g, "&quot;")}">
-      <input readonly value="${BOOL_LABELS[field] || field}">
+      <input readonly value="${esc(label)}">
+      <input readonly value="${esc(BOOL_LABELS[field] || field)}">
       <span></span>
       <button class="danger" type="button">Forget</button>`;
     row.querySelector("button").onclick = async () => {
@@ -604,8 +612,8 @@ function renderLearnedAnswers() {
     row.className = "cred-row";
     row.style.marginBottom = "8px";
     row.innerHTML = `
-      <input readonly value="${label.replace(/"/g, "&quot;")}">
-      <input data-answer="1" value="${String(value).replace(/"/g, "&quot;")}">
+      <input readonly value="${esc(label)}">
+      <input data-answer="1" value="${esc(value)}">
       <span></span>
       <button class="danger" type="button">Forget</button>`;
     // Editable in place: a remembered answer you would rather phrase

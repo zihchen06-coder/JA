@@ -226,6 +226,25 @@ async function _postMessages(apiKey, body, useFallbacks) {
   return { ok: response.ok, status: response.status, body: parsed, raw: text };
 }
 
+// Every form contributes labels, and someone applying in volume contributes
+// a lot of them. Extension storage is finite, so the stores that grow with
+// use are trimmed to the most recently added -- object key order is
+// insertion order, and a merge puts new entries last.
+function capLearned(map, limit = 2000) {
+  const entries = Object.entries(map || {});
+  if (entries.length <= limit) return { ...(map || {}) };
+  return Object.fromEntries(entries.slice(entries.length - limit));
+}
+
+// Misses carry their own count and timestamp, so the ones worth keeping are
+// the ones seen most often and most recently, not merely the newest.
+function capMisses(map, limit = 2000) {
+  const entries = Object.entries(map || {});
+  if (entries.length <= limit) return { ...(map || {}) };
+  entries.sort((a, b) => (b[1].count - a[1].count) || (b[1].last - a[1].last));
+  return Object.fromEntries(entries.slice(0, limit));
+}
+
 function _apiErrorMessage(result) {
   const err = result.body && result.body.error;
   if (err && err.message) return err.message;
@@ -300,6 +319,11 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeS
     result = await _postMessages(apiKey, body, false);
   }
   if (!result.ok) return { error: _apiErrorMessage(result) };
+  // A 200 whose body isn't JSON: a proxy's error page, a captive portal, a
+  // truncated stream. Everything below reads fields off it.
+  if (!result.body || typeof result.body !== "object") {
+    return { error: `Unreadable reply from the API: ${result.raw.slice(0, 200)}` };
+  }
 
   const message = result.body;
   if (message.stop_reason === "refusal") {
@@ -320,12 +344,17 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeS
   } catch (exc) {
     return { error: `Could not read the answer: ${exc}` };
   }
+  // Parsing without throwing is not the same as getting an object back:
+  // "null" and "3" are both valid JSON.
+  if (!parsed || typeof parsed !== "object") {
+    return { error: "The answer came back in a shape this can't read." };
+  }
 
   const answers = {};
   const skipped = {};
   const sources = {};
-  for (const entry of parsed.answers || []) {
-    if (!entry || !entry.ja_id) continue;
+  for (const entry of Array.isArray(parsed.answers) ? parsed.answers : []) {
+    if (!entry || typeof entry !== "object" || !entry.ja_id) continue;
     if (entry.value) {
       answers[entry.ja_id] = entry.value;
       if (entry.profile_field) sources[entry.ja_id] = entry.profile_field;
@@ -426,14 +455,24 @@ async function chatWithClaude({ apiKey, profile, report, fields, job, history, m
 
   let result = await _postMessages(apiKey, body, false);
   if (!result.ok) return { error: _apiErrorMessage(result) };
+  // A 200 whose body isn't JSON: a proxy's error page, a captive portal, a
+  // truncated stream. Everything below reads fields off it.
+  if (!result.body || typeof result.body !== "object") {
+    return { error: `Unreadable reply from the API: ${result.raw.slice(0, 200)}` };
+  }
 
   const textBlock = (result.body.content || []).find((b) => b.type === "text");
   if (!textBlock) return { error: "No reply came back." };
   try {
     const parsed = JSON.parse(textBlock.text);
+    if (!parsed || typeof parsed !== "object") {
+      return { error: "The reply came back in a shape this can't read." };
+    }
     const answers = {};
-    for (const entry of parsed.answers || []) {
-      if (entry && entry.ja_id && entry.value) answers[entry.ja_id] = entry.value;
+    for (const entry of Array.isArray(parsed.answers) ? parsed.answers : []) {
+      if (entry && typeof entry === "object" && entry.ja_id && entry.value) {
+        answers[entry.ja_id] = entry.value;
+      }
     }
     return { reply: parsed.reply || "", answers };
   } catch (exc) {
@@ -546,11 +585,20 @@ async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
     false
   );
   if (!result.ok) return { error: _apiErrorMessage(result) };
+  // A 200 whose body isn't JSON: a proxy's error page, a captive portal, a
+  // truncated stream. Everything below reads fields off it.
+  if (!result.body || typeof result.body !== "object") {
+    return { error: `Unreadable reply from the API: ${result.raw.slice(0, 200)}` };
+  }
 
   const block = (result.body.content || []).find((b) => b.type === "text");
   if (!block) return { error: "Nothing came back." };
   try {
-    return { parsed: JSON.parse(block.text) };
+    const parsed = JSON.parse(block.text);
+    if (!parsed || typeof parsed !== "object") {
+      return { error: "The result came back in a shape this can't read." };
+    }
+    return { parsed };
   } catch (exc) {
     return { error: `Could not read the result: ${exc}` };
   }
