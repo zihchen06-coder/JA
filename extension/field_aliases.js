@@ -185,7 +185,13 @@ var SENSITIVE_GROUPS = {
     [
       "gender", "sex", "race", "ethnicity", "veteran", "disability",
       "disabilities", "sexual orientation", "transgender", "self identif",
-      "pronoun", "hispanic", "latino", "military service", "protected",
+      "pronoun", "hispanic", "latino", "military service",
+      // "protected" on its own is not an EEO signal. 8 U.S.C. 1324b calls a
+      // work-authorised applicant a "protected individual", so every
+      // "Are you a U.S. Person?" question read as a self-ID question and
+      // was flagged forever. The EEO term is the two words together, and
+      // "veteran" above already catches it on its own.
+      "protected veteran",
       "date of birth", "national origin",
     ],
   ],

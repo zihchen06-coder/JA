@@ -1811,3 +1811,120 @@ def test_an_unset_profile_yes_no_does_not_untick_a_box_you_ticked(browser):
 
     assert out["stillTicked"] is True
     assert out["action"] == "skipped_no_data"
+
+
+# --- The RTX/Workday form the applicant had already filled in once ---------
+
+REMEMBERED_RTX = {
+    "did you previously work for rtx including its predecessors or any of its "
+    "businesses in any capacity": "No",
+    "are you a current u s federal government civilian or military active duty "
+    "or reserves employee": "No",
+    "are you a former u s federal government civilian or military active duty "
+    "or reserves employee": "No",
+}
+
+
+def test_a_remembered_answer_reaches_a_workday_listbox(browser):
+    """Workday's questions are <button aria-haspopup="listbox"> with no options
+    in the DOM until the button is clicked, so f.options is empty at extraction
+    time. The remembered-answer path read that empty list instead of opening
+    the widget, and reported every question answered on an earlier application
+    as "Remembered 'No', but no option matched it".
+    """
+    out = _evaluate_on(
+        browser, "workday_remembered.html",
+        """async ({profile, remembered}) => {
+            setLearnedAnswers(remembered);
+            const report = await fillForm(profile, null, {});
+            return {
+                answers: Object.fromEntries(
+                    Array.from(document.querySelectorAll('button[aria-haspopup="listbox"]'))
+                         .map((b) => [b.name, b.textContent.trim()])),
+                results: report.results
+                    .filter((r) => r.detail && r.detail.includes('no option matched'))
+                    .map((r) => r.label),
+                stillOpen: document.querySelectorAll('[role="listbox"]').length,
+            };
+        }""",
+        {"profile": PROFILE, "remembered": REMEMBERED_RTX},
+    )
+
+    assert out["answers"]["q1"] == "No"
+    assert out["answers"]["q2"] == "No"
+    assert out["answers"]["q3"] == "No"
+    assert out["results"] == [], out["results"]
+    # Nothing may be left hanging open over the rest of the form.
+    assert out["stillOpen"] == 0
+
+
+def test_a_work_authorisation_question_is_not_a_self_identification_question(browser):
+    """8 U.S.C. 1324b calls a work-authorised applicant a "protected
+    individual", so RTX's "Are you a U.S. Person?" -- a work-authorisation
+    question wrapped in the statutory definition -- matched the sensitive
+    gate's "protected" keyword and was flagged as self-identification on every
+    form, with no answer the applicant could save that would ever fill it.
+    """
+    out = _evaluate_on(
+        browser, "workday_remembered.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.label.includes('U.S. Person'));
+            return {found: !!r, detail: r ? r.detail : null};
+        }""",
+        PROFILE,
+    )
+
+    assert out["found"], "the U.S. Person question was not reported at all"
+    assert "Self-identification" not in (out["detail"] or ""), out["detail"]
+
+
+def test_real_self_identification_wording_is_still_caught(browser):
+    """The guard above narrows what counts as a self-ID question, so this is
+    the other half of it: the wording that genuinely is one still is. Asserts
+    the fixture offered these at all first -- an empty report would pass the
+    absence check above trivially.
+    """
+    blank = {**PROFILE}
+    for k in ("gender", "pronouns", "hispanic_latino", "race_ethnicity",
+              "veteran_status", "disability_status"):
+        blank[k] = ""
+
+    out = _evaluate_on(
+        browser, "eeo.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            return report.results
+                .filter((r) => r.detail && r.detail.includes('Self-identification'))
+                .map((r) => r.label);
+        }""",
+        blank,
+    )
+
+    assert len(out) >= 3, f"the EEO fixture flagged almost nothing: {out}"
+
+
+def test_the_phone_number_never_goes_into_a_phone_extension_box(browser):
+    """"phone" is a whole word inside "Phone Extension", so the alias matched
+    and the full number went into the extension box -- on three Workday
+    tenants, each of which then cleared it. An extension is not part of a
+    phone number and is not on the profile: there is nothing to put here.
+    """
+    out = _evaluate_on(
+        browser, "workday_remembered.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const ext = document.getElementById('phone-ext');
+            return {
+                extValue: ext.value,
+                phoneValue: document.getElementById('phone-number').value,
+                extResult: (report.results.find((r) => r.label.includes('Extension')) || {}).action,
+            };
+        }""",
+        PROFILE,
+    )
+
+    assert out["extValue"] == "", f"phone extension got {out['extValue']!r}"
+    # The real phone box still fills -- the guard is not a blanket phone block.
+    assert out["phoneValue"] != ""
+    assert out["extResult"] != "filled"

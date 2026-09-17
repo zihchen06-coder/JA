@@ -487,7 +487,7 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
       // here to stop.
       const remembered = learnedAnswerFor(label);
       if (remembered !== null) {
-        _fillRemembered(report, f, label, remembered, required);
+        await _fillRemembered(report, f, label, remembered, required);
         return;
       }
       if (required) _mark(f.ja_id, MARK_BLANK);
@@ -645,7 +645,7 @@ async function _fillSelectLike(profile, report, f, el, canonical, value, label, 
 // with this time. A dropdown or radio group gets the option that matches it,
 // not the raw text, so the same saved "Yes" works on a form that spells it
 // "Yes, I did".
-function _fillRemembered(report, f, label, value, required) {
+async function _fillRemembered(report, f, label, value, required) {
   value = _scalar(value);
   if (value === null || value === "") {
     addResult(report, label, "learned", "skipped_no_data", "", required);
@@ -660,16 +660,49 @@ function _fillRemembered(report, f, label, value, required) {
   }
 
   if (f.tag === "select") {
-    const optionValue = bestOption(value, f.options || []);
+    // A Workday question is a <button aria-haspopup="listbox"> whose choices
+    // do not exist in the DOM until it is clicked, so f.options is empty at
+    // extraction time. The profile-matched path opens the widget first
+    // (_fillSelectLike); this one did not, read the empty list, and reported
+    // every remembered answer as unmatched -- "Remembered 'No', but no option
+    // matched it" on the very questions an earlier application had taught it.
+    let options = f.options || [];
+    let opened = null;
+    if (f.widget === "listbox_button") {
+      opened = await _openListbox(el);
+      if (!opened) {
+        _mark(f.ja_id, MARK_REVIEW);
+        addResult(report, label, "learned", "needs_review",
+          "Could not open this dropdown automatically -- pick an answer here yourself.", required);
+        return;
+      }
+      options = opened.options;
+      f.options = options;
+    } else if (f.widget === "icims") {
+      _openIcims(el);
+      options = f.options || [];
+    }
+
+    const optionValue = bestOption(value, options);
     if (optionValue === null || optionValue === undefined) {
+      // Nothing may be left hanging open over the rest of the form.
+      if (opened) _closeListbox(el, opened);
       if (required) _mark(f.ja_id, MARK_BLANK);
       addResult(report, label, "learned", "skipped_no_match",
         `Remembered '${value}', but no option matched it.`, required);
       return;
     }
-    if (f.widget === "icims") {
-      _openIcims(el);
-      if (!_setIcimsValue(el, optionValue, _optionText(f.options || [], optionValue))) {
+
+    if (opened) {
+      if (!_clickListboxOption(el, opened, Number(optionValue))) {
+        _closeListbox(el, opened);
+        _mark(f.ja_id, MARK_REVIEW);
+        addResult(report, label, "learned", "needs_review",
+          "This dropdown didn't take the remembered answer -- set it here yourself.", required);
+        return;
+      }
+    } else if (f.widget === "icims") {
+      if (!_setIcimsValue(el, optionValue, _optionText(options, optionValue))) {
         _mark(f.ja_id, MARK_REVIEW);
         addResult(report, label, "learned", "needs_review",
           "This dropdown didn't take the remembered answer -- set it here yourself.", required);
@@ -679,7 +712,7 @@ function _fillRemembered(report, f, label, value, required) {
       _setSelectValue(el, optionValue);
     }
     _mark(f.ja_id, MARK_FILLED);
-    addResult(report, label, "learned", "filled", _optionText(f.options || [], optionValue), required);
+    addResult(report, label, "learned", "filled", _optionText(options, optionValue), required);
     return;
   }
 

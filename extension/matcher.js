@@ -119,6 +119,14 @@ function _containsWhole(alias, norm) {
 // filling them with the same value fills in the wrong thing twice.
 var _ESCAPE_HATCH_RE = /^other\b/;
 
+// A phone extension is a different thing from a phone number, and "phone" is
+// a whole word inside "phone extension", so the alias matched and the full
+// number went into the extension box -- on Workday, which then cleared it,
+// across three tenants. There is nothing to put in one of these: an extension
+// is not on the profile and is not part of a phone number. Never match it.
+// Checked before LEARNED_ALIASES below, so a learned mapping cannot reopen it.
+var _NEVER_FILL_RE = /(^|\W)(ext|extn|extension)(\W|$)/;
+
 function isEscapeHatchLabel(label) {
   return _ESCAPE_HATCH_RE.test(normalize(label));
 }
@@ -156,6 +164,7 @@ function matchField(label, minRatio = 0.72) {
   const norm = normalize(label);
   if (!norm) return null;
   if (_ESCAPE_HATCH_RE.test(norm)) return null;
+  if (_NEVER_FILL_RE.test(norm)) return null;
 
   // An exact match on the whole label, learned from a fill that actually
   // worked -- more specific evidence than any substring alias below.
