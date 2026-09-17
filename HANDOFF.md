@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 164 of 165 tests pass; the one failure is a
+`claude/happy-volta-yjo3xc`. 175 of 176 tests pass; the one failure is a
 missing fixture, not a code bug — see Known limitations.
 
 If you are Claude and someone has just pointed you here: read this file, then

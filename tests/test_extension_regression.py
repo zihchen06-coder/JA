@@ -2279,3 +2279,96 @@ def test_an_unset_race_is_still_left_for_the_applicant(browser):
     assert out["action"] == "needs_review"
     assert "Self-identification" in out["detail"]
     assert out["button"] == "Select One"
+
+
+# --- A campus screening questionnaire --------------------------------------
+
+def test_a_question_asking_how_many_is_not_answered_from_a_noun_it_mentions(browser):
+    """"How many credit hours towards your degree...?" put the applicant's
+    "B.S." in a box asking for a number, because the label contains the word
+    "degree". Refusing the alias alone moved the wrong answer along rather
+    than stopping it: it fuzzy-matched gpa next, and then the machine-name
+    fallback matched gpa again off the field id, which carries the
+    questionnaire's name ("Campus - GPA Not Required - Clearance - 2025").
+    """
+    out = _evaluate_on(
+        browser, "campus_questionnaire.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.label.includes('credit hours'));
+            return {action: r.action, canonical: r.canonical, detail: r.detail,
+                    box: document.querySelector('textarea').value};
+        }""",
+        {**PROFILE, "gpa": "3.7"},
+    )
+
+    assert out["action"] != "filled", out
+    assert out["canonical"] is None, out
+    assert out["box"] == "", f"something was typed into it: {out['box']!r}"
+
+
+def test_how_many_years_of_experience_still_matches(browser):
+    """The other half: the guard only refuses a single-word alias and the
+    fuzzy pass, so a question naming the whole field still resolves.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'campus_questionnaire.html')}")
+        for js in ["field_aliases.js", "matcher.js"]:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """() => ({
+                years: matchField("How many years of experience do you have?"),
+                credits: matchField("How many credit hours towards your degree do you anticipate having completed by the time you would start this position?"),
+                gpa: matchField("What is your cumulative GPA?"),
+            })"""
+        )
+    finally:
+        page.close()
+
+    assert out["years"] == "years_experience"
+    assert out["credits"] is None
+    assert out["gpa"] == "gpa"
+
+
+@pytest.mark.parametrize("gpa,bracket", [
+    ("3.7", "3.5 or higher"),
+    ("4.0", "3.5 or higher"),
+    ("3.5", "3.5 or higher"),
+    ("3.49", "3.0 - 3.49"),
+    ("2.6", "2.5 - 2.99"),
+    ("2.0", "2.0 - 2.49"),
+    ("1.8", "Below 2.0"),
+    ("3.7/4.0", "3.5 or higher"),
+])
+def test_a_gpa_lands_in_the_bracket_that_contains_it(browser, gpa, bracket):
+    """A GPA dropdown offers ranges and a GPA is a number: no amount of string
+    matching gets 3.7 into "3.5 or higher".
+    """
+    out = _evaluate_on(
+        browser, "campus_questionnaire.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'gpa');
+            return {action: r.action, detail: r.detail};
+        }""",
+        {**PROFILE, "gpa": gpa},
+    )
+
+    assert out["action"] == "filled", out
+    assert out["detail"] == bracket, out
+
+
+def test_a_gpa_that_fits_no_bracket_is_left_alone(browser):
+    """Nothing is forced into the nearest bracket."""
+    out = _evaluate_on(
+        browser, "campus_questionnaire.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'gpa');
+            return {action: r.action, detail: r.detail};
+        }""",
+        {**PROFILE, "gpa": "first class honours"},
+    )
+
+    assert out["action"] != "filled", out

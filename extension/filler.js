@@ -462,9 +462,14 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
         "Left for Claude to write for this job.", required);
       return;
     }
-    // The machine-name fallback must not undo an escape-hatch label:
-    // "Other School" is named OtherSchool, which reads as a plain school.
-    if (canonical === null && !isEscapeHatchLabel(label)) {
+    // The machine-name fallback must not undo a label that was refused on
+    // purpose. "Other School" is named OtherSchool, which reads as a plain
+    // school. And a machine name is often the whole questionnaire's, not the
+    // field's: the credit-hours box on a campus form is
+    // "secondaryJsqData.Campus - GPA Not Required - Clearance - 2025.b",
+    // which matched *gpa* off the questionnaire's title and put a grade point
+    // average in a box asking for a number of hours.
+    if (canonical === null && !isEscapeHatchLabel(label) && !isQuantityLabel(label)) {
       canonical = matchFieldByName(f.name || "", f.id || "");
     }
     if (canonical === null) {
@@ -578,6 +583,14 @@ function _chooseOption(profile, canonical, value, options) {
   // this wording: it reads the negation as the answer and picks Hispanic or
   // Latino for someone who said Asian. Before the yes/no check below, so a
   // Hispanic/Latino question offering Yes and No still finds its answer.
+  if (canonical === "gpa") {
+    const real = options.filter((o) => o.value !== "" && o.value !== null);
+    const at = bestGpaBracket(value, real.map((o) => o.text || ""));
+    if (at !== null) return { value: real[at].value, detail: real[at].text || "" };
+    // Not a bracketed list after all -- a plain "3.7" option, say. Fall
+    // through and let the ordinary matching have it.
+  }
+
   if (SELF_ID_FIELDS.has(canonical)) {
     const real = options.filter((o) => o.value !== "" && o.value !== null);
     const at = bestSelfIdChoice(String(value), real.map((o) => o.text || ""));

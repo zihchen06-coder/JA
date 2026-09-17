@@ -164,6 +164,46 @@ function bestSelfIdChoice(value, choices, minRatio = 0.75) {
   return score >= minRatio ? best : null;
 }
 
+// A GPA dropdown offers brackets -- "3.0 - 3.49", "3.5 or higher",
+// "Below 2.0" -- and a GPA is a number. No amount of string matching gets
+// 3.7 into "3.5 or higher", so the numbers are read out and compared as
+// numbers. Returns the index of the bracket the GPA falls in, or null.
+//
+// Only ever called for the gpa field: "3.5 or higher" is a range here and
+// could be a shoe size somewhere else.
+function _rangeOf(text) {
+  const nums = (String(text).match(/\d+(?:\.\d+)?/g) || []).map(Number);
+  if (!nums.length) return null;
+  const t = String(text).toLowerCase();
+  if (/\b(below|under|less than|lower than)\b/.test(t)) return { lo: -Infinity, hi: nums[0], open: true };
+  if (/\b(or higher|or above|or greater|or more|and above|and higher|at least)\b|\+\s*$/.test(t)) {
+    return { lo: nums[0], hi: Infinity, open: true };
+  }
+  if (nums.length >= 2) return { lo: Math.min(nums[0], nums[1]), hi: Math.max(nums[0], nums[1]), open: false };
+  return null;
+}
+
+function bestGpaBracket(value, choices) {
+  const found = String(value).match(/\d+(?:\.\d+)?/);
+  if (!found) return null;
+  const gpa = Number(found[0]);
+  if (!isFinite(gpa)) return null;
+
+  const ranges = choices.map(_rangeOf);
+  if (!ranges.some((r) => r)) return null;
+
+  // A bounded bracket wins over an open-ended one, so a 4.0 against
+  // "3.5 - 4.0" and "3.5 or higher" lands in the bracket that names it.
+  let openMatch = null;
+  for (let i = 0; i < ranges.length; i++) {
+    const r = ranges[i];
+    if (!r || gpa < r.lo || gpa > r.hi) continue;
+    if (!r.open) return i;
+    if (openMatch === null) openMatch = i;
+  }
+  return openMatch;
+}
+
 function isResumeLabel(label) {
   const norm = normalize(label);
   return RESUME_KEYWORDS.some((kw) => norm.includes(kw)) && !isCoverLetterLabel(label);
@@ -183,6 +223,10 @@ function _containsWhole(alias, norm) {
 // field they name -- they're meant to hold what the main one couldn't, so
 // filling them with the same value fills in the wrong thing twice.
 var _ESCAPE_HATCH_RE = /^other\b/;
+
+// A label that opens by asking for a count. Anchored: "how many" has to be
+// what the question starts with, not something it mentions in passing.
+var _QUANTITY_RE = /^(how many|how much|number of)\b/;
 
 // Labels that must never resolve to a profile field, because nothing on the
 // profile belongs in them and the alias table matches them anyway. Checked
@@ -206,6 +250,10 @@ var _NEVER_FILL_RE = new RegExp(
 
 function isEscapeHatchLabel(label) {
   return _ESCAPE_HATCH_RE.test(normalize(label));
+}
+
+function isQuantityLabel(label) {
+  return _QUANTITY_RE.test(normalize(label));
 }
 
 // Label phrasings worked out on a previous application and remembered, so
@@ -263,7 +311,25 @@ function matchField(label, minRatio = 0.72) {
       }
     }
   }
+  // A question asking how many of something wants a number, whatever nouns
+  // it mentions on the way. "How many credit hours towards your degree do you
+  // anticipate having completed by the time you would start this position?"
+  // contains the word "degree", matched the degree field, and put the
+  // applicant's "B.S." in a box asking for a count. Only single-word alias
+  // hits are refused, so "how many years of experience do you have" still
+  // matches years_experience on the whole phrase.
+  const wantsCount = _QUANTITY_RE.test(norm);
+  if (bestField && wantsCount && bestKey[0] === 1) {
+    bestField = null;
+  }
   if (bestField) return bestField;
+
+  // And nothing reaches such a question through the fuzzy pass either.
+  // Blocking only the alias path just moved the wrong answer along: with
+  // "degree" refused, the credit-hours question fuzzy-matched *gpa* instead
+  // and a grade point average went into the box. A question asking how many
+  // of something is answered from a saved count or not at all.
+  if (wantsCount) return null;
 
   // A label needs enough of its own text before a near-miss is trustworthy
   // -- see ja/matcher.py's match_field for why the 8-char floor exists.
