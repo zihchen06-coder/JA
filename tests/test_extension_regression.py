@@ -1928,3 +1928,76 @@ def test_the_phone_number_never_goes_into_a_phone_extension_box(browser):
     # The real phone box still fills -- the guard is not a blanket phone block.
     assert out["phoneValue"] != ""
     assert out["extResult"] != "filled"
+
+
+# --- "Learn this form" -----------------------------------------------------
+
+def test_learning_a_form_remembers_what_was_typed_into_it(browser):
+    """The form that comes round again: fill it in by hand once, press Learn,
+    and the next one like it fills itself. watch-and-learn does not cover
+    this -- it only watches what was left blank, and never sees an answer
+    entered before the panel opened or one the applicant corrected.
+    """
+    out = _evaluate_on(
+        browser, "unknowns.html",
+        """async (profile) => {
+            // The applicant fills it in themselves.
+            const typed = {q2: 'Octopus', q4: 'Available from June.'};
+            for (const [id, v] of Object.entries(typed)) {
+                const el = document.getElementById(id);
+                el.value = v;
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+            }
+            const learned = learnFromPage(profile);
+            // Nothing may be written to the page by learning it.
+            return {
+                answers: learned.answers,
+                stillTyped: document.getElementById('q2').value,
+                firstNameUntouched: document.getElementById('fn').value,
+            };
+        }""",
+        PROFILE,
+    )
+
+    assert out["answers"].get("what is your spirit animal") == "Octopus"
+    assert out["answers"].get("anything else we should know") == "Available from June."
+    assert out["stillTyped"] == "Octopus"
+    assert out["firstNameUntouched"] == ""
+
+
+def test_learning_a_form_never_puts_a_self_id_answer_in_the_label_store(browser):
+    """The safety property, on the new path. A label-keyed answer is consulted
+    before every other check, so one holding a disability or veteran
+    declaration would pour it into any field carrying that label. These go to
+    the profile-suggestion store instead, which is not written automatically.
+    """
+    blank = {**PROFILE}
+    for k in ("gender", "pronouns", "hispanic_latino", "race_ethnicity",
+              "veteran_status", "disability_status"):
+        blank[k] = ""
+
+    out = _evaluate_on(
+        browser, "eeo.html",
+        """async (profile) => {
+            const gender = document.getElementById('g');
+            gender.selectedIndex = 1;
+            gender.dispatchEvent(new Event('change', {bubbles: true}));
+            const vet = document.getElementById('v1');
+            vet.checked = true;
+            vet.dispatchEvent(new Event('change', {bubbles: true}));
+            const learned = learnFromPage(profile);
+            return {answers: learned.answers, suggestions: learned.suggestions,
+                    genderText: gender.options[gender.selectedIndex].text};
+        }""",
+        blank,
+    )
+
+    # Asserted non-empty first: an empty result would pass the absence check
+    # below for the wrong reason.
+    assert out["suggestions"], f"learned nothing at all: {out}"
+    assert out["suggestions"].get("gender") == out["genderText"]
+    assert out["suggestions"].get("veteran_status") == "I am not a protected veteran"
+
+    joined = " ".join(out["answers"].keys()).lower()
+    assert "gender" not in joined, out["answers"]
+    assert "veteran" not in joined, out["answers"]

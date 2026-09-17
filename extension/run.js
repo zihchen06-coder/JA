@@ -247,6 +247,38 @@ function _showBanner(html, tone) {
     });
   }
 
+  // "Learn this form", for the form that comes round again: fill it in by
+  // hand once, press this, and the next one like it fills itself. Separate
+  // from the fill on purpose -- watch-and-learn only notices what is typed
+  // into what was left blank, so an answer the applicant corrected, or one
+  // they entered before the panel ever opened, was never picked up.
+  //
+  // It sets nothing on the page. Sensitive and consent answers go to the
+  // profile-suggestion store, never to the label-keyed one -- learnFromPage
+  // goes through learnFromPrefilled for exactly that gate.
+  panel?.onLearn(async () => {
+    const { answers, suggestions } = learnFromPage(profile);
+    const learned = Object.keys(answers).length;
+    const gaps = Object.keys(suggestions).length;
+
+    if (learned) {
+      await chrome.runtime.sendMessage({ type: "ja-learned-answers", answers });
+    }
+    if (gaps) {
+      await chrome.runtime.sendMessage({ type: "ja-profile-suggestions", suggestions });
+    }
+
+    if (!learned && !gaps) {
+      return "Nothing to remember here -- fill the form in first, then press this.";
+    }
+    const parts = [];
+    if (learned) parts.push(`Remembered ${learned} answer(s). The next form like this one fills itself.`);
+    // Never written on their behalf: these are identity, and a page can hold
+    // a default nobody chose or somebody else's value.
+    if (gaps) parts.push(`${gaps} more to confirm under Options -> Learned.`);
+    return parts.join(" ");
+  });
+
   // Whatever arrived already filled -- typed before clicking, put there by
   // another autofill extension, or remembered by the site -- is an answer
   // too, and was being stepped over in silence.

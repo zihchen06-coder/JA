@@ -31,6 +31,11 @@ var _PANEL_CSS = `
     font-size: 15px; padding: 2px 6px; border-radius: 6px;
   }
   header button:hover { background: rgba(148,163,184,.15); color: #e2e8f0; }
+  header button.learn {
+    margin-left: auto; font-size: 11px; padding: 3px 8px; border-radius: 6px;
+    border: 1px solid rgba(148,163,184,.35); color: #cbd5e1;
+  }
+  header button.learn:disabled { opacity: .6; cursor: default; }
   .body { flex: 1 1 auto; overflow-y: auto; padding: 10px 12px; }
   .wrap.min .body, .wrap.min .chat { display: none; }
   .line { display: flex; gap: 7px; align-items: baseline; margin-bottom: 4px; color: #cbd5e1; }
@@ -106,6 +111,7 @@ function createPanel() {
   wrap.innerHTML = `
     <header>
       <strong>Autofill</strong>
+      <button class="learn" title="Remember every answer on this page, so the next form like it fills itself">Learn this form</button>
       <button class="min" title="Collapse">&minus;</button>
       <button class="close" title="Close">&times;</button>
     </header>
@@ -124,6 +130,7 @@ function createPanel() {
   const msgs = wrap.querySelector(".msgs");
   const input = wrap.querySelector("textarea");
   const send = wrap.querySelector(".send");
+  const learn = wrap.querySelector(".learn");
 
   wrap.querySelector(".close").onclick = () => host.remove();
   wrap.querySelector(".min").onclick = () => wrap.classList.toggle("min");
@@ -201,6 +208,24 @@ function createPanel() {
       msgs.appendChild(div);
       scroll(msgs);
       return div;
+    },
+
+    // handler() -> Promise<string>, shown in the log. The button is disabled
+    // while it runs: reading the page twice over would store the same answers
+    // twice and read half-typed ones on the second pass.
+    onLearn(handler) {
+      learn.onclick = async () => {
+        learn.disabled = true;
+        const was = learn.textContent;
+        learn.textContent = "Learning\u2026";
+        try {
+          api.log((await handler()) || "Nothing on this page to remember.", "ok");
+        } catch (exc) {
+          api.log(String(exc), "err");
+        }
+        learn.textContent = was;
+        learn.disabled = false;
+      };
     },
 
     // handler(text) -> Promise<string>, whatever it resolves to is shown.

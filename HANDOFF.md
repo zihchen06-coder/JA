@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 141 of 142 tests pass; the one failure is a
+`claude/happy-volta-yjo3xc`. 147 of 148 tests pass; the one failure is a
 missing fixture, not a code bug — see Known limitations.
 
 If you are Claude and someone has just pointed you here: read this file, then
@@ -112,6 +112,13 @@ tests/
 Sensitive and consent answers go **only** to `profile_suggestions`, never to
 `learned_answers`. That routing is the safety property — see rule 5.
 
+**Learn this form** (the panel button, `learnFromPage` in `filler.js`) reads
+a form the applicant filled in by hand and stores every answer in it,
+setting nothing on the page. It builds a report in which nothing was filled
+and hands it to `learnFromPrefilled`, so it inherits that same routing
+rather than carrying a second copy of the gate. Wired in `run.js` via
+`panel.onLearn`.
+
 Capped in `background.js` (`capLearned`, `capMisses` in `llm.js`).
 
 ### Settings (all in `chrome.storage.local.settings`)
@@ -168,11 +175,22 @@ are DOM-behaviour bugs a mock can't reproduce.
   environment. Request shape, headers, retry and error handling are tested
   against a stubbed `fetch`; the actual round trip is unverified.
 - **SPA re-renders drop watch-and-learn listeners** when elements are replaced.
-- **Corrections are not learned.** `watchForCorrections` skips every field
-  the fill touched (`filler.js:1581`, and `:1619` for radio groups), so a
-  wrong fill the applicant fixes by hand teaches nothing and comes back
-  wrong on the next form. Learning was scoped to blanks only. This is the
-  highest-value open item — it is the one signal that compounds.
+- **Corrections are still not learned automatically.** `watchForCorrections`
+  skips every field the fill touched (`filler.js`, the `filled.has(...)`
+  guards), so a wrong fill the applicant fixes by hand teaches nothing on
+  its own. **Learn this form** is the manual answer to that and covers the
+  case in practice; doing it without the button press is still open.
+- **Context bleed mislabels questions.** `wideContext()` keeps up to 4000
+  characters of surrounding text and the sensitive gate reads it, so an
+  iCIMS search box was flagged as a self-identification question 7 times
+  and a terms-and-conditions tick box as criminal-history 3 times.
+  Narrowing the gate to label + group label was tried and reverted: an LDG
+  legend had swallowed "Veteran status" from a neighbouring block, which
+  made an SMS consent box demographic. `ldg_form.html`'s baseline caught
+  it. Needs those two forms as fixtures before trying again.
+- **Blue Origin clears every core field after it is filled** — 13
+  occurrences across first/last name, address, city, postal code, phone.
+  `verifyFilled` re-applies once and still loses.
 - **`test_the_docx_reader_gets_the_text_out` fails on a fresh clone.**
   `.gitignore` line 12 ignores `*.docx`, so `tests/fixtures/sample_resume.docx`
   was never committed. The reader works; the fixture is absent.

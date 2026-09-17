@@ -1857,6 +1857,33 @@ function _checkedRadioLabel(report, f) {
   return "";
 }
 
+// "Learn this form": the applicant has filled a form in themselves, and
+// presses it so the next identical one fills itself. Nothing is set on the
+// page -- this only reads what is in it.
+//
+// It builds a report in which nothing was filled, because that is what the
+// page is: every answer in it is the applicant's own. learnFromPrefilled
+// then applies unchanged, which is the point -- it already routes a
+// self-identification, criminal-history or consent answer to the profile
+// field for that question and never to the label-keyed answer store, and
+// that routing is the safety property (HANDOFF rule 5). A second copy of
+// this loop would be a second copy of that gate to keep in step.
+function learnFromPage(profile) {
+  const fields = extractFields();
+  const report = {
+    fields,
+    results: fields.map((f) => ({
+      ja_id: f.ja_id,
+      label: f.label || f.group_label || "",
+      canonical: null,
+      action: "skipped_no_match",
+      detail: "",
+      required: !!f.required,
+    })),
+  };
+  return learnFromPrefilled(report, profile);
+}
+
 function learnFromPrefilled(report, profile) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
   const answers = {};

@@ -429,7 +429,8 @@ def test_every_injected_script_loads_together_and_exposes_its_entry_points(load)
     present = page.evaluate(
         """() => [
             'extractFields', 'fillForm', 'applyLlmAnswers', 'llmFieldsFor',
-            'learnFromAnswers', 'learnFromPrefilled', 'rememberableAnswers',
+            'learnFromAnswers', 'learnFromPrefilled', 'learnFromPage',
+            'rememberableAnswers',
             'watchForCorrections', 'verifyFilled', 'missedFields',
             'setLearnedAliases', 'setLearnedAnswers', 'sanitizeLearnedAliases',
             'extractJobContext', 'createPanel', 'hostnameFor', 'getOrCreate',
