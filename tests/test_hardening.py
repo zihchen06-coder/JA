@@ -561,3 +561,99 @@ def test_the_options_page_renders_hostile_stored_text_as_text(browser):
     assert out["pwned"] is False
     assert out["images"] == 0
     assert "<img" in out["shown"]
+
+
+# --- Carrying an existing install onto new defaults ------------------------
+
+def _service_worker(browser, seed=None):
+    """background.js in a real page, with the handful of extension APIs it
+    touches at load stubbed under it. Storage is a live object, so a test can
+    read back what the migration actually wrote.
+    """
+    page = browser.new_page()
+    page.add_init_script(
+        """(() => {
+            const store = JSON.parse(SEED_JSON);
+            window.__store = store;
+            const noop = {addListener: () => {}};
+            window.importScripts = () => {};
+            window.chrome = {
+                storage: {
+                    local: {
+                        get: async (keys) => Object.fromEntries(
+                            (Array.isArray(keys) ? keys : [keys])
+                                .filter((k) => k in store).map((k) => [k, store[k]])),
+                        set: async (obj) => Object.assign(store, obj),
+                    },
+                },
+                tabs: {onUpdated: noop},
+                runtime: {onInstalled: noop, onMessage: noop},
+                action: {setBadgeText: () => {}, setTitle: () => {}},
+            };
+        })();""".replace("SEED_JSON", repr(json.dumps(seed if seed is not None else {})))
+    )
+    # goto, not set_content: an init script runs on a new document, and
+    # set_content writes into the one that already existed.
+    page.goto("about:blank")
+    page.add_script_tag(path=os.path.join(EXT_DIR, "background.js"))
+    page.wait_for_function("() => typeof applyDefaultsOnce === 'function'")
+    return page
+
+
+def _run_defaults(browser, seed):
+    page = _service_worker(browser, seed=seed)
+    try:
+        page.evaluate("() => applyDefaultsOnce()")
+        return page.evaluate("() => window.__store")
+    finally:
+        page.close()
+
+
+def test_an_install_that_saved_these_off_is_carried_onto_the_new_defaults(browser):
+    """Saving on the options page writes every setting explicitly, so an
+    install that has ever been saved holds `false` for these and a changed
+    default never reaches it. That was the whole reason the fill looked
+    narrower here than in the tools it was being compared against.
+    """
+    store = _run_defaults(browser, {
+        "settings": {
+            "auto_fill_known_sites": False,
+            "route_saved_answers": False,
+            "use_llm": False,
+            "show_panel": False,
+        },
+        "llm_api_key": "sk-ant-whatever",
+    })
+
+    assert store["settings"]["auto_fill_known_sites"] is True
+    assert store["settings"]["route_saved_answers"] is True
+    assert store["settings"]["use_llm"] is True
+    # Only the three being changed. Anything else they set stays as they set it.
+    assert store["settings"]["show_panel"] is False
+
+
+def test_the_ai_pass_follows_the_key_rather_than_the_default(browser):
+    """Turning it on without a key buys nothing and puts "No API key saved."
+    on every page they open.
+    """
+    store = _run_defaults(browser, {"settings": {"use_llm": False}})
+
+    assert store["settings"]["use_llm"] is False
+    assert store["settings"]["auto_fill_known_sites"] is True
+
+
+def test_a_setting_turned_off_after_the_migration_stays_off(browser):
+    """Otherwise every update quietly overrides a deliberate choice."""
+    page = _service_worker(browser, seed={"settings": {"auto_fill_known_sites": False}})
+    try:
+        page.evaluate("() => applyDefaultsOnce()")
+        after_first = page.evaluate("() => window.__store.settings.auto_fill_known_sites")
+        # They turn it off again, then the extension updates.
+        page.evaluate("() => { window.__store.settings.auto_fill_known_sites = false; }")
+        page.evaluate("() => applyDefaultsOnce()")
+        after_second = page.evaluate("() => window.__store.settings.auto_fill_known_sites")
+    finally:
+        page.close()
+
+    assert after_first is True
+    assert after_second is False

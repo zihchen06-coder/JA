@@ -107,7 +107,7 @@ It is built in a shadow root, so job sites' own CSS can't reshape it and it
 can't disturb the form. Only the top frame draws one. Turn it off under
 Options → AI assist and you get the small corner summary instead.
 
-### Routing your saved answers (optional, off by default)
+### Routing your saved answers (on, and only acts with AI assist on)
 
 Self-ID, criminal-history and consent questions are answered from what you
 set on the Self-ID and Eligibility tabs — but only when the matcher

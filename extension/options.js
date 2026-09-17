@@ -303,10 +303,12 @@ function loadIntoForm() {
   document.getElementById("s-auto-accounts").checked = !!(state.settings && state.settings.auto_create_accounts);
   document.getElementById("s-use-llm").checked = !!(state.settings && state.settings.use_llm);
   document.getElementById("s-tailor-cover").checked = !!(state.settings && state.settings.tailor_cover_letter);
-  document.getElementById("s-route-saved").checked = !!(state.settings && state.settings.route_saved_answers);
+  document.getElementById("s-route-saved").checked =
+    !state.settings || state.settings.route_saved_answers !== false;
   document.getElementById("s-watch-learn").checked = !state.settings || state.settings.watch_and_learn !== false;
   document.getElementById("s-show-panel").checked = !state.settings || state.settings.show_panel !== false;
-  document.getElementById("s-auto-fill").checked = !!(state.settings && state.settings.auto_fill_known_sites);
+  document.getElementById("s-auto-fill").checked =
+    !state.settings || state.settings.auto_fill_known_sites !== false;
   renderLearned();
   renderLearnedAnswers();
   renderSuggestions();

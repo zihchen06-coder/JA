@@ -94,7 +94,7 @@ function _showBanner(html, tone) {
   const useLlm = !!(settings && settings.use_llm);
   const report = await fillForm(profile, creds, {
     tailorCoverLetter: useLlm && !!(settings && settings.tailor_cover_letter),
-    answerSensitive: useLlm && !!(settings && settings.route_saved_answers),
+    answerSensitive: useLlm && (!settings || settings.route_saved_answers !== false),
   });
 
   // Second pass: hand whatever the rule-based matcher couldn't place to
@@ -121,7 +121,7 @@ function _showBanner(html, tone) {
             fields: pending,
             pageUrl: location.href,
             job,
-            routeSavedAnswers: !!(settings && settings.route_saved_answers),
+            routeSavedAnswers: !settings || settings.route_saved_answers !== false,
           },
         });
         if (reply && reply.error) {

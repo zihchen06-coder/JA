@@ -2,7 +2,8 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/job-application-automation-tp32l1`. 139 tests passing.
+`claude/happy-volta-yjo3xc`. 141 of 142 tests pass; the one failure is a
+missing fixture, not a code bug — see Known limitations.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -117,13 +118,20 @@ Capped in `background.js` (`capLearned`, `capMisses` in `llm.js`).
 
 | Key | Default | What it does |
 |---|---|---|
-| `use_llm` | off | The AI pass at all. Needs `llm_api_key`. |
-| `route_saved_answers` | off | Let Claude route saved answers to sensitive/consent questions |
+| `use_llm` | off, on once a key is saved | The AI pass at all. Needs `llm_api_key`. |
+| `route_saved_answers` | **on** | Let Claude route saved answers to sensitive/consent questions (no effect unless `use_llm`) |
 | `tailor_cover_letter` | off | Draft a letter per job instead of the saved one |
-| `auto_fill_known_sites` | off | Fill on page load across 16 ATS domains |
+| `auto_fill_known_sites` | **on** | Fill on page load across 16 ATS domains |
 | `watch_and_learn` | **on** | Notice what the user types into blanks |
 | `show_panel` | **on** | The side panel |
 | `auto_create_accounts` | off | Generate a password per site |
+
+A changed default only reaches an install that has never opened Options:
+saving there writes every key explicitly. `applyDefaultsOnce()` in
+`background.js` carries an existing install over on update, once, recorded
+under `migrations` so a setting turned off afterwards stays off. Add a new
+key there rather than only changing a default, or the change reaches nobody
+who already has this installed.
 
 ---
 
@@ -160,6 +168,14 @@ are DOM-behaviour bugs a mock can't reproduce.
   environment. Request shape, headers, retry and error handling are tested
   against a stubbed `fetch`; the actual round trip is unverified.
 - **SPA re-renders drop watch-and-learn listeners** when elements are replaced.
+- **Corrections are not learned.** `watchForCorrections` skips every field
+  the fill touched (`filler.js:1581`, and `:1619` for radio groups), so a
+  wrong fill the applicant fixes by hand teaches nothing and comes back
+  wrong on the next form. Learning was scoped to blanks only. This is the
+  highest-value open item — it is the one signal that compounds.
+- **`test_the_docx_reader_gets_the_text_out` fails on a fresh clone.**
+  `.gitignore` line 12 ignores `*.docx`, so `tests/fixtures/sample_resume.docx`
+  was never committed. The reader works; the fixture is absent.
 - **The panel only draws in the top frame**, so a form inside an iframe fills
   correctly but reports through the badge only.
 - `ja/*.py` lacks all widget and AI support. Intentional.

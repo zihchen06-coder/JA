@@ -35,6 +35,38 @@ function isKnownAts(url) {
   }
 }
 
+// Changing a default only reaches an install that has never opened Options:
+// saving there writes every setting explicitly, so an existing install holds
+// `false` for these and would go on behaving the old way after an update.
+// This carries such an install over, once. It records that it ran, so a
+// setting deliberately turned off afterwards is never turned back on.
+const DEFAULTS_MIGRATION = "defaults_on_v1";
+
+async function applyDefaultsOnce() {
+  const stored = await chrome.storage.local.get(["settings", "llm_api_key", "migrations"]);
+  const migrations = stored.migrations || {};
+  if (migrations[DEFAULTS_MIGRATION]) return;
+
+  const settings = { ...(stored.settings || {}) };
+  settings.auto_fill_known_sites = true;
+  settings.route_saved_answers = true;
+  // The AI pass spends money on a paid API, so it follows the key rather than
+  // a default: on once one is saved, left alone when there isn't one, where
+  // turning it on would only put "No API key saved." on every page.
+  if (stored.llm_api_key) settings.use_llm = true;
+
+  migrations[DEFAULTS_MIGRATION] = Date.now();
+  await chrome.storage.local.set({ settings, migrations });
+}
+
+// Fires on first install and on every update, which is when a pulled change
+// to these defaults needs to reach a browser that already has the extension.
+chrome.runtime.onInstalled.addListener(() => {
+  applyDefaultsOnce().catch((exc) =>
+    console.error("Job Application Autofill: could not apply defaults.", exc)
+  );
+});
+
 async function runFill(tabId) {
   resetTally(tabId);
   chrome.action.setBadgeText({ tabId, text: "" });
@@ -53,7 +85,7 @@ const lastFilled = new Map();
 chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
   if (info.status !== "complete" || !tab.url || !isKnownAts(tab.url)) return;
   const { settings } = await chrome.storage.local.get(["settings"]);
-  if (!settings || !settings.auto_fill_known_sites) return;
+  if (settings && settings.auto_fill_known_sites === false) return;
   // Workday rewrites the URL as you move through the flow without a reload,
   // and a reload of the same page shouldn't fill twice over.
   if (lastFilled.get(tabId) === tab.url) return;
