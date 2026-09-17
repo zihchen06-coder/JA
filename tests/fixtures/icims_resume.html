@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>iCIMS resume upload</title>
+<!--
+  The resume upload block from a real iCIMS application, markup verbatim
+  (the LinkedIn widget's remote <script> dropped so the fixture stays
+  offline).
+
+  The input that takes the file is display:none with no id, no name and no
+  label; what the applicant sees is the "Upload Resume" button beside it,
+  which iCIMS's own script wires to the input. The extractor skipped the
+  input for being invisible, so the resume was never attached on any iCIMS
+  application -- it did not appear in the report at all, not even as
+  something left undone.
+
+  Attaching works once it is seen: _attachFile builds a FileList through
+  DataTransfer and fires the same change event the button's own handler
+  listens for.
+-->
+<div class="options-block resume-group"><div class="cloud-options" role="group" aria-labelledby="cloud-options-sr-text"><div class="resume_info"><span id="cloud-options-sr-text" class="sr-only">Upload options</span><div><div class="resume-header"><p>Make completing your job application easier by uploading your resume or CV. </p><br><p>Upload either DOC, DOCX, PDF, HTML or TXT file types (5MB max)</p></div></div></div><div class="drives"><div class="cloud-options-group" atm-id="cloud-options-group"><ul atm-id="cloudoptions-list"><li atm-id="dropbox-option" title="Dropbox"><i tabindex="0" role="button" aria-label="Dropbox" class="dropbox cloud-icon" atm-id="dropbox-button"></i></li><li atm-id="skydrive-option" title="Onedrive"><i tabindex="0" role="button" aria-label="Microsoft online" class="skydrive cloud-icon" atm-id="skydrive-button"></i></li></ul></div><div class="apply-or-line"><span class="apply-or-box">or</span></div><div class="resume-upload-wrapper"><input type="file" autocomplete="off" tabindex="-1" style="display: none;"><button type="button" class="upload-resume-btn btn primary-button" atm-id="resume-button" tabindex="0">Upload Resume</button></div></div></div></div>

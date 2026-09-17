@@ -238,6 +238,30 @@ function extractFields() {
     return true;
   }
 
+  // iCIMS hides its resume <input type="file"> (display:none, no id, no
+  // name, no label) and puts an "Upload Resume" button next to it, which its
+  // own script wires to the input. The input is the thing a file can be
+  // attached to -- _attachFile fires the same change event the button's
+  // handler would -- but it was being skipped for being invisible, so the
+  // resume never went on at all. What the applicant reads is the button, so
+  // that is where the label comes from.
+  //
+  // Deliberately narrow: a hidden file input with no label of its own, and a
+  // visible control beside it that says what it is for.
+  var UPLOAD_PROXY_RE = /\b(upload|attach|choose|select|browse|add)\b/i;
+
+  function uploadProxy(el) {
+    if (el.id || el.getAttribute("name") || el.getAttribute("aria-label")) return null;
+    const scope = el.closest("div, span, li, fieldset, form");
+    if (!scope) return null;
+    const controls = Array.from(
+      scope.querySelectorAll('button, [role="button"], label, a')
+    );
+    return (
+      controls.find((c) => isVisible(c) && UPLOAD_PROXY_RE.test(c.textContent || "")) || null
+    );
+  }
+
   function listboxButtonRequired(el) {
     if (el.getAttribute("aria-required") === "true") return true;
     if (/\brequired\b/i.test(el.getAttribute("aria-label") || "")) return true;
@@ -308,7 +332,8 @@ function extractFields() {
     const widget = tag === "select" ? icimsWidget(el) : null;
     // The real <select> behind an iCIMS widget is display:none by design;
     // what the applicant sees and clicks is the widget's own anchor.
-    if (!isVisible(el) && !(widget && isVisible(widget.anchor))) continue;
+    const proxy = type === "file" ? uploadProxy(el) : null;
+    if (!isVisible(el) && !(widget && isVisible(widget.anchor)) && !proxy) continue;
 
     const jaId = "ja-" + idx++;
     el.setAttribute("data-ja-id", jaId);
@@ -361,7 +386,10 @@ function extractFields() {
       // explicit value="" attribute, so requiring both catches that case.
       item.has_value = el.selectedIndex > 0 && el.value !== "";
     } else if (type === "file") {
-      item.label = labelFor(el);
+      // A hidden input surfaced through its upload button reads as that
+      // button: "Upload Resume" is what the applicant sees, and what
+      // isResumeLabel has to be given to know which document goes on.
+      item.label = labelFor(el) || (proxy ? cleanText(proxy.textContent) : "");
       item.has_value = !!(el.files && el.files.length);
     } else {
       item.label = labelFor(el);

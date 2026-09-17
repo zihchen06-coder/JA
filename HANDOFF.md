@@ -2,8 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 175 of 176 tests pass; the one failure is a
-missing fixture, not a code bug — see Known limitations.
+`claude/happy-volta-yjo3xc`. 179 tests passing, the whole suite green.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -220,9 +219,13 @@ are DOM-behaviour bugs a mock can't reproduce.
   applicant hasn't got (middle name, address line 2). Blank is the answer
   for those, so they are neither typed into nor counted as gaps. Add to it
   rather than teaching the matcher to miss them.
-- **`test_the_docx_reader_gets_the_text_out` fails on a fresh clone.**
-  `.gitignore` line 12 ignores `*.docx`, so `tests/fixtures/sample_resume.docx`
-  was never committed. The reader works; the fixture is absent.
+- **A hidden control needs something visible standing in for it** before the
+  extractor will surface it — an iCIMS `<select>` behind its widget anchor,
+  a `display:none` file input behind an "Upload Resume" button
+  (`uploadProxy` in `extractor.js`). The file-input rule is deliberately
+  narrow: no id, no name, no aria-label, and a visible control beside it
+  whose text says what it is for. A labelled hidden file input is still
+  skipped; widen it from a real form, not from a guess.
 - **The panel only draws in the top frame**, so a form inside an iframe fills
   correctly but reports through the badge only.
 - `ja/*.py` lacks all widget and AI support. Intentional.

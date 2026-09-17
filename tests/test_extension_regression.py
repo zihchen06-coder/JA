@@ -2372,3 +2372,84 @@ def test_a_gpa_that_fits_no_bracket_is_left_alone(browser):
     )
 
     assert out["action"] != "filled", out
+
+
+# --- The resume upload iCIMS hides -----------------------------------------
+
+FAKE_RESUME = {
+    "name": "resume.pdf",
+    "dataUrl": "data:application/pdf;base64,JVBERi0xLjQgZmFrZQ==",
+}
+
+
+def test_a_resume_reaches_the_input_icims_hides(browser):
+    """iCIMS's file input is display:none with no id, no name and no label;
+    the "Upload Resume" button beside it is what the applicant sees and what
+    its own script wires up. Skipped for being invisible, the resume was
+    never attached on any iCIMS application -- and never reported as missing
+    either, since the field was not in the report at all.
+    """
+    out = _evaluate_on(
+        browser, "icims_resume.html",
+        """async (profile) => {
+            const fields = extractFields();
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'resume_file');
+            const input = document.querySelector('input[type=file]');
+            return {
+                labels: fields.map((f) => f.label),
+                action: r ? r.action : null,
+                attached: input.files.length ? input.files[0].name : null,
+            };
+        }""",
+        {**PROFILE, "resume_file": FAKE_RESUME},
+    )
+
+    assert out["labels"] == ["Upload Resume"], out
+    assert out["action"] == "filled", out
+    assert out["attached"] == "resume.pdf", out
+
+
+def test_a_missing_resume_is_reported_rather_than_silently_skipped(browser):
+    """Being invisible to the extractor is worse than being unanswerable:
+    with no resume saved the applicant should at least be told.
+    """
+    out = _evaluate_on(
+        browser, "icims_resume.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'resume_file');
+            return {action: r ? r.action : null, detail: r ? r.detail : null};
+        }""",
+        {**PROFILE, "resume_file": None},
+    )
+
+    assert out["action"] == "needs_review"
+    assert "No resume saved" in out["detail"]
+
+
+def test_a_hidden_file_input_with_nothing_pointing_at_it_stays_hidden(browser):
+    """The exception is for an input a visible control plainly stands in for.
+    A hidden file input on its own is hidden for a reason and is left alone.
+    """
+    page = browser.new_page()
+    try:
+        page.set_content(
+            "<body><form>"
+            "<input type='file' style='display:none'>"
+            "<div><input type='file' style='display:none'>"
+            "<button type='button'>Continue</button></div>"
+            "<label for='v'>Email</label><input id='v'>"
+            "</form></body>"
+        )
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            "() => extractFields().map((f) => ({type: f.type, label: f.label}))"
+        )
+    finally:
+        page.close()
+
+    assert [f for f in out if f["type"] == "file"] == [], out
+    # Asserted non-empty, or the check above passes for the wrong reason.
+    assert any(f["label"] == "Email" for f in out), out
