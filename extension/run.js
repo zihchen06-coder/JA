@@ -91,160 +91,187 @@ function _showBanner(html, tone) {
   const panel = wantPanel ? createPanel() : null;
   panel?.log(`Found ${fieldsData.length} field(s) on this page.`);
 
-  const useLlm = !!(settings && settings.use_llm);
-  const report = await fillForm(profile, creds, {
-    tailorCoverLetter: useLlm && !!(settings && settings.tailor_cover_letter),
-    answerSensitive: useLlm && (!settings || settings.route_saved_answers !== false),
-  });
+  // The fill itself, as something that can be asked for rather than
+  // something that just happens. Another autofill extension on the same
+  // page -- Simplify, most often -- listens to the same change events this
+  // fires, and the two overwrite each other: on Blue Origin every core
+  // field came back cleared. Filling on arrival makes that fight happen
+  // whether or not it was wanted.
+  let report = null;
 
-  // Second pass: hand whatever the rule-based matcher couldn't place to
-  // Claude, if the user has turned that on and saved a key. Failures here
-  // are never fatal -- the deterministic fill already happened and stands.
-  let claudeFilled = 0;
-  let claudeError = null;
-  let learnedCount = 0;
-  const job = extractJobContext();
-  panel?.log(
-    `Filled ${report.results.filter((r) => r.action === "filled").length} from your profile.`,
-    "ok"
-  );
-  if (job.title) panel?.log(`Job: ${job.title}`, "muted");
-  if (useLlm) {
-    const pending = llmFieldsFor(report);
-    if (pending.length) {
-      panel?.log(`Asking Claude about ${pending.length} field(s) it didn't recognise\u2026`, "info");
-      try {
+  async function doFill() {
+    const useLlm = !!(settings && settings.use_llm);
+    report = await fillForm(profile, creds, {
+      tailorCoverLetter: useLlm && !!(settings && settings.tailor_cover_letter),
+      answerSensitive: useLlm && (!settings || settings.route_saved_answers !== false),
+    });
+
+    // Second pass: hand whatever the rule-based matcher couldn't place to
+    // Claude, if the user has turned that on and saved a key. Failures here
+    // are never fatal -- the deterministic fill already happened and stands.
+    let claudeFilled = 0;
+    let claudeError = null;
+    let learnedCount = 0;
+    const job = extractJobContext();
+    panel?.log(
+      `Filled ${report.results.filter((r) => r.action === "filled").length} from your profile.`,
+      "ok"
+    );
+    if (job.title) panel?.log(`Job: ${job.title}`, "muted");
+    if (useLlm) {
+      const pending = llmFieldsFor(report);
+      if (pending.length) {
+        panel?.log(`Asking Claude about ${pending.length} field(s) it didn't recognise\u2026`, "info");
+        try {
+          const reply = await chrome.runtime.sendMessage({
+            type: "ja-llm-resolve",
+            request: {
+              profile,
+              fields: pending,
+              pageUrl: location.href,
+              job,
+              routeSavedAnswers: !settings || settings.route_saved_answers !== false,
+            },
+          });
+          if (reply && reply.error) {
+            claudeError = reply.error;
+            panel?.log(reply.error, "err");
+          } else if (reply) {
+            panel?.showThinking(reply.thinking);
+            claudeFilled = await applyLlmAnswers(report, reply.answers, reply.skipped, profile);
+            const learned = learnFromAnswers(report, reply.answers, profile, reply.sources);
+            learnedCount = Object.keys(learned).length;
+            if (learnedCount) {
+              chrome.runtime.sendMessage({ type: "ja-learned", learned });
+            }
+            // Short answers to questions the profile has no field for -- the
+            // ones that would otherwise cost an API call on every form.
+            const remembered = rememberableAnswers(report, reply.answers, reply.sources);
+            if (Object.keys(remembered).length) {
+              chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: remembered });
+            }
+            panel?.log(`Claude filled ${claudeFilled}.`, claudeFilled ? "ok" : "muted");
+            const declined = Object.keys(reply.skipped || {}).length;
+            if (declined) panel?.log(`${declined} left for you to answer.`, "warn");
+          }
+        } catch (exc) {
+          claudeError = String(exc);
+          panel?.log(claudeError, "err");
+        }
+      }
+    }
+
+    // Setting a value and it staying set are different claims -- check.
+    const lost = await verifyFilled(report);
+    if (lost.length) {
+      panel?.log(`${lost.length} field(s) were cleared by the page after filling.`, "warn");
+    }
+
+    const filled = report.results.filter((r) => r.action === "filled").length;
+    const review = report.results.filter((r) => r.action === "needs_review").length;
+    const blankRequired = report.results.filter(
+      (r) => r.required && (r.action === "skipped_no_match" || r.action === "skipped_no_data")
+    ).length;
+
+    const parts = [`<strong>Autofill done</strong>`];
+    parts.push(`<div style="margin-top:6px; color:#4ade80;">&#9679; ${filled} field(s) filled</div>`);
+    if (claudeFilled) {
+      parts.push(
+        `<div style="color:#7dd3fc;">&#9679; ${claudeFilled} of those answered by Claude &mdash; read them before you submit</div>`
+      );
+    }
+    if (learnedCount) {
+      parts.push(
+        `<div style="color:#7dd3fc;">&#9679; ${learnedCount} label(s) remembered &mdash; free next time</div>`
+      );
+    }
+    if (claudeError) {
+      parts.push(`<div style="color:#fbbf24;">&#9679; Claude step failed: ${claudeError}</div>`);
+    }
+    if (review) parts.push(`<div style="color:#fbbf24;">&#9679; ${review} flagged for you to answer</div>`);
+    if (blankRequired) parts.push(`<div style="color:#f87171;">&#9679; ${blankRequired} required field(s) left blank</div>`);
+    parts.push(`<div style="margin-top:8px; color:#94a3b8; font-size:11px;">Nothing was submitted. Review the highlighted fields, then submit yourself.</div>`);
+    // The panel says all this and stays put; the banner is the fallback for
+    // when it has been turned off.
+    if (!panel) _showBanner(parts.join(""), blankRequired ? "warn" : "ok");
+
+    chrome.runtime.sendMessage({ type: "ja-fill-done", filled, review, blank: blankRequired, setupNeeded: false });
+
+    // What this form asked that couldn't be answered, kept across applications
+    // so the recurring gaps become visible instead of being re-discovered one
+    // form at a time.
+    const misses = missedFields(report);
+    if (misses.length) {
+      chrome.runtime.sendMessage({ type: "ja-misses", host: location.hostname, misses });
+    }
+
+    // One row per application, from the top frame only -- an embedded form
+    // would otherwise log itself alongside the page hosting it.
+    if (window.top === window) {
+      chrome.runtime.sendMessage({
+        type: "ja-applied",
+        entry: {
+          url: location.href.slice(0, 400),
+          host: location.hostname,
+          title: job.title || document.title.slice(0, 200),
+          company: job.company || "",
+          filled, review, blank: blankRequired,
+          at: Date.now(),
+        },
+      });
+    }
+
+    if (panel) {
+      if (learnedCount) panel.log(`${learnedCount} label(s) remembered -- free next time.`, "info");
+      if (blankRequired) panel.log(`${blankRequired} required field(s) still blank.`, "err");
+      panel.log("Nothing submitted. Check the highlighted fields, then submit yourself.", "muted");
+      panel.showResults(report);
+
+      // Asking about the form is asking about this exact fill, so the chat
+      // gets the same report the panel is showing -- including why each field
+      // was left the way it was.
+      const history = [];
+      panel.onAsk(async (text) => {
         const reply = await chrome.runtime.sendMessage({
-          type: "ja-llm-resolve",
+          type: "ja-chat",
           request: {
             profile,
-            fields: pending,
-            pageUrl: location.href,
             job,
-            routeSavedAnswers: !settings || settings.route_saved_answers !== false,
+            message: text,
+            history,
+            report: {
+              results: report.results.map((r) => ({
+                ja_id: r.ja_id, label: r.label, action: r.action, detail: r.detail,
+              })),
+            },
+            fields: llmFieldsFor(report),
           },
         });
-        if (reply && reply.error) {
-          claudeError = reply.error;
-          panel?.log(reply.error, "err");
-        } else if (reply) {
-          panel?.showThinking(reply.thinking);
-          claudeFilled = await applyLlmAnswers(report, reply.answers, reply.skipped, profile);
-          const learned = learnFromAnswers(report, reply.answers, profile, reply.sources);
-          learnedCount = Object.keys(learned).length;
-          if (learnedCount) {
-            chrome.runtime.sendMessage({ type: "ja-learned", learned });
-          }
-          // Short answers to questions the profile has no field for -- the
-          // ones that would otherwise cost an API call on every form.
-          const remembered = rememberableAnswers(report, reply.answers, reply.sources);
-          if (Object.keys(remembered).length) {
-            chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: remembered });
-          }
-          panel?.log(`Claude filled ${claudeFilled}.`, claudeFilled ? "ok" : "muted");
-          const declined = Object.keys(reply.skipped || {}).length;
-          if (declined) panel?.log(`${declined} left for you to answer.`, "warn");
-        }
-      } catch (exc) {
-        claudeError = String(exc);
-        panel?.log(claudeError, "err");
-      }
+        if (!reply) return "No reply came back.";
+        if (reply.error) return reply.error;
+        const changed = await applyLlmAnswers(report, reply.answers, {}, profile);
+        history.push({ role: "user", content: text });
+        history.push({ role: "assistant", content: reply.reply });
+        return changed ? `${reply.reply}\n\n(${changed} field(s) changed.)` : reply.reply;
+      });
     }
   }
 
-  // Setting a value and it staying set are different claims -- check.
-  const lost = await verifyFilled(report);
-  if (lost.length) {
-    panel?.log(`${lost.length} field(s) were cleared by the page after filling.`, "warn");
-  }
+  panel?.onFill(doFill);
 
-  const filled = report.results.filter((r) => r.action === "filled").length;
-  const review = report.results.filter((r) => r.action === "needs_review").length;
-  const blankRequired = report.results.filter(
-    (r) => r.required && (r.action === "skipped_no_match" || r.action === "skipped_no_data")
-  ).length;
-
-  const parts = [`<strong>Autofill done</strong>`];
-  parts.push(`<div style="margin-top:6px; color:#4ade80;">&#9679; ${filled} field(s) filled</div>`);
-  if (claudeFilled) {
-    parts.push(
-      `<div style="color:#7dd3fc;">&#9679; ${claudeFilled} of those answered by Claude &mdash; read them before you submit</div>`
+  // Manual mode is the answer to that fight: the panel opens, nothing is
+  // touched, and it is a choice -- Autofill when this is the tool doing the
+  // filling, Learn this form when the other one already did it and its
+  // answers are worth keeping. With no panel there is no button to press,
+  // so the fill still runs rather than the click doing nothing at all.
+  if (panel && settings && settings.manual_fill) {
+    panel.log(
+      "Ready, and nothing touched yet. Press Autofill to fill this in, or " +
+        "Learn this form to keep what is already here.",
+      "info"
     );
-  }
-  if (learnedCount) {
-    parts.push(
-      `<div style="color:#7dd3fc;">&#9679; ${learnedCount} label(s) remembered &mdash; free next time</div>`
-    );
-  }
-  if (claudeError) {
-    parts.push(`<div style="color:#fbbf24;">&#9679; Claude step failed: ${claudeError}</div>`);
-  }
-  if (review) parts.push(`<div style="color:#fbbf24;">&#9679; ${review} flagged for you to answer</div>`);
-  if (blankRequired) parts.push(`<div style="color:#f87171;">&#9679; ${blankRequired} required field(s) left blank</div>`);
-  parts.push(`<div style="margin-top:8px; color:#94a3b8; font-size:11px;">Nothing was submitted. Review the highlighted fields, then submit yourself.</div>`);
-  // The panel says all this and stays put; the banner is the fallback for
-  // when it has been turned off.
-  if (!panel) _showBanner(parts.join(""), blankRequired ? "warn" : "ok");
-
-  chrome.runtime.sendMessage({ type: "ja-fill-done", filled, review, blank: blankRequired, setupNeeded: false });
-
-  // What this form asked that couldn't be answered, kept across applications
-  // so the recurring gaps become visible instead of being re-discovered one
-  // form at a time.
-  const misses = missedFields(report);
-  if (misses.length) {
-    chrome.runtime.sendMessage({ type: "ja-misses", host: location.hostname, misses });
-  }
-
-  // One row per application, from the top frame only -- an embedded form
-  // would otherwise log itself alongside the page hosting it.
-  if (window.top === window) {
-    chrome.runtime.sendMessage({
-      type: "ja-applied",
-      entry: {
-        url: location.href.slice(0, 400),
-        host: location.hostname,
-        title: job.title || document.title.slice(0, 200),
-        company: job.company || "",
-        filled, review, blank: blankRequired,
-        at: Date.now(),
-      },
-    });
-  }
-
-  if (panel) {
-    if (learnedCount) panel.log(`${learnedCount} label(s) remembered -- free next time.`, "info");
-    if (blankRequired) panel.log(`${blankRequired} required field(s) still blank.`, "err");
-    panel.log("Nothing submitted. Check the highlighted fields, then submit yourself.", "muted");
-    panel.showResults(report);
-
-    // Asking about the form is asking about this exact fill, so the chat
-    // gets the same report the panel is showing -- including why each field
-    // was left the way it was.
-    const history = [];
-    panel.onAsk(async (text) => {
-      const reply = await chrome.runtime.sendMessage({
-        type: "ja-chat",
-        request: {
-          profile,
-          job,
-          message: text,
-          history,
-          report: {
-            results: report.results.map((r) => ({
-              ja_id: r.ja_id, label: r.label, action: r.action, detail: r.detail,
-            })),
-          },
-          fields: llmFieldsFor(report),
-        },
-      });
-      if (!reply) return "No reply came back.";
-      if (reply.error) return reply.error;
-      const changed = await applyLlmAnswers(report, reply.answers, {}, profile);
-      history.push({ role: "user", content: text });
-      history.push({ role: "assistant", content: reply.reply });
-      return changed ? `${reply.reply}\n\n(${changed} field(s) changed.)` : reply.reply;
-    });
+  } else {
+    await doFill();
   }
 
   // "Learn this form", for the form that comes round again: fill it in by
@@ -282,7 +309,7 @@ function _showBanner(html, tone) {
   // Whatever arrived already filled -- typed before clicking, put there by
   // another autofill extension, or remembered by the site -- is an answer
   // too, and was being stepped over in silence.
-  if (!settings || settings.watch_and_learn !== false) {
+  if (report && (!settings || settings.watch_and_learn !== false)) {
     const prefilled = learnFromPrefilled(report, profile);
     const learnedNow = Object.keys(prefilled.answers).length;
     if (learnedNow) {
@@ -306,7 +333,7 @@ function _showBanner(html, tone) {
   // noticed and kept, so the same question fills itself next time. No API
   // call, no prompting, and their own answer rather than anyone's reading
   // of it.
-  if (!settings || settings.watch_and_learn !== false) {
+  if (report && (!settings || settings.watch_and_learn !== false)) {
     watchForCorrections(
       report,
       (learned) => chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: learned }),

@@ -31,11 +31,12 @@ var _PANEL_CSS = `
     font-size: 15px; padding: 2px 6px; border-radius: 6px;
   }
   header button:hover { background: rgba(148,163,184,.15); color: #e2e8f0; }
-  header button.learn {
-    margin-left: auto; font-size: 11px; padding: 3px 8px; border-radius: 6px;
+  header button.fill, header button.learn {
+    font-size: 11px; padding: 3px 8px; border-radius: 6px;
     border: 1px solid rgba(148,163,184,.35); color: #cbd5e1;
   }
-  header button.learn:disabled { opacity: .6; cursor: default; }
+  header button.fill { margin-left: auto; }
+  header button.fill:disabled, header button.learn:disabled { opacity: .6; cursor: default; }
   .body { flex: 1 1 auto; overflow-y: auto; padding: 10px 12px; }
   .wrap.min .body, .wrap.min .chat { display: none; }
   .line { display: flex; gap: 7px; align-items: baseline; margin-bottom: 4px; color: #cbd5e1; }
@@ -111,6 +112,7 @@ function createPanel() {
   wrap.innerHTML = `
     <header>
       <strong>Autofill</strong>
+      <button class="fill" title="Fill this form in from your profile">Autofill</button>
       <button class="learn" title="Remember every answer on this page, so the next form like it fills itself">Learn this form</button>
       <button class="min" title="Collapse">&minus;</button>
       <button class="close" title="Close">&times;</button>
@@ -131,6 +133,7 @@ function createPanel() {
   const input = wrap.querySelector("textarea");
   const send = wrap.querySelector(".send");
   const learn = wrap.querySelector(".learn");
+  const fill = wrap.querySelector(".fill");
 
   wrap.querySelector(".close").onclick = () => host.remove();
   wrap.querySelector(".min").onclick = () => wrap.classList.toggle("min");
@@ -208,6 +211,23 @@ function createPanel() {
       msgs.appendChild(div);
       scroll(msgs);
       return div;
+    },
+
+    // handler() -> Promise<void>. Disabled while it runs, so a second press
+    // cannot start a fill over the top of the one still going.
+    onFill(handler) {
+      fill.onclick = async () => {
+        fill.disabled = true;
+        const was = fill.textContent;
+        fill.textContent = "Filling\u2026";
+        try {
+          await handler();
+        } catch (exc) {
+          api.log(String(exc), "err");
+        }
+        fill.textContent = was;
+        fill.disabled = false;
+      };
     },
 
     // handler() -> Promise<string>, shown in the log. The button is disabled

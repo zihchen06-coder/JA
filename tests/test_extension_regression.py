@@ -2048,3 +2048,71 @@ def test_a_field_that_is_merely_empty_is_still_a_gap(browser):
     )
 
     assert out > 0
+
+
+def test_the_panel_offers_autofill_and_learn_as_separate_presses(browser):
+    """Running alongside another autofill extension, filling on arrival is the
+    wrong default: both tools listen for the same change events and overwrite
+    each other. The panel has to be able to open having touched nothing, and
+    let the applicant say which of the two things they want on this form.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'screening.html')}")
+        for js in SCRIPT_FILES + ["panel.js"]:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async () => {
+                const panel = createPanel();
+                const pressed = [];
+                panel.onFill(async () => { pressed.push('fill'); });
+                panel.onLearn(async () => { pressed.push('learn'); return 'done'; });
+
+                const root = document.getElementById('ja-autofill-panel').shadowRoot;
+                const fill = root.querySelector('button.fill');
+                const learn = root.querySelector('button.learn');
+                const labels = {fillText: fill.textContent, learnText: learn.textContent};
+
+                // Each handler is async and relabels its button while it runs,
+                // so let both settle before reading anything back.
+                fill.click();
+                await new Promise((r) => setTimeout(r, 50));
+                learn.click();
+                await new Promise((r) => setTimeout(r, 50));
+
+                return {
+                    ...labels,
+                    hasBoth: !!fill && !!learn,
+                    // Back to their resting labels, not stuck on "Filling...".
+                    fillAfter: fill.textContent,
+                    learnAfter: learn.textContent,
+                    enabledAfter: !fill.disabled && !learn.disabled,
+                    pressed,
+                };
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["hasBoth"]
+    assert out["fillText"] == "Autofill"
+    assert out["learnText"] == "Learn this form"
+    assert out["pressed"] == ["fill", "learn"]
+    assert out["fillAfter"] == "Autofill"
+    assert out["learnAfter"] == "Learn this form"
+    assert out["enabledAfter"]
+
+
+def test_the_fill_is_a_function_the_button_can_call_rather_than_the_script_body():
+    """run.js is not loaded by the browser fixtures, so this is a static check
+    of the shape the buttons depend on: the fill has to be callable more than
+    once, and the things that read its report have to tolerate it not having
+    run at all.
+    """
+    src = open(os.path.join(EXT_DIR, "run.js"), encoding="utf-8").read()
+
+    assert "async function doFill()" in src
+    assert "panel?.onFill(doFill)" in src
+    # Manual mode leaves report null; both readers have to be guarded.
+    assert src.count("if (report && (!settings || settings.watch_and_learn !== false))") == 2
+    assert "let report = null;" in src

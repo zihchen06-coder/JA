@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 149 of 150 tests pass; the one failure is a
+`claude/happy-volta-yjo3xc`. 151 of 152 tests pass; the one failure is a
 missing fixture, not a code bug — see Known limitations.
 
 If you are Claude and someone has just pointed you here: read this file, then
@@ -75,6 +75,22 @@ tests/
 
 ## How it works
 
+### Two buttons, not one automatic fill
+
+`run.js` wraps the whole fill in `doFill()`, wired to the panel's **Autofill**
+button and called on arrival unless `manual_fill` is set. The reason is
+coexistence: another autofill extension on the same page (Simplify) listens
+for the same change events this fires, both write to the same fields, and
+they overwrite each other — on Blue Origin every core field came back
+cleared. Manual mode makes it a choice per form: **Autofill** when this is
+the tool doing the filling, **Learn this form** when the other one already
+did it and its answers are worth keeping.
+
+`report` is null until a fill has run, so everything downstream of it
+(watch-and-learn, the chat) is guarded. run.js is not loaded by the browser
+fixtures — `test_the_fill_is_a_function_the_button_can_call...` checks that
+shape statically, so it is the thing to update if this is restructured.
+
 ### The fill, in order (`run.js`)
 
 1. Bail immediately if the frame has no form controls (runs in every frame).
@@ -128,7 +144,8 @@ Capped in `background.js` (`capLearned`, `capMisses` in `llm.js`).
 | `use_llm` | off, on once a key is saved | The AI pass at all. Needs `llm_api_key`. |
 | `route_saved_answers` | **on** | Let Claude route saved answers to sensitive/consent questions (no effect unless `use_llm`) |
 | `tailor_cover_letter` | off | Draft a letter per job instead of the saved one |
-| `auto_fill_known_sites` | **on** | Fill on page load across 16 ATS domains |
+| `auto_fill_known_sites` | **on** | Inject and fill on page load across 16 ATS domains |
+| `manual_fill` | off | Open the panel but fill nothing until **Autofill** is pressed |
 | `watch_and_learn` | **on** | Notice what the user types into blanks |
 | `show_panel` | **on** | The side panel |
 | `auto_create_accounts` | off | Generate a password per site |

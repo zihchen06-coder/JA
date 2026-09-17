@@ -283,10 +283,22 @@
           <div class="desc">Fill each page of an application as it loads on Workday, iCIMS,
             Greenhouse, Lever, Ashby, SmartRecruiters and the rest, without clicking the icon.
             A six-page Workday application becomes one pass instead of six clicks. Still never
-            submits anything. Note this spends API credit without a click, so it is off until you
-            turn it on.</div>
+            submits anything. Note this spends API credit without a click.</div>
         </div>
-        <label class="row"><input type="checkbox" id="s-auto-fill" style="width:18px;height:18px;"></label>
+        <label class="row"><input type="checkbox" id="s-auto-fill" style="width:18px;height:18px;" checked></label>
+      </div>
+      <div class="toggle-row" style="margin-top:16px;">
+        <div>
+          <div><strong>Wait for me to press Autofill</strong></div>
+          <div class="desc">Open the panel on an application page but touch nothing until you
+            press <strong>Autofill</strong>. Turn this on if you also run another autofill
+            extension such as Simplify: both tools listen for the same events, so when both
+            fill the same page they overwrite each other and fields come back blank. With this
+            on you choose per form &mdash; <strong>Autofill</strong> when this is the tool doing
+            the filling, <strong>Learn this form</strong> when the other one already filled it
+            and its answers are worth keeping for next time.</div>
+        </div>
+        <label class="row"><input type="checkbox" id="s-manual-fill" style="width:18px;height:18px;"></label>
       </div>
       <div class="grid" style="margin-top:14px;">
         <div class="field full">

@@ -309,6 +309,7 @@ function loadIntoForm() {
   document.getElementById("s-show-panel").checked = !state.settings || state.settings.show_panel !== false;
   document.getElementById("s-auto-fill").checked =
     !state.settings || state.settings.auto_fill_known_sites !== false;
+  document.getElementById("s-manual-fill").checked = !!(state.settings && state.settings.manual_fill);
   renderLearned();
   renderLearnedAnswers();
   renderSuggestions();
@@ -373,6 +374,7 @@ async function save() {
     watch_and_learn: document.getElementById("s-watch-learn").checked,
     show_panel: document.getElementById("s-show-panel").checked,
     auto_fill_known_sites: document.getElementById("s-auto-fill").checked,
+    manual_fill: document.getElementById("s-manual-fill").checked,
   };
   // Kept out of `profile` so it is never in anything exported, imported, or
   // sent to the API as part of the profile blob.
