@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 147 of 148 tests pass; the one failure is a
+`claude/happy-volta-yjo3xc`. 149 of 150 tests pass; the one failure is a
 missing fixture, not a code bug — see Known limitations.
 
 If you are Claude and someone has just pointed you here: read this file, then
@@ -190,7 +190,16 @@ are DOM-behaviour bugs a mock can't reproduce.
   it. Needs those two forms as fixtures before trying again.
 - **Blue Origin clears every core field after it is filled** — 13
   occurrences across first/last name, address, city, postal code, phone.
-  `verifyFilled` re-applies once and still loses.
+  `verifyFilled` re-applies once and still loses. What the report proves is
+  narrower than it looks: the re-read after the second write is synchronous,
+  so the value is gone *as it is set*, not on a later re-render — the site's
+  own change handler is rejecting it. `_setNativeValue` already does the
+  native-setter-plus-events dance, so it is not the usual React-controlled-
+  input problem. Needs a saved copy of that page to go further.
+- `NOT_APPLICABLE_FIELDS` in `field_aliases.js` holds the fields this
+  applicant hasn't got (middle name, address line 2). Blank is the answer
+  for those, so they are neither typed into nor counted as gaps. Add to it
+  rather than teaching the matcher to miss them.
 - **`test_the_docx_reader_gets_the_text_out` fails on a fresh clone.**
   `.gitignore` line 12 ignores `*.docx`, so `tests/fixtures/sample_resume.docx`
   was never committed. The reader works; the fixture is absent.

@@ -220,6 +220,13 @@ var BOOLEAN_FIELDS = new Set([
   "bound_by_noncompete", "criminal_history", "sms_consent", "consent_general",
 ]);
 
+// Fields this applicant hasn't got. An empty profile field is normally a gap
+// worth filling, which is why the Gaps tab counts one -- but these are not
+// gaps, they are the answer, and counting them put 18 occurrences of two
+// fields that will never be filled at the top of a 250-occurrence list.
+// Nothing is typed into them and nothing is reported about them.
+var NOT_APPLICABLE_FIELDS = new Set(["middle_name", "address_line2"]);
+
 var EDUCATION_FIELDS = new Set(["school", "degree", "field_of_study", "graduation_year"]);
 
 var SELF_ID_FIELDS = new Set([

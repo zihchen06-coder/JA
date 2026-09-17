@@ -499,6 +499,15 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
 
   value = _scalar(value);
   if (value === null || value === undefined || value === "") {
+    // A field the applicant hasn't got is answered, not missing: blank is the
+    // right value and there is nothing to flag or count. Still reported, so
+    // the panel can say why the box was left alone, but as a settled outcome
+    // rather than as something outstanding.
+    if (NOT_APPLICABLE_FIELDS.has(canonical)) {
+      addResult(report, label, canonical, "filled",
+        "Left blank -- you've said you don't have one.", required);
+      return;
+    }
     if (required) _mark(f.ja_id, MARK_BLANK);
     addResult(report, label, canonical, "skipped_no_data", "Profile has no value for this field.", required);
     return;
@@ -1787,6 +1796,7 @@ function missedFields(report) {
     if (!["skipped_no_match", "skipped_no_data", "needs_review", "error"].includes(r.action)) {
       continue;
     }
+    if (NOT_APPLICABLE_FIELDS.has(r.canonical)) continue;
     const label = (r.label || "").trim();
     if (!label) continue;
     const f = byId.get(r.ja_id) || {};

@@ -2001,3 +2001,50 @@ def test_learning_a_form_never_puts_a_self_id_answer_in_the_label_store(browser)
     joined = " ".join(out["answers"].keys()).lower()
     assert "gender" not in joined, out["answers"]
     assert "veteran" not in joined, out["answers"]
+
+
+def test_a_field_the_applicant_hasnt_got_is_not_a_gap(browser):
+    """An empty profile field is normally a gap worth filling, which is why
+    the Gaps tab counts one. A middle name the applicant does not have is not
+    a gap -- blank is the answer -- and counting it put 18 occurrences of two
+    such fields at the top of a 250-occurrence list.
+    """
+    no_middle = {**PROFILE, "middle_name": ""}
+
+    out = _evaluate_on(
+        browser, "icims.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'middle_name');
+            return {
+                found: !!r,
+                action: r ? r.action : null,
+                detail: r ? r.detail : null,
+                box: (document.getElementById('PersonProfileFields.MiddleName') || {}).value,
+                counted: missedFields(report).map((m) => m.label),
+            };
+        }""",
+        no_middle,
+    )
+
+    assert out["found"], "the middle name field was not reported at all"
+    assert out["box"] == "", f"something was typed into it: {out['box']!r}"
+    # Not outstanding, and not counted against the next thing worth fixing.
+    assert out["action"] != "skipped_no_data"
+    assert not any("middle" in m.lower() for m in out["counted"]), out["counted"]
+
+
+def test_a_field_that_is_merely_empty_is_still_a_gap(browser):
+    """The other half: the counting still works for everything else, or the
+    check above passes because nothing is ever counted.
+    """
+    out = _evaluate_on(
+        browser, "icims.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            return missedFields(report).length;
+        }""",
+        {**PROFILE, "middle_name": ""},
+    )
+
+    assert out > 0
