@@ -13,14 +13,21 @@ var JA_PANEL_ID = "ja-autofill-panel";
 var _PANEL_CSS = `
   :host { all: initial; }
   * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  /* Only as tall as it needs to be, rather than the full height of the
+     window. A full-height rail covers whatever the page has down the right
+     -- which on a lot of application forms is the submit button. */
   .wrap {
-    position: fixed; top: 12px; right: 12px; bottom: 12px; width: 340px;
+    position: fixed; top: 12px; right: 12px; width: 312px;
+    max-height: calc(100vh - 24px);
     z-index: 2147483647; display: flex; flex-direction: column;
     background: #0f172a; color: #e2e8f0; border: 1px solid rgba(148,163,184,.25);
     border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.45);
     font-size: 13px; line-height: 1.5; overflow: hidden;
   }
-  .wrap.min { bottom: auto; height: auto; }
+  .wrap.min { height: auto; }
+  .wrap.dragging { user-select: none; }
+  header { cursor: move; }
+  .body { max-height: 46vh; }
   header {
     display: flex; align-items: center; gap: 8px; padding: 10px 12px;
     border-bottom: 1px solid rgba(148,163,184,.18); flex: 0 0 auto;
@@ -137,6 +144,79 @@ function createPanel() {
 
   wrap.querySelector(".close").onclick = () => host.remove();
   wrap.querySelector(".min").onclick = () => wrap.classList.toggle("min");
+
+  // Where the panel lands is over the page, and on plenty of forms that is
+  // exactly where the submit button is. Drag it by the header and it stays
+  // where it was put, on this and every later application -- moved once
+  // rather than fought with on each one.
+  //
+  // Position is kept in extension storage rather than the page's own
+  // localStorage: this is injected into someone else's site, and writing to
+  // their storage is a side effect the panel has no business having.
+  const POS_KEY = "panel_pos";
+  const store = (() => {
+    try {
+      return typeof chrome !== "undefined" && chrome.storage && chrome.storage.local
+        ? chrome.storage.local
+        : null;
+    } catch (exc) {
+      return null;
+    }
+  })();
+
+  // Keep at least a corner of the header on screen whatever it is dragged
+  // towards, or it becomes unreachable and the only way back is a reload.
+  function place(left, top) {
+    const w = wrap.offsetWidth || 312;
+    wrap.style.left = `${Math.min(Math.max(left, 64 - w), window.innerWidth - 64)}px`;
+    wrap.style.top = `${Math.min(Math.max(top, 0), window.innerHeight - 36)}px`;
+    wrap.style.right = "auto";
+  }
+
+  if (store) {
+    try {
+      store.get([POS_KEY], (got) => {
+        const pos = got && got[POS_KEY];
+        if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
+          place(pos.left, pos.top);
+        }
+      });
+    } catch (exc) {
+      // Not remembered; it still opens where the CSS puts it.
+    }
+  }
+
+  const head = wrap.querySelector("header");
+  head.addEventListener("pointerdown", (e) => {
+    // The buttons in the header are buttons, not a grab handle.
+    if (e.target.closest("button")) return;
+    const box = wrap.getBoundingClientRect();
+    const dx = e.clientX - box.left;
+    const dy = e.clientY - box.top;
+    wrap.classList.add("dragging");
+
+    const move = (ev) => place(ev.clientX - dx, ev.clientY - dy);
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      wrap.classList.remove("dragging");
+      const now = wrap.getBoundingClientRect();
+      try {
+        store?.set({ [POS_KEY]: { left: now.left, top: now.top } });
+      } catch (exc) {
+        // Not remembered; it has still moved for this page.
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    e.preventDefault();
+  });
+
+  // A window narrowed after the panel was parked off to one side would
+  // otherwise leave it out of reach.
+  window.addEventListener("resize", () => {
+    if (wrap.style.left) place(parseFloat(wrap.style.left), parseFloat(wrap.style.top));
+  });
 
   const scroll = (el) => {
     el.scrollTop = el.scrollHeight;

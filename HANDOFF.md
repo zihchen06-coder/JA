@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 151 of 152 tests pass; the one failure is a
+`claude/happy-volta-yjo3xc`. 153 of 154 tests pass; the one failure is a
 missing fixture, not a code bug — see Known limitations.
 
 If you are Claude and someone has just pointed you here: read this file, then
@@ -61,7 +61,9 @@ extension/
   field_aliases.js  The alias table + the sensitive/consent group definitions.
   filler.js         ~1700 lines. The fill itself, all the guards, all learning.
   llm.js            Claude API. Runs in the service worker only (API key).
-  panel.js          The on-page side panel, in a shadow root.
+  panel.js          The on-page side panel, in a shadow root. Draggable by its
+                    header; position kept in chrome.storage under `panel_pos`,
+                    never the page's own localStorage.
   options.js/html   The Options page. 11 tabs.
 tests/
   conftest.py                  Shared browser fixture + `load` helper.

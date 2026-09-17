@@ -2116,3 +2116,97 @@ def test_the_fill_is_a_function_the_button_can_call_rather_than_the_script_body(
     # Manual mode leaves report null; both readers have to be guarded.
     assert src.count("if (report && (!settings || settings.watch_and_learn !== false))") == 2
     assert "let report = null;" in src
+
+
+def test_the_panel_can_be_dragged_off_the_submit_button(browser):
+    """It is injected over someone else's form, and where it lands is often
+    exactly where the submit button is. Dragging it by the header moves it;
+    the header's own buttons stay buttons rather than becoming a grab handle.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'screening.html')}")
+        for js in SCRIPT_FILES + ["panel.js"]:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """() => {
+                const panel = createPanel();
+                const root = document.getElementById('ja-autofill-panel').shadowRoot;
+                const wrap = root.querySelector('.wrap');
+                const head = root.querySelector('header');
+
+                const drag = (fromX, fromY, toX, toY, target) => {
+                    (target || head).dispatchEvent(new PointerEvent('pointerdown', {
+                        clientX: fromX, clientY: fromY, bubbles: true, composed: true}));
+                    window.dispatchEvent(new PointerEvent('pointermove', {
+                        clientX: toX, clientY: toY, bubbles: true}));
+                    window.dispatchEvent(new PointerEvent('pointerup', {bubbles: true}));
+                };
+
+                const before = wrap.getBoundingClientRect();
+                drag(before.left + 40, before.top + 10, 300, 400);
+                const afterDrag = wrap.getBoundingClientRect();
+
+                // Pressing a header button must not drag the panel with it.
+                const parked = wrap.getBoundingClientRect();
+                drag(parked.left + 6, parked.top + 10, 900, 20,
+                     root.querySelector('button.learn'));
+                const afterButton = wrap.getBoundingClientRect();
+
+                // Hurled far off-screen, a corner has to stay reachable.
+                drag(afterButton.left + 40, afterButton.top + 10, -5000, -5000);
+                const afterYeet = wrap.getBoundingClientRect();
+
+                return {
+                    movedX: Math.round(afterDrag.left), movedY: Math.round(afterDrag.top),
+                    startedRight: Math.round(before.left),
+                    buttonMovedTo: Math.round(afterButton.left),
+                    parkedAt: Math.round(parked.left),
+                    yeetX: Math.round(afterYeet.left), yeetY: Math.round(afterYeet.top),
+                    width: Math.round(afterYeet.width),
+                    viewport: {w: window.innerWidth, h: window.innerHeight},
+                };
+            }"""
+        )
+    finally:
+        page.close()
+
+    # It actually moved, and to roughly where it was dragged.
+    assert out["movedX"] != out["startedRight"]
+    assert abs(out["movedX"] - 260) <= 2, out
+    assert abs(out["movedY"] - 390) <= 2, out
+    # The button press left it where it was.
+    assert out["buttonMovedTo"] == out["parkedAt"], out
+    # Still grabbable after being thrown at the top-left corner.
+    assert out["yeetX"] + out["width"] >= 64, out
+    assert out["yeetY"] >= 0, out
+
+
+def test_the_panel_does_not_run_the_full_height_of_the_window(browser):
+    """A full-height right rail covers whatever the page has down that side,
+    which on an application form is usually the submit button.
+    """
+    page = browser.new_page()
+    try:
+        page.set_viewport_size({"width": 1280, "height": 900})
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'screening.html')}")
+        for js in SCRIPT_FILES + ["panel.js"]:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                const report = await fillForm(profile, null, {});
+                const panel = createPanel();
+                panel.showResults(report);
+                const wrap = document.getElementById('ja-autofill-panel')
+                    .shadowRoot.querySelector('.wrap');
+                const box = wrap.getBoundingClientRect();
+                return {height: box.height, width: box.width, viewportH: window.innerHeight};
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    # Leaves room below it even with a full report showing.
+    assert out["height"] < out["viewportH"] * 0.92, out
+    assert out["width"] <= 320, out
