@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Workday race / ethnicity question</title>
+<!--
+  The race/ethnicity question from a real Workday personal-information step,
+  markup verbatim from the page (only the decorative caret <svg> and the
+  outline this tool had drawn on the button were dropped).
+
+  It is a <button aria-haspopup="listbox"> like the rest of Workday, but the
+  thing that broke here was the wording of its choices, not the widget. They
+  read "Asian (Not Hispanic or Latino) (United States of America)", and:
+
+  - bestOption scores that at 0.42 against a saved "Asian" -- below its 0.5
+    bar -- so the question came back required-and-blank with the answer
+    sitting in the profile the whole time. Red outline, every Workday form.
+  - its containment bonus is worse than useless on this wording: every
+    non-Hispanic choice contains the string "hispanic or latino", so a
+    looser threshold picks the negation as the answer.
+
+  The script at the bottom stands in for Workday's own bundle, as in
+  workday_questions.html. The option list is the one the real form offers.
+-->
+<div data-automation-id="formField-ethnicity" data-fkit-id="personalInfoUS--ethnicity" class="css-7t35fz"><label for="personalInfoUS--ethnicity" class="css-1ud5i8o"><span>What is your race / ethnicity?<abbr aria-hidden="true" class="css-1fc83zd">*</abbr></span></label><div class="css-15rz5ap"><div style="width: 100%; max-width: 344px; min-width: 280px;"><div class="css-12zup1l"><button aria-haspopup="listbox" type="button" value="" aria-label="What is your race / ethnicity? Select One Required" name="ethnicity" id="personalInfoUS--ethnicity" class="css-96bsxb">Select One</button><input type="text" class="css-77hcv" value=""><span class="menu-icon css-gvnnq4"></span></div></div><div class="css-18szrho"></div></div></div>
+<script>
+  var CHOICES = {ethnicity: [
+    "American Indian or Alaska Native (Not Hispanic or Latino) (United States of America)",
+    "Asian (Not Hispanic or Latino) (United States of America)",
+    "Black or African American (Not Hispanic or Latino) (United States of America)",
+    "Hispanic or Latino (United States of America)",
+    "Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino) (United States of America)",
+    "Two or More Races (Not Hispanic or Latino) (United States of America)",
+    "White (Not Hispanic or Latino) (United States of America)",
+    "I do not wish to self-identify my ethnicity (United States of America)"
+  ]};
+  var openList = null;
+  function close() { if (openList) { openList.remove(); openList = null; } }
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
+  document.querySelectorAll('button[aria-haspopup="listbox"]').forEach(function (button) {
+    button.addEventListener("click", function () {
+      if (openList && openList.dataset.owner === button.name) { close(); return; }
+      close();
+      var list = document.createElement("ul");
+      list.setAttribute("role", "listbox");
+      list.dataset.owner = button.name;
+      (CHOICES[button.name] || []).forEach(function (text) {
+        var li = document.createElement("li");
+        li.setAttribute("role", "option");
+        li.textContent = text;
+        li.addEventListener("click", function () { button.textContent = text; button.value = text; close(); });
+        list.appendChild(li);
+      });
+      button.parentElement.appendChild(list);
+      openList = list;
+    });
+  });
+</script>

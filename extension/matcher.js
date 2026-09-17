@@ -112,7 +112,16 @@ function bestChoice(target, choices, minRatio = 0.45) {
 // on an EEO form a wrong answer is a false statement, and "I could not tell"
 // is the only other honest outcome.
 function _withoutQualifiers(value) {
-  return String(value).replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  return String(value)
+    // "(Not Hispanic or Latino)", "(United States of America)"
+    .replace(/\([^)]*\)/g, " ")
+    // LDG writes the same qualifier after a comma instead:
+    // "White, not Hispanic or Latino". Only a trailing "not ..." clause goes
+    // -- a comma inside the answer itself ("No, I do not have a disability")
+    // is part of it and has to stay.
+    .replace(/,\s*not\b[^,]*/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 var _DECLINE_RE = /\b(decline|prefer not|do not wish|don t wish|do not want|don t want|not wish to|rather not)\b/;
@@ -120,28 +129,33 @@ var _DECLINE_RE = /\b(decline|prefer not|do not wish|don t wish|do not want|don 
 function bestSelfIdChoice(value, choices, minRatio = 0.75) {
   const norm = normalize(value);
   if (!norm) return null;
-
-  let i = choices.findIndex((c) => normalize(c) === norm);
-  if (i >= 0) return i;
-
   const bare = normalize(_withoutQualifiers(value));
   if (!bare) return null;
-  i = choices.findIndex((c) => normalize(c) === bare);
-  if (i >= 0) return i;
+
+  // Either side can be the long one. Workday's choice is
+  // "Asian (Not Hispanic or Latino) (United States of America)" and this
+  // profile's is "Asian"; the Learned tab sees it the other way round. Take
+  // the qualifiers off both and the two meet in the middle.
+  for (const form of norm === bare ? [norm] : [norm, bare]) {
+    const i = choices.findIndex(
+      (c) => normalize(c) === form || normalize(_withoutQualifiers(c)) === form
+    );
+    if (i >= 0) return i;
+  }
 
   // "I do not wish to self-identify", "Prefer not to say" and "I don't wish
   // to answer" are the same answer worded three ways, and every form picks a
   // different one. This can only ever land on a declining choice, never on a
   // substantive one.
   if (_DECLINE_RE.test(bare)) {
-    i = choices.findIndex((c) => _DECLINE_RE.test(normalize(c)));
-    if (i >= 0) return i;
+    const declining = choices.findIndex((c) => _DECLINE_RE.test(normalize(c)));
+    if (declining >= 0) return declining;
   }
 
   let best = null;
   let score = 0.0;
   choices.forEach((c, j) => {
-    const ratio = fuzzyRatio(normalize(c), bare);
+    const ratio = fuzzyRatio(normalize(_withoutQualifiers(c)), bare);
     if (ratio > score) {
       score = ratio;
       best = j;
@@ -170,13 +184,25 @@ function _containsWhole(alias, norm) {
 // filling them with the same value fills in the wrong thing twice.
 var _ESCAPE_HATCH_RE = /^other\b/;
 
-// A phone extension is a different thing from a phone number, and "phone" is
-// a whole word inside "phone extension", so the alias matched and the full
-// number went into the extension box -- on Workday, which then cleared it,
-// across three tenants. There is nothing to put in one of these: an extension
-// is not on the profile and is not part of a phone number. Never match it.
-// Checked before LEARNED_ALIASES below, so a learned mapping cannot reopen it.
-var _NEVER_FILL_RE = /(^|\W)(ext|extn|extension)(\W|$)/;
+// Labels that must never resolve to a profile field, because nothing on the
+// profile belongs in them and the alias table matches them anyway. Checked
+// before LEARNED_ALIASES below, so a learned mapping cannot reopen one.
+//
+// - A phone extension is not a phone number, but "phone" is a whole word
+//   inside "phone extension", so the full number went into the extension box
+//   on three Workday tenants, each of which then cleared it.
+// - An employee or badge number is an internal identifier the applicant does
+//   not have and could not know. Worse, the fuzzy fallback was confident
+//   about them: "Employee Number" and "Badge Number" both matched *phone*,
+//   and "Employee ID" matched current_company. "Employer" is a real match and
+//   stays one -- these need a number word after them.
+var _NEVER_FILL_RE = new RegExp(
+  [
+    "(^|\\W)(ext|extn|extension)(\\W|$)",
+    "(^|\\W)(employee|associate|staff|badge|payroll)\\s+(number|num|no|id|code)(\\W|$)",
+    "^employee$",
+  ].join("|")
+);
 
 function isEscapeHatchLabel(label) {
   return _ESCAPE_HATCH_RE.test(normalize(label));

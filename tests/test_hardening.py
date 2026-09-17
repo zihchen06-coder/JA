@@ -762,3 +762,32 @@ def test_accepting_a_suggested_self_id_answer_puts_it_on_the_form(browser):
 
     assert "No matching choice" not in out["status"], out
     assert out["chosen"] == "Asian", out
+
+
+def test_an_employee_number_is_never_filled(load):
+    """An internal identifier the applicant does not have and could not know.
+    The fuzzy fallback was confident about them anyway: "Employee Number" and
+    "Badge Number" both matched *phone*, so the phone number went in, and
+    "Employee ID" matched current_company.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = page.evaluate(
+        """() => {
+            const never = ["Employee Number", "Employee ID", "Employee #",
+                           "Badge Number", "Employee Badge Number",
+                           "Please provide your GD Employee Badge Number",
+                           "Payroll number", "Associate ID"];
+            // "Employer" is a real match and has to stay one.
+            const keep = {"Employer": "current_company",
+                          "Current Employer": "current_company",
+                          "Employment Type": "employment_type",
+                          "Phone Number": "phone"};
+            return {
+                filled: never.filter((l) => matchField(l) !== null),
+                broken: Object.entries(keep).filter(([l, want]) => matchField(l) !== want),
+            };
+        }"""
+    )
+
+    assert out["filled"] == [], f"still matches something: {out['filled']}"
+    assert out["broken"] == [], f"collateral damage: {out['broken']}"

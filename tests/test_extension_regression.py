@@ -48,7 +48,11 @@ PROFILE_JSON = json.dumps(PROFILE)
 EXPECTED = {
     "cc305_form.html": {"filled": 2, "review": 0},
     "edu_form.html": {"filled": 8, "review": 1},
-    "eeo.html": {"filled": 5, "review": 1},
+    # 6, not 5, since the self-ID answers stopped going through bestOption:
+    # a Hispanic/Latino question offering Yes and No used to be written off
+    # as "a yes/no question with no matching saved answer" before the saved
+    # answer was ever tried against it.
+    "eeo.html": {"filled": 6, "review": 1},
     "experience_repeater.html": {"filled": 9, "review": 0},
     "false_positive_check.html": {"filled": 0, "review": 0},
     "icims.html": {"filled": 3, "review": 0},
@@ -2210,3 +2214,68 @@ def test_the_panel_does_not_run_the_full_height_of_the_window(browser):
     # Leaves room below it even with a full report showing.
     assert out["height"] < out["viewportH"] * 0.92, out
     assert out["width"] <= 320, out
+
+
+# --- Workday's race/ethnicity wording --------------------------------------
+
+WORKDAY_ETHNICITY = [
+    ("Asian", "Asian (Not Hispanic or Latino) (United States of America)"),
+    ("White", "White (Not Hispanic or Latino) (United States of America)"),
+    ("Black or African American",
+     "Black or African American (Not Hispanic or Latino) (United States of America)"),
+    ("Hispanic or Latino", "Hispanic or Latino (United States of America)"),
+    ("Two or More Races",
+     "Two or More Races (Not Hispanic or Latino) (United States of America)"),
+    ("Decline to self-identify",
+     "I do not wish to self-identify my ethnicity (United States of America)"),
+]
+
+
+@pytest.mark.parametrize("saved,expected", WORKDAY_ETHNICITY)
+def test_a_saved_race_reaches_workdays_own_wording_for_it(browser, saved, expected):
+    """The answer was in the profile the whole time. bestOption scores
+    "Asian (Not Hispanic or Latino) (United States of America)" at 0.42
+    against a saved "Asian", under its 0.5 bar, so the question came back
+    required-and-blank on every Workday form -- and loosening that bar is the
+    wrong fix, because every non-Hispanic choice contains the string
+    "hispanic or latino" and a containment bonus picks the negation.
+    """
+    out = _evaluate_on(
+        browser, "workday_ethnicity.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'race_ethnicity');
+            return {
+                action: r ? r.action : null,
+                detail: r ? r.detail : null,
+                button: document.querySelector('button[aria-haspopup="listbox"]').textContent.trim(),
+                stillOpen: document.querySelectorAll('[role="listbox"]').length,
+            };
+        }""",
+        {**PROFILE, "race_ethnicity": saved},
+    )
+
+    assert out["action"] == "filled", out
+    assert out["button"] == expected, out
+    assert out["stillOpen"] == 0
+
+
+def test_an_unset_race_is_still_left_for_the_applicant(browser):
+    """The gate does not move: nothing is inferred, and unset stays flagged.
+    Without this the check above could be passing because the matcher got
+    loose rather than because it got right.
+    """
+    out = _evaluate_on(
+        browser, "workday_ethnicity.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results[0];
+            return {action: r.action, detail: r.detail,
+                    button: document.querySelector('button[aria-haspopup="listbox"]').textContent.trim()};
+        }""",
+        {**PROFILE, "race_ethnicity": ""},
+    )
+
+    assert out["action"] == "needs_review"
+    assert "Self-identification" in out["detail"]
+    assert out["button"] == "Select One"

@@ -569,6 +569,22 @@ function _chooseOption(profile, canonical, value, options) {
     return { value: match.value, detail: match.text || "" };
   }
 
+  // A self-identification answer is matched with the qualifier-stripping
+  // rule rather than bestOption. Workday writes the choice as
+  // "Asian (Not Hispanic or Latino) (United States of America)", which
+  // bestOption scores at 0.42 against a saved "Asian" -- under its 0.5 bar,
+  // so the question came back required-and-blank on every Workday form even
+  // with the answer saved. Its containment bonus is also actively wrong on
+  // this wording: it reads the negation as the answer and picks Hispanic or
+  // Latino for someone who said Asian. Before the yes/no check below, so a
+  // Hispanic/Latino question offering Yes and No still finds its answer.
+  if (SELF_ID_FIELDS.has(canonical)) {
+    const real = options.filter((o) => o.value !== "" && o.value !== null);
+    const at = bestSelfIdChoice(String(value), real.map((o) => o.text || ""));
+    if (at === null) return { skip: `No option matched '${value}'.` };
+    return { value: real[at].value, detail: real[at].text || "" };
+  }
+
   const realOptions = options.length > 1 ? options.slice(1) : options;
   const allBoolShaped = realOptions.length > 0 && realOptions.every((o) => semanticBool(o.text || "") !== null);
   if (allBoolShaped) {
