@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 153 of 154 tests pass; the one failure is a
+`claude/happy-volta-yjo3xc`. 156 of 157 tests pass; the one failure is a
 missing fixture, not a code bug — see Known limitations.
 
 If you are Claude and someone has just pointed you here: read this file, then
@@ -64,7 +64,8 @@ extension/
   panel.js          The on-page side panel, in a shadow root. Draggable by its
                     header; position kept in chrome.storage under `panel_pos`,
                     never the page's own localStorage.
-  options.js/html   The Options page. 11 tabs.
+  options.js/html   The Options page. 11 tabs. Loads matcher.js too, for
+                    bestSelfIdChoice.
 tests/
   conftest.py                  Shared browser fixture + `load` helper.
   test_extension_regression.py Behaviour against saved real forms.

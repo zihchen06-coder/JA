@@ -658,3 +658,107 @@ def test_a_setting_turned_off_after_the_migration_stays_off(browser):
 
     assert after_first is True
     assert after_second is False
+
+
+# --- Matching a form's EEO wording to one of this profile's choices --------
+
+WORKDAY_RACES = [
+    ("Asian (Not hispanic or Latino) (United States of America)", "Asian"),
+    ("White (Not Hispanic or Latino) (United States of America)", "White"),
+    ("Black or African American (Not Hispanic or Latino) (United States of America)",
+     "Black or African American"),
+    ("Hispanic or Latino (United States of America)", "Hispanic or Latino"),
+    ("Two or More Races (Not Hispanic or Latino) (United States of America)",
+     "Two or More Races"),
+    ("American Indian or Alaska Native (Not Hispanic or Latino)",
+     "American Indian or Alaska Native"),
+    ("Asian", "Asian"),
+]
+
+
+def test_a_negated_qualifier_is_not_read_as_the_answer(load):
+    """Workday words these as "Asian (Not Hispanic or Latino) (United States of
+    America)". The parenthetical is a negation, so any matcher that scores a
+    substring hit upwards reads an answer of Asian as Hispanic or Latino --
+    bestChoice does exactly that, for Asian, White and Two or More Races
+    alike. The qualifiers come off and the match is exact.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = page.evaluate(
+        """(cases) => {
+            const races = SELF_ID_CHOICES.race_ethnicity;
+            return cases.map(([input]) => {
+                const i = bestSelfIdChoice(input, races);
+                return i === null ? null : races[i];
+            });
+        }""",
+        WORKDAY_RACES,
+    )
+
+    for (given, wanted), got in zip(WORKDAY_RACES, out):
+        assert got == wanted, f"{given!r} -> {got!r}, wanted {wanted!r}"
+
+
+def test_a_wording_it_cannot_place_is_left_for_the_applicant(load):
+    """On an EEO form a wrong answer is a false statement, so the fallback is
+    a person, not a best guess. The declining choices are the one exception:
+    every form words "I'd rather not say" differently and it can only ever
+    land on another declining choice.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = page.evaluate(
+        """() => {
+            const races = SELF_ID_CHOICES.race_ethnicity;
+            const at = (v) => {
+                const i = bestSelfIdChoice(v, races);
+                return i === null ? null : races[i];
+            };
+            return {
+                nonsense: at("Martian"),
+                empty: at(""),
+                unrelated: at("Senior Mechanical Engineer"),
+                decline: at("I do not wish to self-identify"),
+                prefer: at("Prefer not to say"),
+            };
+        }"""
+    )
+
+    assert out["nonsense"] is None
+    assert out["empty"] is None
+    assert out["unrelated"] is None
+    assert out["decline"] == "Decline to self-identify"
+    assert out["prefer"] == "Decline to self-identify"
+
+
+def test_accepting_a_suggested_self_id_answer_puts_it_on_the_form(browser):
+    """End to end on the options page: the Learned tab offers what a form
+    said, and pressing Add has to land it in the dropdown rather than on
+    "No matching choice for ... -- set it by hand."
+    """
+    page = _options_page(browser, seed={
+        "profile": {**PROFILE, "race_ethnicity": ""},
+        "settings": {},
+        "profile_suggestions": {
+            "race_ethnicity": "Asian (Not hispanic or Latino) (United States of America)",
+        },
+    })
+    try:
+        page.wait_for_timeout(200)
+        out = page.evaluate(
+            """async () => {
+                const row = document.querySelector('#suggestions-list [data-suggested]')
+                    .closest('.cred-row, .listitem, div');
+                const add = row.querySelector('button');
+                add.click();
+                await new Promise((r) => setTimeout(r, 50));
+                return {
+                    chosen: document.querySelector('[data-f="race_ethnicity"]').value,
+                    status: document.getElementById('status').textContent,
+                };
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert "No matching choice" not in out["status"], out
+    assert out["chosen"] == "Asian", out

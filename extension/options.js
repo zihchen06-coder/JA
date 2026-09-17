@@ -875,11 +875,9 @@ function renderSuggestions() {
         // A self-ID dropdown only takes one of its own options, so match the
         // form's wording to the nearest choice this profile offers.
         if (input.tagName === "SELECT") {
-          const choice = Array.from(input.options).find(
-            (o) => o.value && (o.value === value || o.text.toLowerCase() === value.toLowerCase())
-          ) || Array.from(input.options).find(
-            (o) => o.value && o.text.toLowerCase().startsWith(value.toLowerCase().slice(0, 12))
-          );
+          const real = Array.from(input.options).filter((o) => o.value);
+          const at = bestSelfIdChoice(value, real.map((o) => o.text));
+          const choice = at === null ? null : real[at];
           if (!choice) {
             status.className = "err";
             status.textContent = `No matching choice for "${value}" — set it by hand.`;

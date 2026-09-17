@@ -99,6 +99,57 @@ function bestChoice(target, choices, minRatio = 0.45) {
   return bestScore >= minRatio ? bestIdx : null;
 }
 
+// Matching a form's wording for a self-identification answer to one of the
+// choices this profile offers. Deliberately not bestChoice(): that scores a
+// substring hit upwards, and Workday words these as
+// "Asian (Not Hispanic or Latino) (United States of America)" -- where the
+// parenthetical is a *negation*, so containment picks "Hispanic or Latino"
+// out of an answer that says the opposite. It did, for Asian, White and Two
+// or More Races alike.
+//
+// The race is the part before the qualifiers, so they come off first and the
+// match has to be exact. Anything left over returns null and is set by hand:
+// on an EEO form a wrong answer is a false statement, and "I could not tell"
+// is the only other honest outcome.
+function _withoutQualifiers(value) {
+  return String(value).replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+}
+
+var _DECLINE_RE = /\b(decline|prefer not|do not wish|don t wish|do not want|don t want|not wish to|rather not)\b/;
+
+function bestSelfIdChoice(value, choices, minRatio = 0.75) {
+  const norm = normalize(value);
+  if (!norm) return null;
+
+  let i = choices.findIndex((c) => normalize(c) === norm);
+  if (i >= 0) return i;
+
+  const bare = normalize(_withoutQualifiers(value));
+  if (!bare) return null;
+  i = choices.findIndex((c) => normalize(c) === bare);
+  if (i >= 0) return i;
+
+  // "I do not wish to self-identify", "Prefer not to say" and "I don't wish
+  // to answer" are the same answer worded three ways, and every form picks a
+  // different one. This can only ever land on a declining choice, never on a
+  // substantive one.
+  if (_DECLINE_RE.test(bare)) {
+    i = choices.findIndex((c) => _DECLINE_RE.test(normalize(c)));
+    if (i >= 0) return i;
+  }
+
+  let best = null;
+  let score = 0.0;
+  choices.forEach((c, j) => {
+    const ratio = fuzzyRatio(normalize(c), bare);
+    if (ratio > score) {
+      score = ratio;
+      best = j;
+    }
+  });
+  return score >= minRatio ? best : null;
+}
+
 function isResumeLabel(label) {
   const norm = normalize(label);
   return RESUME_KEYWORDS.some((kw) => norm.includes(kw)) && !isCoverLetterLabel(label);
