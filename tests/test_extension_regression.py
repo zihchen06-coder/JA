@@ -2453,3 +2453,110 @@ def test_a_hidden_file_input_with_nothing_pointing_at_it_stays_hidden(browser):
     assert [f for f in out if f["type"] == "file"] == [], out
     # Asserted non-empty, or the check above passes for the wrong reason.
     assert any(f["label"] == "Email" for f in out), out
+
+
+# --- Reading a resume ------------------------------------------------------
+
+def _resume_call(browser, responses):
+    """Run parseResumeWithClaude against a stubbed fetch. `responses` is the
+    queue of {status, body} the fake API hands back, one per request.
+    """
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        return page.evaluate(
+            """async (responses) => {
+                const sent = [];
+                const queue = [...responses];
+                window.fetch = async (url, init) => {
+                    sent.push(JSON.parse(init.body));
+                    const next = queue.shift();
+                    return {
+                        ok: next.status === 200,
+                        status: next.status,
+                        text: async () => JSON.stringify(next.body),
+                    };
+                };
+                const result = await parseResumeWithClaude({
+                    apiKey: "sk-ant-test",
+                    text: "Jamie Rivera\\nTest Engineer at Test Industries",
+                });
+                return {sent, result};
+            }""",
+            responses,
+        )
+    finally:
+        page.close()
+
+
+def _ok(text):
+    return {"status": 200, "body": {"content": [{"type": "text", "text": text}]}}
+
+
+PARSED = json.dumps({
+    "education": [{"school": "State University", "degree": "B.S.",
+                   "field_of_study": "Mechanical Engineering", "graduation_year": "2027"}],
+    "experience": [],
+    "fields": {"first_name": "Jamie", "last_name": "Rivera", "email": "", "phone": "",
+               "city": "", "state": "", "linkedin_url": "", "github_url": "",
+               "portfolio_url": "", "gpa": "", "education_level": "", "languages": "",
+               "current_company": "", "current_title": ""},
+})
+
+
+def test_the_resume_schema_asks_for_one_shape_not_sixteen_thousand(browser):
+    """Every scalar optional under required: [] asks the schema compiler to
+    allow every subset of fourteen keys, and the API answered the whole
+    request with "Schema is too complex" -- so reading a resume failed before
+    the document was ever looked at. Requiring them all is one shape.
+    """
+    out = _resume_call(browser, [_ok(PARSED)])
+    schema = out["sent"][0]["output_config"]["format"]["schema"]
+    props = schema["properties"]["fields"]["properties"]
+
+    assert sorted(schema["properties"]["fields"]["required"]) == sorted(props.keys())
+    assert out["result"].get("error") is None, out["result"]
+
+
+def test_a_refused_schema_still_gets_the_resume_read(browser):
+    """A schema the API won't compile is a 400 before the resume is read, and
+    the applicant sees an error about a schema they have never heard of.
+    Asking for the same JSON in words guarantees nothing about the shape, but
+    it is worth more than nothing.
+    """
+    out = _resume_call(browser, [
+        {"status": 400, "body": {"error": {"message": "Schema is too complex."}}},
+        _ok("```json\n" + PARSED + "\n```"),
+    ])
+
+    assert len(out["sent"]) == 2, out["sent"]
+    # The retry drops the schema and asks in the prompt instead.
+    assert "output_config" not in out["sent"][1]
+    assert any(
+        "JSON only" in b.get("text", "")
+        for b in out["sent"][1]["messages"][0]["content"]
+    ), out["sent"][1]
+    # A fenced reply is still read.
+    assert out["result"]["parsed"]["fields"]["first_name"] == "Jamie", out["result"]
+
+
+def test_what_the_resume_does_not_say_is_not_offered_as_an_answer(browser):
+    """Requiring every scalar means the reply carries "" for everything the
+    document is silent about. An empty string offered as an import reads as
+    an answer, and accepting it would blank a field already filled in by hand.
+    """
+    out = _resume_call(browser, [_ok(PARSED)])
+    fields = out["result"]["parsed"]["fields"]
+
+    assert fields == {"first_name": "Jamie", "last_name": "Rivera"}, fields
+    # Asserted against something present, or the check above is vacuous.
+    assert out["result"]["parsed"]["education"][0]["school"] == "State University"
+
+
+def test_reading_a_resume_uses_sonnet(browser):
+    """Extraction against a fixed schema, checked by the applicant before any
+    of it becomes a profile -- not the judgement the fill itself needs.
+    """
+    out = _resume_call(browser, [_ok(PARSED)])
+    assert out["sent"][0]["model"] == "claude-sonnet-5", out["sent"][0]["model"]

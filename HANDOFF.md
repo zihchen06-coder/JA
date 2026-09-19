@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 179 tests passing, the whole suite green.
+`claude/happy-volta-yjo3xc`. 183 tests passing, the whole suite green.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -60,6 +60,9 @@ extension/
   field_aliases.js  The alias table + the sensitive/consent group definitions.
   filler.js         ~1700 lines. The fill itself, all the guards, all learning.
   llm.js            Claude API. Runs in the service worker only (API key).
+                    The fill and the chat use Opus (LLM_MODEL); reading a
+                    resume uses Sonnet (RESUME_MODEL) -- extraction against
+                    a fixed schema, checked by the applicant before it lands.
   panel.js          The on-page side panel, in a shadow root. Draggable by its
                     header; position kept in chrome.storage under `panel_pos`,
                     never the page's own localStorage.
@@ -190,9 +193,14 @@ are DOM-behaviour bugs a mock can't reproduce.
   it does not close by cleverness.
 - **Fixtures are frozen snapshots.** A green test does not mean the real site
   still looks like that.
-- **The Claude API path has never run live.** No key available in the dev
-  environment. Request shape, headers, retry and error handling are tested
-  against a stubbed `fetch`; the actual round trip is unverified.
+- **The Claude API path is only partly verified.** No key in the dev
+  environment, so request shape, headers, retry and error handling are
+  tested against a stubbed `fetch`. One thing has now been seen live: the
+  resume schema was refused with "Schema is too complex" because its 14
+  scalar fields were optional under `required: []`, which asks the schema
+  compiler to allow all 2^14 subsets of them. Structured-output schemas
+  here require every property and use "" for absent, with `_pruneEmpty`
+  dropping the blanks before anything is offered as an import.
 - **SPA re-renders drop watch-and-learn listeners** when elements are replaced.
 - **Corrections are still not learned automatically.** `watchForCorrections`
   skips every field the fill touched (`filler.js`, the `filled.has(...)`

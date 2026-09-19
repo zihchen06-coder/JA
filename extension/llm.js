@@ -18,6 +18,23 @@
 var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 var ANTHROPIC_VERSION = "2023-06-01";
 var LLM_MODEL = "claude-opus-5";
+
+// Reading a resume is extraction against a fixed schema -- copy out what
+// the document says, leave the rest empty -- rather than the judgement the
+// fill needs when routing a saved answer to an oddly-worded question. The
+// result also lands in the import box for the applicant to check before any
+// of it becomes a profile. Cheaper model, same job.
+var RESUME_MODEL = "claude-sonnet-5";
+
+// Only sent if the schema itself is refused; otherwise the schema does this.
+var RESUME_JSON_FALLBACK =
+  'Reply with JSON only -- no prose, no code fence. Shape: ' +
+  '{"education":[{"school","degree","field_of_study","graduation_year"}],' +
+  '"experience":[{"company","title","location","start_date","end_date","description"}],' +
+  '"fields":{"first_name","last_name","email","phone","city","state",' +
+  '"linkedin_url","github_url","portfolio_url","gpa","education_level",' +
+  '"languages","current_company","current_title"}}. ' +
+  'Use "" for anything the resume does not state.';
 var FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
 var LLM_SYSTEM_RULES = `You are helping one job applicant fill in a job
@@ -536,7 +553,18 @@ var RESUME_SCHEMA = {
         education_level: { type: "string" }, languages: { type: "string" },
         current_company: { type: "string" }, current_title: { type: "string" },
       },
-      required: [],
+      // Every one of these is required, and absent means "". They used to be
+      // optional with required: [], which asks the schema compiler to allow
+      // every subset of fourteen keys -- 16,384 of them -- and the API
+      // rejected the whole request with "Schema is too complex", so reading a
+      // resume failed outright. Requiring them all is one shape instead, and
+      // RESUME_RULES already says to leave absent things empty; _pruneEmpty
+      // drops the blanks before any of this is offered as an import.
+      required: [
+        "first_name", "last_name", "email", "phone", "city", "state",
+        "linkedin_url", "github_url", "portfolio_url", "gpa",
+        "education_level", "languages", "current_company", "current_title",
+      ],
       additionalProperties: false,
     },
   },
@@ -558,6 +586,38 @@ Dates as YYYY-MM. A job still held ends "Present". Newest first.
 Each experience description: one or two sentences of what they actually did,
 drawn from the bullets, not a rewrite of them.`;
 
+// Under the schema the reply is bare JSON. Down the worded fallback above it
+// can arrive wrapped in a ```json fence, which JSON.parse chokes on.
+function _jsonFrom(text) {
+  const fenced = String(text).match(/```(?:json)?\s*([\s\S]*?)```/);
+  return (fenced ? fenced[1] : String(text)).trim();
+}
+
+// Every scalar is required now, so the reply carries "" for everything the
+// resume does not state. An empty string offered as an import reads as an
+// answer -- and would blank a field the applicant had already filled in by
+// hand -- so the blanks come out before anyone is shown them.
+function _pruneEmpty(parsed) {
+  const out = { ...parsed };
+  if (out.fields && typeof out.fields === "object") {
+    const kept = {};
+    for (const [k, v] of Object.entries(out.fields)) {
+      if (typeof v === "string" ? v.trim() !== "" : v !== null && v !== undefined) {
+        kept[k] = v;
+      }
+    }
+    out.fields = kept;
+  }
+  for (const list of ["education", "experience"]) {
+    if (!Array.isArray(out[list])) continue;
+    out[list] = out[list].filter(
+      (row) => row && typeof row === "object" &&
+        Object.values(row).some((v) => String(v == null ? "" : v).trim() !== "")
+    );
+  }
+  return out;
+}
+
 async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
 
@@ -574,16 +634,41 @@ async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   }
   content.push({ type: "text", text: RESUME_RULES });
 
-  const result = await _postMessages(
+  const base = {
+    model: RESUME_MODEL,
+    max_tokens: 8000,
+    messages: [{ role: "user", content }],
+  };
+
+  let result = await _postMessages(
     apiKey,
     {
-      model: LLM_MODEL,
-      max_tokens: 8000,
+      ...base,
       output_config: { effort: "medium", format: { type: "json_schema", schema: RESUME_SCHEMA } },
-      messages: [{ role: "user", content }],
     },
     false
   );
+
+  // A schema the API won't compile is a 400 before the resume is ever read,
+  // and the applicant sees the import fail with an API error about a schema
+  // they have never heard of. Asking for the same JSON in words is worse --
+  // nothing guarantees the shape -- but it is worth more than nothing, and
+  // everything below already copes with a reply that doesn't parse.
+  if (!result.ok && result.status === 400) {
+    result = await _postMessages(
+      apiKey,
+      {
+        ...base,
+        messages: [
+          {
+            role: "user",
+            content: [...content, { type: "text", text: RESUME_JSON_FALLBACK }],
+          },
+        ],
+      },
+      false
+    );
+  }
   if (!result.ok) return { error: _apiErrorMessage(result) };
   // A 200 whose body isn't JSON: a proxy's error page, a captive portal, a
   // truncated stream. Everything below reads fields off it.
@@ -594,11 +679,11 @@ async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   const block = (result.body.content || []).find((b) => b.type === "text");
   if (!block) return { error: "Nothing came back." };
   try {
-    const parsed = JSON.parse(block.text);
+    const parsed = JSON.parse(_jsonFrom(block.text));
     if (!parsed || typeof parsed !== "object") {
       return { error: "The result came back in a shape this can't read." };
     }
-    return { parsed };
+    return { parsed: _pruneEmpty(parsed) };
   } catch (exc) {
     return { error: `Could not read the result: ${exc}` };
   }
