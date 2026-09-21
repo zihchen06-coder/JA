@@ -2845,3 +2845,126 @@ def test_a_self_id_question_stays_out_of_reach_either_way(browser):
 
     assert with_filled["labels"], "nothing was offered at all"
     assert "Gender" not in with_filled["labels"], with_filled["labels"]
+
+
+# --- The panel's own controls ----------------------------------------------
+
+def _panel_page(browser, seed):
+    """A panel with chrome.storage stubbed under it, so what it remembers can
+    be read back.
+    """
+    page = browser.new_page()
+    page.add_init_script(
+        """((seedJson) => {
+            const store = JSON.parse(seedJson);
+            window.__store = store;
+            window.chrome = {storage: {local: {
+                get: (keys, cb) => {
+                    const out = Object.fromEntries(
+                        (Array.isArray(keys) ? keys : [keys])
+                            .filter((k) => k in store).map((k) => [k, store[k]]));
+                    if (cb) cb(out);
+                    return Promise.resolve(out);
+                },
+                set: (obj) => { Object.assign(store, obj); return Promise.resolve(); },
+            }}};
+        })(SEED);""".replace("SEED", repr(json.dumps(seed)))
+    )
+    page.goto("about:blank")
+    page.set_content("<body><form><label for='a'>Email</label><input id='a'></form></body>")
+    for js in SCRIPT_FILES + ["panel.js"]:
+        page.add_script_tag(path=os.path.join(EXT_DIR, js))
+    page.evaluate("() => { window.__panel = createPanel(); }")
+    page.wait_for_timeout(120)
+    return page
+
+
+def test_closing_the_panel_leaves_something_to_bring_it_back(browser):
+    """It used to remove itself outright, with nothing to reopen it short of
+    running the fill again.
+    """
+    page = _panel_page(browser, {"settings": {}})
+    try:
+        out = page.evaluate(
+            """() => {
+                const root = document.getElementById('ja-autofill-panel').shadowRoot;
+                const wrap = root.querySelector('.wrap');
+                const launcher = root.querySelector('.launcher');
+                root.querySelector('button.close').click();
+                const closed = {wrap: wrap.style.display, launcher: launcher.style.display};
+                launcher.click();
+                return {closed, reopened: {wrap: wrap.style.display, launcher: launcher.style.display},
+                        stillThere: !!document.getElementById('ja-autofill-panel')};
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["closed"] == {"wrap": "none", "launcher": "flex"}, out
+    assert out["reopened"] == {"wrap": "flex", "launcher": "none"}, out
+    assert out["stillThere"]
+
+
+def test_the_panel_can_be_made_wider_and_stays_that_way(browser):
+    page = _panel_page(browser, {"settings": {}})
+    try:
+        out = page.evaluate(
+            """async () => {
+                const root = document.getElementById('ja-autofill-panel').shadowRoot;
+                const wrap = root.querySelector('.wrap');
+                const narrow = wrap.getBoundingClientRect().width;
+                root.querySelector('button.big').click();
+                await new Promise((r) => setTimeout(r, 50));
+                return {narrow, wide: wrap.getBoundingClientRect().width,
+                        remembered: window.__store.panel_big};
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["wide"] > out["narrow"], out
+    assert out["remembered"] is True, out
+
+
+def test_a_panel_opened_after_being_widened_opens_wide(browser):
+    page = _panel_page(browser, {"settings": {}, "panel_big": True})
+    try:
+        wide = page.evaluate(
+            """() => document.getElementById('ja-autofill-panel')
+                .shadowRoot.querySelector('.wrap').classList.contains('big')"""
+        )
+    finally:
+        page.close()
+
+    assert wide
+
+
+def test_ai_assist_can_be_turned_off_from_the_panel(browser):
+    """Three clicks away on the options page is too far from where it is
+    being used. The box below says what off means rather than looking broken.
+    """
+    page = _panel_page(browser, {"settings": {"use_llm": True, "manual_fill": True}})
+    try:
+        out = page.evaluate(
+            """async () => {
+                const root = document.getElementById('ja-autofill-panel').shadowRoot;
+                const box = root.querySelector('.ai-on');
+                const ask = root.querySelector('textarea');
+                const on = {checked: box.checked, askDisabled: ask.disabled};
+                box.checked = false;
+                box.dispatchEvent(new Event('change'));
+                await new Promise((r) => setTimeout(r, 50));
+                return {on, off: {askDisabled: ask.disabled,
+                                  note: root.querySelector('.ai-note').textContent},
+                        stored: window.__store.settings};
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["on"] == {"checked": True, "askDisabled": False}, out
+    assert out["off"]["askDisabled"] is True
+    assert "off" in out["off"]["note"]
+    assert out["stored"]["use_llm"] is False
+    # Every other setting survives the write.
+    assert out["stored"]["manual_fill"] is True, out["stored"]

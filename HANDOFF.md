@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 224 tests passing, the whole suite green.
+`claude/happy-volta-yjo3xc`. 228 tests passing, the whole suite green.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -66,7 +66,9 @@ extension/
                     a 400 and a silent retry on every request.
   panel.js          The on-page side panel, in a shadow root. Draggable by its
                     header; position kept in chrome.storage under `panel_pos`,
-                    never the page's own localStorage.
+                    never the page's own localStorage. Also the wide toggle
+                    (`panel_big`), the launcher that closing leaves behind, and
+                    the AI assist switch, which read-modify-writes `settings`.
   options.js/html   The Options page. 11 tabs. Loads matcher.js too, for
                     bestSelfIdChoice. Also holds the full backup/restore
                     (BACKUP_KEYS / BACKUP_SECRET_KEYS) for moving browsers.
