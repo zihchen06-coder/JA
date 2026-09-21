@@ -2690,3 +2690,90 @@ def test_the_learn_button_runs_the_mapping_through_the_real_gate():
     # The sanitized set is what gets stored, not the raw reply.
     assert "learned: safe" in learn
     assert "learned: reply.mappings" not in learn
+
+
+# --- iCIMS's own questionnaires --------------------------------------------
+
+BOEING_Q1 = "1. Do your current job duties involve Boeing under any of the following conditions?"
+BOEING_Q2 = ("2. Have you ever been employed by the U.S. Government (federal, state, county, "
+             "or local, including publicly funded institutions) in either a civilian or "
+             "military capacity?")
+
+
+def test_icims_radio_options_get_the_word_that_names_them(browser):
+    """The word is a bare text node after the input, with no <label>. Without
+    it there is no way to tell the Yes radio from the No one, and the whole
+    form was unanswerable for want of two words.
+    """
+    out = _evaluate_on(
+        browser, "icims_questionnaire.html",
+        """async () => extractFields()
+            .filter((f) => f.type === 'radio')
+            .map((f) => f.label)""",
+        None,
+    )
+
+    assert out == ["Yes", "No", "Yes", "No"], out
+
+
+def test_a_question_buried_under_its_own_bullet_lists_is_still_the_question(browser):
+    """Question 1 states itself and then spends three bullet lists qualifying
+    it. Over 300 characters the cell was given up on, and the nearest
+    preceding text -- the last bullet -- was taken as the question instead.
+    """
+    out = _evaluate_on(
+        browser, "icims_questionnaire.html",
+        """async () => {
+            const groups = {};
+            for (const f of extractFields()) {
+                if (f.type === 'radio') groups[f.name] = f.group_label;
+            }
+            return groups;
+        }""",
+        None,
+    )
+
+    assert out["icims_f_Q1"] == BOEING_Q1, out
+    assert out["icims_f_Q2"] == BOEING_Q2, out
+
+
+def test_a_question_written_straight_into_the_cell_is_read(browser):
+    """Question 6 is a textarea preceded by a bare text node.
+    nearestPrecedingText only walks previousElementSibling, so it had no
+    label at all -- nothing to match against and nothing to learn.
+    """
+    out = _evaluate_on(
+        browser, "icims_questionnaire.html",
+        """async () => (extractFields().find((f) => f.tag === 'textarea') || {}).label""",
+        None,
+    )
+
+    assert out.startswith("6. Describe how you found out about this job"), out
+
+
+def test_an_icims_questionnaire_fills_from_what_it_was_taught(browser):
+    """None of these can come from a profile -- they are about this company.
+    What matters is that they can be answered once and fill from then on,
+    which needs every one of the three readings above to work.
+    """
+    out = _evaluate_on(
+        browser, "icims_questionnaire.html",
+        """async ({profile, remembered}) => {
+            setLearnedAnswers(remembered);
+            const report = await fillForm(profile, null, {});
+            const checked = [...document.querySelectorAll('input[type=radio]:checked')]
+                .map((el) => el.id);
+            return {checked, filled: report.results.filter((r) => r.action === 'filled').length};
+        }""",
+        {"profile": PROFILE, "remembered": {
+            _norm_q(BOEING_Q1): "No",
+            _norm_q(BOEING_Q2): "No",
+        }},
+    )
+
+    assert sorted(out["checked"]) == ["icims_f_Q1_no", "icims_f_Q2_no"], out
+
+
+def _norm_q(text):
+    import re
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", text.lower())).strip()

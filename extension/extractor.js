@@ -65,6 +65,30 @@ function extractFields() {
     );
   }
 
+  // The question written straight into the cell, with no element around it:
+  //   6. Describe how you found out about this job. ...<br><textarea>
+  // nearestPrecedingText below only walks previousElementSibling, so a
+  // question that is a bare text node is invisible to it -- the box came
+  // back with no label at all and nothing could be matched or learned
+  // against it.
+  function precedingBareText(el) {
+    let text = "";
+    for (let node = el.previousSibling; node; node = node.previousSibling) {
+      if (node.nodeType === 1) {
+        if (hasControl(node) || node.matches("input, select, textarea")) break;
+        if (/^(TABLE|UL|OL|DIV|P)$/.test(node.tagName)) break;
+      }
+      text = (node.textContent || "") + text;
+      if (cleanText(text).length > 300) break;
+    }
+    const whole = cleanText(text);
+    if (whole.length < 3) return "";
+    // Long cells state the question and then qualify it; the question mark
+    // is where the question ends.
+    const asked = whole.length > 200 ? (whole.match(/^.{10,200}?\?/) || [])[0] : whole;
+    return asked || whole.slice(0, 200);
+  }
+
   function nearestPrecedingText(el) {
     let node = el.previousElementSibling;
     let hops = 0;
@@ -78,19 +102,75 @@ function extractFields() {
     }
     return "";
   }
+  // iCIMS builds its own questionnaires as bare text in a table cell:
+  //   <span><input type="radio" name="Q1" value="yes"></span>&nbsp;&nbsp;Yes
+  // The word naming the option is a text node *after* the input, with no
+  // <label> anywhere, so every fallback below comes back empty and the
+  // filler has no way to tell the Yes radio from the No one. Whole forms
+  // were unanswerable for want of two words.
+  function followingOptionText(el) {
+    if (el.type !== "radio" && el.type !== "checkbox") return "";
+
+    // The input is usually wrapped in a styling <span> with nothing else in
+    // it, and the word sits after that wrapper rather than after the input.
+    let from = el;
+    const wrap = el.parentElement;
+    if (wrap && wrap.tagName !== "LABEL" && wrap.querySelectorAll("input, select, textarea").length === 1) {
+      from = wrap;
+    }
+
+    let text = "";
+    for (let node = from.nextSibling; node; node = node.nextSibling) {
+      if (node.nodeType === 1) {
+        // Another control, or something holding one: the next option has
+        // started and anything past here belongs to it.
+        if (node.matches("input, select, textarea") ||
+            node.querySelector("input, select, textarea")) {
+          break;
+        }
+        if (/^(BR|DIV|P|TABLE|UL|OL|HR)$/.test(node.tagName)) break;
+      }
+      text += node.textContent || "";
+      if (cleanText(text).length > 60) break;
+    }
+    return cleanText(text).slice(0, 60);
+  }
+
   function labelFor(el) {
     return (
       cleanText(el.getAttribute("aria-label")) ||
       labelForById(el.id, el) ||
       ariaLabelledBy(el) ||
       closestLabelWrap(el) ||
+      followingOptionText(el) ||
       cleanText(el.getAttribute("placeholder")) ||
       automationIdWords(el) ||
-      nearestPrecedingText(el)
+      nearestPrecedingText(el) ||
+      precedingBareText(el)
     );
   }
   function isOptionWord(t) {
     return /^(yes|no|y|n|n\/a|true|false|other)$/i.test((t || "").trim());
+  }
+
+  // Where the run of text naming an option ends: at the next control, or at
+  // the next block. followingOptionText reads exactly this run, so taking it
+  // out here is what makes the question and its options partition the cell
+  // between them instead of overlapping.
+  function optionTextEnds(node) {
+    if (node.nodeType !== 1) return false;
+    if (node.matches("input, select, textarea")) return true;
+    if (node.querySelector("input, select, textarea")) return true;
+    return /^(BR|DIV|P|TABLE|UL|OL|HR)$/.test(node.tagName);
+  }
+
+  function removeFollowingOptionText(from) {
+    let node = from.nextSibling;
+    while (node && !optionTextEnds(node)) {
+      const next = node.nextSibling;
+      node.remove();
+      node = next;
+    }
   }
 
   function stripOptionControls(clone) {
@@ -102,7 +182,20 @@ function extractFields() {
       .forEach((n) => {
         if (n.id) ids.add(n.id);
         const wrap = n.closest("label");
-        (wrap || n).remove();
+        const anchor = wrap || n;
+        // iCIMS names its options in bare text after the input rather than
+        // in a <label>, so removing the control alone left the words behind:
+        // every question on one of its forms came out ending " Yes No", and
+        // an answer learned against the question as a person reads it never
+        // matched it again.
+        const outer =
+          anchor.parentElement &&
+          anchor.parentElement.tagName !== "LABEL" &&
+          anchor.parentElement.querySelectorAll("input, select, textarea").length === 1
+            ? anchor.parentElement
+            : anchor;
+        removeFollowingOptionText(outer);
+        outer.remove();
       });
     clone.querySelectorAll("label[for]").forEach((l) => {
       if (ids.has(l.getAttribute("for"))) l.remove();
@@ -115,8 +208,18 @@ function extractFields() {
     if (!node.querySelector("input, select, textarea")) return "";
     const clone = stripOptionControls(node.cloneNode(true));
     const t = cleanText(clone.textContent || "");
-    if (t.length < 3 || t.length > 300) return "";
+    if (t.length < 3) return "";
     if (ownLabel && t.toLowerCase() === ownLabel.toLowerCase()) return "";
+    if (t.length > 300) {
+      // A long cell is not a lost cause: iCIMS states the question first and
+      // then spends three bullet lists qualifying it, so the question mark
+      // is where the question ends. Rejecting the cell outright sent this
+      // looking at surrounding text instead, and it came back with the last
+      // bullet point -- "An employee of a Boeing subsidiary;" -- as the
+      // question being asked.
+      const asked = t.match(/^.{10,300}?\?/);
+      return asked ? asked[0] : "";
+    }
     return t;
   }
 
@@ -164,12 +267,24 @@ function extractFields() {
       const heading = groupRoot.querySelector('legend, [class*="label" i], [class*="question" i]');
       if (heading && !heading.contains(el)) return cleanText(heading.innerText);
     }
+    const chain = [];
     let node = el.parentElement;
-    for (let depth = 0; node && depth < 5; depth++, node = node.parentElement) {
-      const own = containerQuestion(node, ownLabel);
+    for (let depth = 0; node && depth < 5; depth++, node = node.parentElement) chain.push(node);
+
+    // A question stated inside the thing that holds the control beats text
+    // that merely sits before it. These ran interleaved, so the first
+    // ancestor -- usually a styling <span> with only the input in it --
+    // produced no question of its own and handed straight to whatever text
+    // came before. On an iCIMS questionnaire that is the last bullet of the
+    // list qualifying the question: every option of question 1 came back
+    // asking "An employee of a Boeing subsidiary;".
+    for (const n of chain) {
+      const own = containerQuestion(n, ownLabel);
       if (own) return own;
-      if (node.tagName === "LABEL") continue;
-      const prev = nearestPrecedingText(node);
+    }
+    for (const n of chain) {
+      if (n.tagName === "LABEL") continue;
+      const prev = nearestPrecedingText(n);
       if (prev && !isOptionWord(prev) && prev.toLowerCase() !== (ownLabel || "").toLowerCase()) {
         return prev;
       }

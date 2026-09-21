@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 218 tests passing, the whole suite green.
+`claude/happy-volta-yjo3xc`. 222 tests passing, the whole suite green.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -132,6 +132,15 @@ shape statically, so it is the thing to update if this is restructured.
   Long lists are paged and fetched through its search box. `icimsWidget()` in
   `extractor.js`, `_setIcimsValue()`/`_icimsSearch()` in `filler.js`.
 - Both have frozen fixtures: `workday_questions.html`, `icims_profile.html`.
+- **iCIMS's own questionnaires** (`icims_questionnaire.html`) are bare text in
+  table cells: the word naming a radio option is a text node *after* the
+  input with no `<label>`, and the question is the cell's text, often under
+  several bullet lists. `followingOptionText` reads the first,
+  `containerQuestion` (up to the first `?` when long) the second, and
+  `stripOptionControls` removes an option's words along with its control so
+  the two partition the cell. None of these questions can come from a
+  profile — they are about that company — so being readable is what lets
+  Learn this form answer them from then on.
 
 ### Learning (three stores, different rules)
 
