@@ -6,6 +6,10 @@
 
 var REQUIRED_FIELDS = ["first_name", "last_name", "email", "phone"];
 
+// Set as soon as a panel exists, so a failure after that point can be
+// reported into it rather than vanishing.
+var _jaPanel = null;
+
 function _showBanner(html, tone) {
   document.getElementById("ja-autofill-banner")?.remove();
   const colors = {
@@ -103,7 +107,27 @@ async function _reportWithoutOwnForm() {
     "profile", "settings", "credentials", "learned_aliases", "learned_answers",
   ]);
 
+  // Only the top frame draws a panel. This script runs in every frame, and a
+  // panel inside an embedded application iframe would be clipped to that
+  // iframe's box -- and a page with two frames holding forms would get two
+  // panels fighting over the same corner.
+  const wantPanel = window.top === window && !(settings && settings.show_panel === false);
+
+  // On a click it goes up here, before anything below can return. Every one
+  // of those returns was a way for pressing the icon to produce nothing at
+  // all, and each was found separately -- an incomplete profile showed a
+  // banner that took itself away after fifteen seconds, and a page whose
+  // fields are all hidden said nothing whatsoever. On the fill-on-load path
+  // it still waits until there is something to report.
+  let panel = wantPanel && globalThis.__JA_VIA_CLICK ? createPanel() : null;
+  _jaPanel = panel;
+
   if (!profile || REQUIRED_FIELDS.some((f) => !profile[f])) {
+    panel?.log(
+      "Set up your profile first: right-click the extension's icon, choose Options, " +
+        "and fill in your name, email and phone.",
+      "warn"
+    );
     _showBanner(
       "<strong>Set up your profile first</strong><br>Right-click this extension's icon &rarr; Options, " +
         "fill in your name/email/phone, then click the icon again on the application page.",
@@ -116,7 +140,10 @@ async function _reportWithoutOwnForm() {
   const autoCreateAccounts = !!(settings && settings.auto_create_accounts);
   const fieldsData = extractFields();
   // A frame whose only controls were hidden or non-fillable.
-  if (!fieldsData.length) return;
+  if (!fieldsData.length) {
+    panel?.log("Nothing fillable on this page -- what is here is hidden or read-only.", "warn");
+    return;
+  }
   let creds = null;
   if (autoCreateAccounts && fieldsData.some((f) => f.type === "password")) {
     const hostname = hostnameFor(location.href);
@@ -134,12 +161,10 @@ async function _reportWithoutOwnForm() {
   }
   setLearnedAnswers(learnedAnswers || {});
 
-  // Only the top frame draws a panel. This script runs in every frame, and a
-  // panel inside an embedded application iframe would be clipped to that
-  // iframe's box -- and a page with two frames holding forms would get two
-  // panels fighting over the same corner.
-  const wantPanel = window.top === window && !(settings && settings.show_panel === false);
-  const panel = wantPanel ? createPanel() : null;
+  if (!panel && wantPanel) {
+    panel = createPanel();
+    _jaPanel = panel;
+  }
   panel?.log(`Found ${fieldsData.length} field(s) on this page.`);
 
   // The fill itself, as something that can be asked for rather than
@@ -425,4 +450,13 @@ async function _reportWithoutOwnForm() {
         chrome.runtime.sendMessage({ type: "ja-profile-suggestions", suggestions: suggested })
     );
   }
-})();
+})().catch((exc) => {
+  // Otherwise this is an unhandled rejection in a console nobody has open,
+  // and the icon looks like it did nothing. Which is how it looked.
+  try {
+    _jaPanel?.log(String(exc && exc.stack ? exc.stack : exc), "err");
+  } catch (ignored) {
+    /* the panel is the thing that broke */
+  }
+  console.error("Job Application Autofill:", exc);
+});

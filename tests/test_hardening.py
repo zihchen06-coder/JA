@@ -1518,3 +1518,84 @@ def test_a_question_with_no_fixed_answers_keeps_its_box(browser):
     assert out["tag"] == "INPUT", out
     assert out["value"] == "he/him"
     assert out["gender"] == "SELECT"
+
+
+# --- Pressing the icon always puts something on screen ---------------------
+
+def _clicked(browser, html, profile):
+    """run.js on a page, as a click, with the extension APIs stubbed. Returns
+    what the panel ended up saying -- or None if none was drawn.
+    """
+    page = browser.new_page()
+    page.add_init_script(
+        """((profileJson) => {
+            const store = {profile: JSON.parse(profileJson), settings: {}};
+            window.chrome = {
+                storage: {local: {
+                    get: async (keys) => Object.fromEntries(
+                        (Array.isArray(keys) ? keys : [keys])
+                            .filter((k) => k in store).map((k) => [k, store[k]])),
+                    set: async () => {},
+                }},
+                runtime: {
+                    sendMessage: async () => ({}),
+                    onMessage: {addListener: () => {}, removeListener: () => {}},
+                },
+            };
+            globalThis.__JA_VIA_CLICK = true;
+        })(PROFILE_JSON);""".replace("PROFILE_JSON", repr(json.dumps(profile)))
+    )
+    page.goto("about:blank")
+    page.set_content(html)
+    for js in ["field_aliases.js", "matcher.js", "extractor.js", "credentials.js",
+               "filler.js", "panel.js", "run.js"]:
+        page.add_script_tag(path=os.path.join(EXT_DIR, js))
+    page.wait_for_timeout(400)
+    text = page.evaluate(
+        """() => {
+            const host = document.getElementById('ja-autofill-panel');
+            return host ? host.shadowRoot.querySelector('.body').textContent : null;
+        }"""
+    )
+    page.close()
+    return text
+
+
+REAL_FORM = """<body><form>
+  <label for="e">Email</label><input id="e" name="email">
+  <label for="p">Phone</label><input id="p" name="phone">
+</form></body>"""
+
+
+def test_a_click_draws_a_panel_even_with_no_profile(browser):
+    """It showed a banner that took itself away after fifteen seconds, and no
+    panel at all. Look away for a moment and the icon did nothing.
+    """
+    text = _clicked(browser, REAL_FORM, {"first_name": "", "last_name": "", "email": "", "phone": ""})
+
+    assert text is not None, "no panel was drawn"
+    assert "Set up your profile first" in text, text
+
+
+def test_a_click_draws_a_panel_when_every_field_is_hidden(browser):
+    """The page has controls, so the frame does not bail at the top, and then
+    extractFields filters them all out and it returned in silence.
+    """
+    text = _clicked(
+        browser,
+        """<body><form>
+             <input type="hidden" name="csrf" value="x">
+             <label for="s">Search</label><input id="s" style="display:none">
+           </form></body>""",
+        {**PROFILE},
+    )
+
+    assert text is not None, "no panel was drawn"
+    assert "Nothing fillable on this page" in text, text
+
+
+def test_a_click_on_a_real_form_still_reports_what_it_found(browser):
+    text = _clicked(browser, REAL_FORM, {**PROFILE})
+
+    assert text is not None, "no panel was drawn"
+    assert "field(s) on this page" in text, text
