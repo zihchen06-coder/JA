@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 212 tests passing, the whole suite green.
+`claude/happy-volta-yjo3xc`. 215 tests passing, the whole suite green.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -70,6 +70,10 @@ extension/
   options.js/html   The Options page. 11 tabs. Loads matcher.js too, for
                     bestSelfIdChoice. Also holds the full backup/restore
                     (BACKUP_KEYS / BACKUP_SECRET_KEYS) for moving browsers.
+                    Eligibility and Self-ID answer through segmentedFor():
+                    buttons over a hidden <select> that stays the value, so
+                    every [data-bool]/[data-f] reader is untouched. Anything
+                    assigning .value must call repaintSegmented() after.
 tests/
   conftest.py                  Shared browser fixture + `load` helper.
   test_extension_regression.py Behaviour against saved real forms.

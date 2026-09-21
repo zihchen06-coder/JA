@@ -1423,3 +1423,98 @@ def test_only_a_click_makes_a_frame_with_no_fields_speak(browser):
     # The click path asks for it; the page-load path does not.
     assert "await runFill(tab.id, true);" in bg
     assert "await runFill(tabId);" in bg
+
+
+# --- Answering by button rather than dropdown ------------------------------
+
+def test_a_saved_answer_shows_as_the_button_that_is_on(browser):
+    """The buttons drive a hidden <select>, and load() assigns .value
+    directly, which fires no event -- so they sat on "Not set" over a profile
+    that was set, which is exactly the thing a dropdown was hiding.
+    """
+    page = _options_page(browser, seed={
+        "profile": {**PROFILE, "gender": "Male", "work_authorized": True,
+                    "needs_sponsorship": False, "has_drivers_license": None},
+        "settings": {},
+    })
+    try:
+        page.wait_for_timeout(200)
+        out = page.evaluate(
+            """() => {
+                const on = (sel) => {
+                    const row = document.querySelector(sel).parentElement;
+                    const b = row.querySelector('button.on');
+                    return b ? b.textContent : null;
+                };
+                return {
+                    gender: on('[data-f="gender"]'),
+                    authorized: on('[data-bool="work_authorized"]'),
+                    sponsorship: on('[data-bool="needs_sponsorship"]'),
+                    unset: on('[data-bool="has_drivers_license"]'),
+                };
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["gender"] == "Male", out
+    assert out["authorized"] == "Yes", out
+    assert out["sponsorship"] == "No", out
+    assert out["unset"] == "Not set", out
+
+
+def test_pressing_a_button_is_what_gets_saved(browser):
+    """The <select> stays the value -- everything else on the page reads
+    these through [data-bool] / [data-f] and .value.
+    """
+    page = _options_page(browser, seed={"profile": {**PROFILE}, "settings": {}})
+    try:
+        page.wait_for_timeout(200)
+        out = page.evaluate(
+            """() => {
+                const press = (sel, text) => {
+                    const row = document.querySelector(sel).parentElement;
+                    [...row.querySelectorAll('button')].find((b) => b.textContent === text).click();
+                };
+                press('[data-f="gender"]', 'Non-binary');
+                press('[data-bool="over_18"]', 'Yes');
+                return {
+                    gender: document.querySelector('[data-f="gender"]').value,
+                    over18: document.querySelector('[data-bool="over_18"]').value,
+                    saved: gatherProfile().gender,
+                    savedBool: gatherProfile().over_18,
+                };
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["gender"] == "Non-binary"
+    assert out["over18"] == "true"
+    assert out["saved"] == "Non-binary"
+    assert out["savedBool"] is True
+
+
+def test_a_question_with_no_fixed_answers_keeps_its_box(browser):
+    """Pronouns has no set to choose from, and a row of buttons holding only
+    "Not set" is worse than the box it replaced.
+    """
+    page = _options_page(browser, seed={
+        "profile": {**PROFILE, "pronouns": "he/him"}, "settings": {},
+    })
+    try:
+        page.wait_for_timeout(200)
+        out = page.evaluate(
+            """() => {
+                const el = document.querySelector('[data-f="pronouns"]');
+                return {tag: el.tagName, value: el.value,
+                        // And the ones that do have a set are not boxes.
+                        gender: document.querySelector('[data-f="gender"]').tagName};
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["tag"] == "INPUT", out
+    assert out["value"] == "he/him"
+    assert out["gender"] == "SELECT"

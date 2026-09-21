@@ -147,7 +147,7 @@ function buildBoolGrid() {
   grid.innerHTML = "";
   for (const field of BOOLEAN_FIELDS) {
     const wrap = document.createElement("div");
-    wrap.className = "field";
+    wrap.className = "field full seg-row";
     wrap.innerHTML = `
       <label>${BOOL_LABELS[field] || field}</label>
       <select data-bool="${field}">
@@ -155,7 +155,55 @@ function buildBoolGrid() {
         <option value="true">Yes</option>
         <option value="false">No</option>
       </select>`;
+    wrap.appendChild(segmentedFor(wrap.querySelector("select")));
     grid.appendChild(wrap);
+  }
+}
+
+// The <select> stays and stays the value: everything else on this page reads
+// these through [data-bool] / [data-f] and .value, and the Learned tab's
+// Add button leans on it being a SELECT so it can match a form's wording to
+// one of the choices. The buttons only drive it, and repaint when anything
+// else sets it.
+function segmentedFor(select) {
+  const row = document.createElement("div");
+  row.className = "segmented";
+
+  const paint = () => {
+    for (const b of row.querySelectorAll("button")) {
+      b.classList.toggle("on", b.dataset.value === select.value);
+    }
+  };
+
+  for (const opt of Array.from(select.options)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = opt.value === "" ? "seg-btn unset" : "seg-btn";
+    button.dataset.value = opt.value;
+    button.textContent = opt.text;
+    button.onclick = () => {
+      select.value = opt.value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      paint();
+    };
+    row.appendChild(button);
+  }
+
+  // Loading the profile, or accepting a suggestion from the Learned tab,
+  // both set the select directly.
+  select.addEventListener("change", paint);
+  // load() and the Learned tab's Add button both assign .value directly,
+  // which fires nothing -- so the buttons sat on "Not set" over a profile
+  // that was set. Anything that writes a value calls this afterwards.
+  select.__jaPaint = paint;
+  select.style.display = "none";
+  paint();
+  return row;
+}
+
+function repaintSegmented() {
+  for (const select of document.querySelectorAll("select")) {
+    if (select.__jaPaint) select.__jaPaint();
   }
 }
 
@@ -164,13 +212,26 @@ function buildSelfIdGrid() {
   grid.innerHTML = "";
   for (const field of SELF_ID_FIELDS) {
     const wrap = document.createElement("div");
-    wrap.className = "field";
-    const options = (SELF_ID_CHOICES[field] || [])
+    wrap.className = "field full seg-row";
+    const choices = SELF_ID_CHOICES[field] || [];
+    const name = SELF_ID_DISPLAY_NAMES[field] || field;
+
+    // Pronouns has no fixed set to choose from, and a row of buttons holding
+    // only "Not set" is worse than the box it replaced.
+    if (!choices.length) {
+      wrap.className = "field";
+      wrap.innerHTML = `<label>${name}</label><input data-f="${field}" placeholder="e.g. he/him">`;
+      grid.appendChild(wrap);
+      continue;
+    }
+
+    const options = choices
       .map((c) => `<option value="${c.replace(/"/g, "&quot;")}">${c}</option>`)
       .join("");
     wrap.innerHTML = `
-      <label>${SELF_ID_DISPLAY_NAMES[field] || field}</label>
+      <label>${name}</label>
       <select data-f="${field}"><option value="">Not set</option>${options}</select>`;
+    wrap.appendChild(segmentedFor(wrap.querySelector("select")));
     grid.appendChild(wrap);
   }
 }
@@ -287,6 +348,9 @@ function loadIntoForm() {
     const v = p[field];
     el.value = v === true ? "true" : v === false ? "false" : "";
   });
+  // Assigning .value fires nothing, so the buttons over these selects have
+  // to be told the profile just landed.
+  repaintSegmented();
 
   const eduList = document.getElementById("edu-list");
   eduList.innerHTML = "";
@@ -980,6 +1044,7 @@ function renderSuggestions() {
         // -- are stored as true/false, whatever the form phrased them as.
         const yes = /^(yes|y|true|checked|i (do |am |agree|consent|certify))/i.test(value.trim());
         boolInput.value = String(yes);
+        repaintSegmented();
       } else if (input) {
         // A self-ID dropdown only takes one of its own options, so match the
         // form's wording to the nearest choice this profile offers.
@@ -993,6 +1058,7 @@ function renderSuggestions() {
             return;
           }
           input.value = choice.value;
+          repaintSegmented();
         } else {
           input.value = value;
         }
