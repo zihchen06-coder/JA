@@ -1211,7 +1211,16 @@ function _isConsentLike(text) {
 // descriptor sent to the API and the local handles needed to apply what
 // comes back. Built here and recomputed on the way in, so an answer for
 // anything not on this list can be dropped rather than trusted.
-function _llmCandidates(report) {
+// opts.includeFilled: offer fields the fill already set, and carry what is
+// in them. The fill pass must not have those -- re-answering what is done
+// costs money and invites a worse answer -- but the chat is where someone
+// says "that date is wrong, fix it", and without them it could only reply
+// that the field was locked from its side. Which it did.
+//
+// Nothing about what may be answered moves: blocked(), the consent rules
+// and the radio gates below are untouched, and applyLlmAnswers re-checks
+// every one of them on the way back in.
+function _llmCandidates(report, opts) {
   const fields = report.fields || [];
   const routeSaved = !!report.opts.answerSensitive;
   // "Flagged for you to answer" is precisely the pile routing exists to
@@ -1224,6 +1233,7 @@ function _llmCandidates(report) {
     !(routeSaved && r.action === "needs_review");
   const answered = new Set(report.results.filter(settled).map((r) => r.ja_id));
 
+  const includeFilled = !!(opts && opts.includeFilled);
   const offer = (f, descriptor, jaIds) => ({ field: f, descriptor, jaIds });
   const out = [];
 
@@ -1259,8 +1269,8 @@ function _llmCandidates(report) {
     // is only ever offered once the applicant has said their saved consent
     // answers may be used for wordings the matcher didn't recognise.
     if (f.type === "checkbox" && !routeSaved) continue;
-    if (answered.has(f.ja_id)) continue;
-    if (f.has_value) continue;
+    if (!includeFilled && answered.has(f.ja_id)) continue;
+    if (!includeFilled && f.has_value) continue;
     if (!LLM_FILLABLE_TYPES.has(f.type) && f.tag !== "select" && f.type !== "checkbox") continue;
     if (blocked(f.label, f.group_label, f.context)) continue;
     if (!f.label && !f.group_label && !f.section) continue;
@@ -1275,6 +1285,9 @@ function _llmCandidates(report) {
         type: f.tag === "select" ? "select" : f.tag === "textarea" ? "textarea" : f.type,
         required: !!f.required,
         max_length: f.max_length || null,
+        // What is in the box now, so a correction can be asked for by what
+        // is wrong with it rather than by naming the field's internal id.
+        current: includeFilled ? _readableValue(_el(f.ja_id), f) || "" : "",
         options: f.type === "checkbox"
           ? ["Yes", "No"]
           : (f.options || []).map((o) => o.text).filter(Boolean),
@@ -1284,8 +1297,8 @@ function _llmCandidates(report) {
 
   for (const group of radioGroups.values()) {
     const head = group[0];
-    if (answered.has(head.ja_id)) continue;
-    if (group.some((o) => o.checked)) continue;
+    if (!includeFilled && answered.has(head.ja_id)) continue;
+    if (!includeFilled && group.some((o) => o.checked)) continue;
     const question = group.find((o) => o.group_label)?.group_label || "";
     const context = group.find((o) => o.context)?.context || "";
     // The options are part of the question. A disability self-ID group can be
@@ -1304,6 +1317,7 @@ function _llmCandidates(report) {
         type: "radio",
         required: group.some((o) => o.required),
         max_length: null,
+        current: includeFilled ? _checkedRadioLabel(report, head) || "" : "",
         options: group.map((o) => o.label || "").filter(Boolean),
       }, group.map((o) => o.ja_id))
     );
@@ -1312,8 +1326,8 @@ function _llmCandidates(report) {
   return out;
 }
 
-function llmFieldsFor(report) {
-  return _llmCandidates(report).map((c) => c.descriptor);
+function llmFieldsFor(report, opts) {
+  return _llmCandidates(report, opts).map((c) => c.descriptor);
 }
 
 async function _applyLlmSelect(f, el, value) {
@@ -1506,9 +1520,9 @@ function _savedAnswerAllows(profile, candidate, value) {
   return false;
 }
 
-async function applyLlmAnswers(report, answers, skipped, profile) {
+async function applyLlmAnswers(report, answers, skipped, profile, opts) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
-  const candidates = new Map(_llmCandidates(report).map((c) => [c.descriptor.ja_id, c]));
+  const candidates = new Map(_llmCandidates(report, opts).map((c) => [c.descriptor.ja_id, c]));
   let filled = 0;
 
   for (const [jaId, value] of Object.entries(answers || {})) {

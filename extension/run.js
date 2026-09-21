@@ -320,12 +320,16 @@ async function _reportWithoutOwnForm() {
                 ja_id: r.ja_id, label: r.label, action: r.action, detail: r.detail,
               })),
             },
-            fields: llmFieldsFor(report),
+            // Including what the fill already set: correcting one of those
+            // is most of what anybody asks the chat for.
+            fields: llmFieldsFor(report, { includeFilled: true }),
           },
         });
         if (!reply) return "No reply came back.";
         if (reply.error) return reply.error;
-        const changed = await applyLlmAnswers(report, reply.answers, {}, profile);
+        const changed = await applyLlmAnswers(report, reply.answers, {}, profile, {
+          includeFilled: true,
+        });
         history.push({ role: "user", content: text });
         history.push({ role: "assistant", content: reply.reply });
         return changed ? `${reply.reply}\n\n(${changed} field(s) changed.)` : reply.reply;

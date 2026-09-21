@@ -2777,3 +2777,71 @@ def test_an_icims_questionnaire_fills_from_what_it_was_taught(browser):
 def _norm_q(text):
     import re
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", text.lower())).strip()
+
+
+# --- Asking the panel to fix something it already filled -------------------
+
+FILLED_FORM = """<body><form>
+  <label for="d">Degree</label>
+  <select id="d" name="degree">
+    <option value="">Select</option><option>B.S.</option><option>M.S.</option>
+  </select>
+  <label for="g">Gender</label>
+  <select id="g" name="gender">
+    <option value="">Select</option><option>Male</option><option>Female</option>
+  </select>
+  <label for="q">What interests you about this role?</label>
+  <textarea id="q" name="q"></textarea>
+</form></body>"""
+
+
+def _offered(browser, include_filled):
+    page = browser.new_page()
+    try:
+        page.set_content(FILLED_FORM)
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        return page.evaluate(
+            """async ({profile, includeFilled}) => {
+                const report = await fillForm(profile, null, {});
+                const fields = llmFieldsFor(report, includeFilled ? {includeFilled: true} : undefined);
+                return {
+                    labels: fields.map((f) => f.label),
+                    degree: fields.find((f) => f.label === 'Degree') || null,
+                    filledDegree: (report.results.find((r) => r.canonical === 'degree') || {}).action,
+                };
+            }""",
+            {"profile": {**PROFILE, "degree": "B.S.", "gender": "Male"},
+             "includeFilled": include_filled},
+        )
+    finally:
+        page.close()
+
+
+def test_the_chat_can_reach_a_field_the_fill_already_set(browser):
+    """"I can't edit those fields since they're locked from this side" -- the
+    chat was handed only what the fill left alone, so the one thing anybody
+    asks it for, fixing something that came out wrong, was the one thing it
+    could not do.
+    """
+    without = _offered(browser, False)
+    with_filled = _offered(browser, True)
+
+    assert with_filled["filledDegree"] == "filled", with_filled
+    # The fill pass still must not be handed it: re-answering what is done
+    # costs money and invites a worse answer.
+    assert "Degree" not in without["labels"], without["labels"]
+    assert "Degree" in with_filled["labels"], with_filled["labels"]
+    # And it carries what is in the box, so the correction can be asked for
+    # by what is wrong with it.
+    assert with_filled["degree"]["current"] == "B.S.", with_filled["degree"]
+
+
+def test_a_self_id_question_stays_out_of_reach_either_way(browser):
+    """Widening what the chat may touch moves nothing about what may be
+    answered. Asserted against a list that is otherwise non-empty.
+    """
+    with_filled = _offered(browser, True)
+
+    assert with_filled["labels"], "nothing was offered at all"
+    assert "Gender" not in with_filled["labels"], with_filled["labels"]
