@@ -262,6 +262,12 @@ function isQuantityLabel(label) {
 // where entries come from and options.js for where they can be deleted.
 var LEARNED_ALIASES = {};
 
+// The table as it stands, so a caller adding to it mid-fill keeps what is
+// already there rather than replacing it.
+function getLearnedAliases() {
+  return { ...LEARNED_ALIASES };
+}
+
 function setLearnedAliases(map) {
   LEARNED_ALIASES = map || {};
 }

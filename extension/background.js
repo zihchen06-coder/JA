@@ -152,6 +152,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "ja-learn-map") {
+    (async () => {
+      try {
+        const { llm_api_key: apiKey } = await chrome.storage.local.get(["llm_api_key"]);
+        sendResponse(await mapLabelsWithClaude({ ...message.request, apiKey }));
+      } catch (exc) {
+        sendResponse({ error: String(exc) });
+      }
+    })();
+    return true;
+  }
+
   if (message?.type === "ja-chat") {
     (async () => {
       try {

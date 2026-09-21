@@ -432,7 +432,8 @@ def test_every_injected_script_loads_together_and_exposes_its_entry_points(load)
             'learnFromAnswers', 'learnFromPrefilled', 'learnFromPage',
             'rememberableAnswers',
             'watchForCorrections', 'verifyFilled', 'missedFields',
-            'setLearnedAliases', 'setLearnedAnswers', 'sanitizeLearnedAliases',
+            'setLearnedAliases', 'getLearnedAliases', 'setLearnedAnswers',
+            'sanitizeLearnedAliases',
             'extractJobContext', 'createPanel', 'hostnameFor', 'getOrCreate',
         ].filter((name) => typeof window[name] !== 'function')"""
     )

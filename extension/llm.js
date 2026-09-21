@@ -17,14 +17,18 @@
 
 var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 var ANTHROPIC_VERSION = "2023-06-01";
-var LLM_MODEL = "claude-opus-5";
+var LLM_MODEL = "claude-sonnet-5";
 
-// Reading a resume is extraction against a fixed schema -- copy out what
-// the document says, leave the rest empty -- rather than the judgement the
-// fill needs when routing a saved answer to an oddly-worded question. The
-// result also lands in the import box for the applicant to check before any
-// of it becomes a profile. Cheaper model, same job.
 var RESUME_MODEL = "claude-sonnet-5";
+
+// Server-side refusal fallbacks exist for the models that run safety
+// classifiers and can answer with stop_reason: "refusal" -- Opus and Fable.
+// Sonnet does not, so sending the parameter there buys a 400 and a silent
+// retry on every single request. Keyed off the model rather than hardcoded,
+// so moving a model back up picks it up again.
+function _wantsFallbacks(model) {
+  return /^claude-(opus|fable|mythos)/.test(String(model));
+}
 
 // Only sent if the schema itself is refused; otherwise the schema does this.
 var RESUME_JSON_FALLBACK =
@@ -328,7 +332,7 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeS
     ],
   };
 
-  let result = await _postMessages(apiKey, body, true);
+  let result = await _postMessages(apiKey, body, _wantsFallbacks(body.model));
   // The fallbacks parameter and its beta header are the newest thing in this
   // request. If the API rejects the shape, the useful thing is still to get
   // an answer, so try once more without them rather than failing the fill.
@@ -616,6 +620,127 @@ function _pruneEmpty(parsed) {
     );
   }
   return out;
+}
+
+// "Learn this form" with the AI pass on. The local learn already stored the
+// applicant's own answers keyed by label, which is exact and brittle: the
+// same question worded differently on the next site misses. This asks Claude
+// only which profile field each question is asking for -- never what the
+// answer is, which the applicant has already supplied -- and the mapping
+// generalises to any wording of that field anywhere.
+//
+// The answer is sent as context because the question alone is often
+// ambiguous ("Number" on an iCIMS phone row), and the shape of what is in
+// the box is what disambiguates it. Values are truncated: this is about
+// which field, not what was written.
+// The service worker loads llm.js and nothing else, so field_aliases.js's
+// SELF_ID_FIELDS / CONSENT_FIELDS are not in scope here. This list is not the
+// gate -- sanitizeLearnedAliases in filler.js is, and it reads those sets
+// directly, so an alias reaching storage is checked against the real thing.
+// This copy exists so these field names are never offered to the model in the
+// first place, and so a mapping naming one is dropped before it leaves the
+// worker. If it ever drifts from field_aliases.js the gate still holds.
+var _UNLEARNABLE_FOR_LEARN = new Set([
+  "gender", "pronouns", "hispanic_latino", "race_ethnicity", "veteran_status",
+  "disability_status", "sexual_orientation", "transgender_status",
+  "criminal_history", "consent_general", "consent_background_check",
+  "consent_drug_test", "sms_consent", "custom_answers", "cover_letter_text",
+]);
+
+var LEARN_RULES = `Each item below is a question from a job application form
+and the answer this applicant gave it.
+
+For each one, name the single profile field the question is asking for, using
+the exact field name from the list. This is a naming task, not a judgement:
+if none of the fields is what the question asks for, return "" rather than
+the closest thing. A wrong mapping sends the wrong answer out on every later
+application, and "" costs nothing -- the answer they gave is already stored
+against this exact wording either way.
+
+Return "" for anything asking about race, ethnicity, gender, disability,
+veteran status, criminal history, or consent to anything. Those are never
+learned from a mapping.`;
+
+var LEARN_SCHEMA = {
+  type: "object",
+  properties: {
+    mappings: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          profile_field: {
+            type: "string",
+            description: 'Exact field name from the list, or "" if none fits.',
+          },
+        },
+        required: ["label", "profile_field"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["mappings"],
+  additionalProperties: false,
+};
+
+async function mapLabelsWithClaude({ apiKey, profile, items }) {
+  if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
+  const asked = (items || []).filter((i) => i && i.label).slice(0, 60);
+  if (!asked.length) return { mappings: {} };
+
+  const fieldNames = Object.keys(profile || {}).filter((k) => !_UNLEARNABLE_FOR_LEARN.has(k));
+
+  const result = await _postMessages(
+    apiKey,
+    {
+      model: LLM_MODEL,
+      max_tokens: 4000,
+      output_config: { effort: "low", format: { type: "json_schema", schema: LEARN_SCHEMA } },
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Profile fields:\n${fieldNames.join(", ")}`,
+              cache_control: { type: "ephemeral" },
+            },
+            { type: "text", text: LEARN_RULES },
+            {
+              type: "text",
+              text: asked
+                .map((i) => `Q: ${i.label}\nA: ${String(i.answer || "").slice(0, 120)}`)
+                .join("\n\n"),
+            },
+          ],
+        },
+      ],
+    },
+    false
+  );
+  if (!result.ok) return { error: _apiErrorMessage(result) };
+  if (!result.body || typeof result.body !== "object") {
+    return { error: `Unreadable reply from the API: ${result.raw.slice(0, 200)}` };
+  }
+
+  const block = (result.body.content || []).find((b) => b.type === "text");
+  if (!block) return { error: "Nothing came back." };
+  try {
+    const parsed = JSON.parse(_jsonFrom(block.text));
+    const mappings = {};
+    for (const row of (parsed && parsed.mappings) || []) {
+      if (!row || !row.label || !row.profile_field) continue;
+      // Claude naming a field it was told to leave alone is the one thing
+      // that would defeat the gate, so it is refused here too rather than
+      // relied on from the prompt.
+      if (_UNLEARNABLE_FOR_LEARN.has(row.profile_field)) continue;
+      mappings[String(row.label)] = String(row.profile_field);
+    }
+    return { mappings, usage: result.body.usage || null };
+  } catch (exc) {
+    return { error: `Could not read the result: ${exc}` };
+  }
 }
 
 async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {

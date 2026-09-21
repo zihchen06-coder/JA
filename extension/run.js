@@ -298,8 +298,41 @@ function _showBanner(html, tone) {
     if (!learned && !gaps) {
       return "Nothing to remember here -- fill the form in first, then press this.";
     }
+
+    // What was just stored is keyed by this form's exact wording, which is
+    // brittle: the same question asked differently on the next site misses.
+    // With the AI pass on, ask Claude which profile field each question is
+    // asking for -- never what the answer is, which is already stored -- and
+    // keep that as an alias, which holds for any wording of that field.
+    let mapped = 0;
+    if (settings && settings.use_llm && learned) {
+      const reply = await chrome.runtime.sendMessage({
+        type: "ja-learn-map",
+        request: {
+          profile,
+          items: Object.entries(answers).map(([label, answer]) => ({ label, answer })),
+        },
+      });
+      if (reply && reply.error) {
+        panel?.log(reply.error, "err");
+      } else if (reply && reply.mappings) {
+        // The gate, rather than the prompt: a mapping onto a self-ID,
+        // consent or criminal-history field never reaches storage, whatever
+        // came back.
+        const safe = sanitizeLearnedAliases(reply.mappings, profile);
+        mapped = Object.keys(safe).length;
+        if (mapped) {
+          setLearnedAliases({ ...getLearnedAliases(), ...safe });
+          await chrome.runtime.sendMessage({ type: "ja-learned", learned: safe });
+        }
+      }
+    }
+
     const parts = [];
     if (learned) parts.push(`Remembered ${learned} answer(s). The next form like this one fills itself.`);
+    if (mapped) {
+      parts.push(`${mapped} of them matched to a profile field, so any wording of those fills now.`);
+    }
     // Never written on their behalf: these are identity, and a page can hold
     // a default nobody chose or somebody else's value.
     if (gaps) parts.push(`${gaps} more to confirm under Options -> Learned.`);

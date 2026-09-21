@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 183 tests passing, the whole suite green.
+`claude/happy-volta-yjo3xc`. 189 tests passing, the whole suite green.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -60,9 +60,10 @@ extension/
   field_aliases.js  The alias table + the sensitive/consent group definitions.
   filler.js         ~1700 lines. The fill itself, all the guards, all learning.
   llm.js            Claude API. Runs in the service worker only (API key).
-                    The fill and the chat use Opus (LLM_MODEL); reading a
-                    resume uses Sonnet (RESUME_MODEL) -- extraction against
-                    a fixed schema, checked by the applicant before it lands.
+                    Everything is Sonnet now (LLM_MODEL, RESUME_MODEL).
+                    _wantsFallbacks() keys the refusal-fallback beta off the
+                    model -- Sonnet doesn't refuse, so sending it there was
+                    a 400 and a silent retry on every request.
   panel.js          The on-page side panel, in a shadow root. Draggable by its
                     header; position kept in chrome.storage under `panel_pos`,
                     never the page's own localStorage.
@@ -139,6 +140,15 @@ setting nothing on the page. It builds a report in which nothing was filled
 and hands it to `learnFromPrefilled`, so it inherits that same routing
 rather than carrying a second copy of the gate. Wired in `run.js` via
 `panel.onLearn`.
+
+With `use_llm` on, the button then calls `mapLabelsWithClaude` (llm.js) and
+asks which *profile field* each question was asking for — never what the
+answer is, which the applicant has already given. A `learned_answer` is
+keyed by one form's exact wording; an alias holds for any wording of that
+field anywhere, so this is what generalises. Rule 5 still decides what
+lands: the reply goes through `sanitizeLearnedAliases`, and llm.js keeps
+its own copy of the refused field names so they are never offered to the
+model — that copy is not the gate, and says so.
 
 Capped in `background.js` (`capLearned`, `capMisses` in `llm.js`).
 

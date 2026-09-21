@@ -424,7 +424,7 @@ def test_llm_select_answer_must_match_an_option_exactly(browser):
     assert outcome["afterExact"] == "Bachelor's Degree"
 
 
-def _llm_call(browser, responses):
+def _llm_call(browser, responses, model=None):
     """Run llm.js against a stubbed fetch and report what it sent and returned.
 
     `responses` is the queue of {status, body} the fake API hands back, one
@@ -436,7 +436,8 @@ def _llm_call(browser, responses):
         page.goto("about:blank")
         page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
         return page.evaluate(
-            """async ({responses, profile}) => {
+            """async ({responses, profile, model}) => {
+                if (model) LLM_MODEL = model;
                 const sent = [];
                 const queue = [...responses];
                 window.fetch = async (url, init) => {
@@ -457,7 +458,7 @@ def _llm_call(browser, responses):
                 });
                 return {sent, result};
             }""",
-            {"responses": responses, "profile": PROFILE},
+            {"responses": responses, "profile": PROFILE, "model": model},
         )
     finally:
         page.close()
@@ -486,7 +487,7 @@ def test_llm_request_shape_and_answer_parsing(browser):
     assert sent["headers"]["anthropic-version"] == "2023-06-01"
     # Required to call the API from a browser context at all.
     assert sent["headers"]["anthropic-dangerous-direct-browser-access"] == "true"
-    assert sent["body"]["model"] == "claude-opus-5"
+    assert sent["body"]["model"] == "claude-sonnet-5"
     assert sent["body"]["output_config"]["format"]["type"] == "json_schema"
 
     # The resume and cover letter are stored as base64 data URLs for
@@ -500,7 +501,8 @@ def test_llm_request_shape_and_answer_parsing(browser):
 def test_llm_retries_once_without_the_fallback_beta_on_a_400(browser):
     """The server-side fallbacks parameter is the newest thing in the request.
     If the API rejects the shape, still get an answer rather than failing the
-    fill over an optional extra.
+    fill over an optional extra. Pinned to a model that sends it at all --
+    see the test below for the one that doesn't.
     """
     out = _llm_call(
         browser,
@@ -510,6 +512,7 @@ def test_llm_retries_once_without_the_fallback_beta_on_a_400(browser):
                 {"ja_id": "ja-1", "value": "Second time.", "skip_reason": ""},
             ])},
         ],
+        model="claude-opus-5",
     )
     assert len(out["sent"]) == 2
     assert "anthropic-beta" in out["sent"][0]["headers"]
@@ -2560,3 +2563,130 @@ def test_reading_a_resume_uses_sonnet(browser):
     """
     out = _resume_call(browser, [_ok(PARSED)])
     assert out["sent"][0]["model"] == "claude-sonnet-5", out["sent"][0]["model"]
+
+
+def test_sonnet_never_sends_the_fallback_beta_at_all(browser):
+    """Server-side refusal fallbacks exist for the models that run safety
+    classifiers and can answer with stop_reason: "refusal". Sonnet does not,
+    so sending the parameter there buys a 400 and a silent retry on every
+    request -- two calls where one would do.
+    """
+    out = _llm_call(
+        browser,
+        [{"status": 200, "body": _ok_body([
+            {"ja_id": "ja-1", "value": "First time.", "skip_reason": ""},
+        ])}],
+    )
+
+    assert len(out["sent"]) == 1, out["sent"]
+    assert out["sent"][0]["body"]["model"] == "claude-sonnet-5"
+    assert "anthropic-beta" not in out["sent"][0]["headers"]
+    assert "fallbacks" not in out["sent"][0]["body"]
+
+
+# --- Learning a mapping, not just an answer --------------------------------
+
+def _map_call(browser, body, profile=None, items=None):
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        return page.evaluate(
+            """async ({body, profile, items}) => {
+                const sent = [];
+                window.fetch = async (url, init) => {
+                    sent.push(JSON.parse(init.body));
+                    return {ok: true, status: 200, text: async () => JSON.stringify(body)};
+                };
+                const result = await mapLabelsWithClaude({
+                    apiKey: "sk-ant-test", profile, items,
+                });
+                return {sent, result};
+            }""",
+            {"body": body, "profile": profile or {**PROFILE},
+             "items": items or [{"label": "home telephone", "answer": "(555) 123-4567"}]},
+        )
+    finally:
+        page.close()
+
+
+def _mapping_body(rows):
+    return {"content": [{"type": "text",
+                         "text": json.dumps({"mappings": rows})}]}
+
+
+def test_learning_asks_which_field_not_what_the_answer_is(browser):
+    """A remembered answer is keyed by this form's exact wording, so the same
+    question worded differently on the next site misses. An alias maps the
+    question to a profile field and holds for any wording of it.
+    """
+    out = _map_call(browser, _mapping_body([
+        {"label": "home telephone", "profile_field": "phone"},
+    ]))
+
+    assert out["result"]["mappings"] == {"home telephone": "phone"}
+    # The applicant's own answer goes along as context -- "Number" on its own
+    # says nothing -- but what comes back is a field name, never a value.
+    sent = json.dumps(out["sent"][0])
+    assert "(555) 123-4567" in sent
+    schema = out["sent"][0]["output_config"]["format"]["schema"]
+    props = schema["properties"]["mappings"]["items"]["properties"]
+    assert set(props) == {"label", "profile_field"}
+
+
+def test_a_mapping_onto_a_self_id_field_is_dropped(browser):
+    """HANDOFF rule 5: a learned label mapping may never point at a sensitive
+    field, because learned aliases are consulted before every other check and
+    one pointing at race_ethnicity would bypass the sensitive gate entirely.
+    Refused in the worker as well as by sanitizeLearnedAliases downstream.
+    """
+    out = _map_call(browser, _mapping_body([
+        {"label": "what is your background", "profile_field": "race_ethnicity"},
+        {"label": "do you agree to the terms", "profile_field": "consent_general"},
+        {"label": "have you ever been convicted", "profile_field": "criminal_history"},
+        {"label": "home telephone", "profile_field": "phone"},
+    ]))
+
+    # Asserted non-empty first, or the absence checks below pass trivially.
+    assert out["result"]["mappings"] == {"home telephone": "phone"}
+
+
+def test_a_sensitive_field_is_never_even_offered_as_a_choice(browser):
+    """The list of field names sent to the model leaves them out, so the
+    refusal above is a second line rather than the only one.
+    """
+    out = _map_call(browser, _mapping_body([]))
+    sent = json.dumps(out["sent"][0])
+
+    assert "race_ethnicity" not in sent, sent[:400]
+    assert "veteran_status" not in sent
+    assert "criminal_history" not in sent
+    assert "consent_general" not in sent
+    # Ordinary fields are offered, or the checks above mean nothing.
+    assert "phone" in sent and "linkedin_url" in sent
+
+
+def test_an_empty_mapping_is_not_stored_as_a_field_named_nothing(browser):
+    """"" is what the model is told to return when none of the fields fits,
+    and it has to stay nothing rather than becoming an alias to "".
+    """
+    out = _map_call(browser, _mapping_body([
+        {"label": "which shift suits you", "profile_field": ""},
+    ]))
+
+    assert out["result"]["mappings"] == {}
+
+
+def test_the_learn_button_runs_the_mapping_through_the_real_gate():
+    """run.js is not loaded by the browser fixtures, so this is a static check
+    that what comes back from the model goes through sanitizeLearnedAliases --
+    which reads field_aliases.js's own sets -- before it reaches storage.
+    """
+    src = open(os.path.join(EXT_DIR, "run.js"), encoding="utf-8").read()
+    learn = src[src.index("panel?.onLearn("):src.index("// Whatever arrived already filled")]
+
+    assert '"ja-learn-map"' in learn
+    assert "sanitizeLearnedAliases(reply.mappings, profile)" in learn
+    # The sanitized set is what gets stored, not the raw reply.
+    assert "learned: safe" in learn
+    assert "learned: reply.mappings" not in learn
