@@ -721,7 +721,14 @@ async function _fillRemembered(report, f, label, value, required) {
       options = f.options || [];
     }
 
-    const optionValue = bestOption(value, options);
+    let optionValue = bestOption(value, options);
+    if (optionValue === null || optionValue === undefined) {
+      // A remembered month against a list of month names, or the other way
+      // round. Only for a list that is actually months -- see bestMonthOption.
+      const real = options.filter((o) => o.value !== "" && o.value !== null);
+      const at = bestMonthOption(value, real.map((o) => o.text || ""), label);
+      if (at !== null) optionValue = real[at].value;
+    }
     if (optionValue === null || optionValue === undefined) {
       // Nothing may be left hanging open over the rest of the form.
       if (opened) _closeListbox(el, opened);
@@ -1617,13 +1624,48 @@ function watchForCorrections(report, onLearn, onSuggest) {
     radioGroups.get(key).push(f);
   }
 
+  // One edit, recorded once. Two listeners can see the same change now --
+  // the one on the element and the delegated one -- and a page firing
+  // `change` twice was already enough on its own. Storing the same answer
+  // twice is harmless in itself; counting it as two forms having asked is
+  // not, because that count is what decides which answers survive the cap.
+  const alreadyStored = new Map();
+  const isRepeat = (slot, text) => {
+    if (alreadyStored.get(slot) === text) return true;
+    alreadyStored.set(slot, text);
+    return false;
+  };
+
   const remember = (label, value) => {
     const text = String(value == null ? "" : value).trim();
     if (!text || text.length > LEARNABLE_MAX_LENGTH) return;
-    onLearn({ [normalize(label)]: text });
+    const key = normalize(label);
+    if (isRepeat(`a:${key}`, text)) return;
+    onLearn({ [key]: text });
   };
 
   const watched = [];
+
+  // A listener lives on the element it was attached to. React and Angular
+  // replace elements rather than updating them, so on those forms every
+  // listener below is quietly thrown away on the next render and a
+  // correction typed afterwards teaches nothing -- silently, which is why
+  // this sat in the known limitations rather than being noticed.
+  //
+  // So the same handlers are also registered against something the page
+  // itself keeps stable across a render: the field's id or name. One pair of
+  // listeners on the document then catches the event wherever it comes from,
+  // including from an element that did not exist when this ran.
+  const delegated = new Map();
+  const keyOf = (el) => (el && (el.id || el.getAttribute("name"))) || "";
+  const byKey = (el, handler) => {
+    const key = keyOf(el);
+    // A radio group shares one name, so its options are told apart by id
+    // alone; without one there is nothing stable to find them by later.
+    if (!key) return;
+    if (el.type === "radio" && !el.id) return;
+    delegated.set(key, handler);
+  };
 
   // `change` is the reliable signal -- it fires when a box is left, and any
   // other tool filling a field programmatically has to dispatch it or React
@@ -1645,6 +1687,7 @@ function watchForCorrections(report, onLearn, onSuggest) {
   const suggest = (field, value) => {
     const text = String(value == null ? "" : value).trim();
     if (!text || !onSuggest) return;
+    if (isRepeat(`s:${field}`, text)) return;
     onSuggest({ [field]: text });
   };
 
@@ -1660,29 +1703,32 @@ function watchForCorrections(report, onLearn, onSuggest) {
     // being asked still applies to it.
     const sensitive = _sensitiveCanonicalFor(f, f.group_label || "");
     if (sensitive) {
-      watchBoth(el, () => {
-        if (f.type === "checkbox") return suggest(sensitive, el.checked ? "Yes" : "No");
+      const onSensitive = (node) => {
+        if (f.type === "checkbox") return suggest(sensitive, node.checked ? "Yes" : "No");
         if (f.tag === "select") {
-          const opt = el.options && el.options[el.selectedIndex];
-          return suggest(sensitive, opt ? opt.text : el.value);
+          const opt = node.options && node.options[node.selectedIndex];
+          return suggest(sensitive, opt ? opt.text : node.value);
         }
-        suggest(sensitive, el.value);
-      });
+        suggest(sensitive, node.value);
+      };
+      watchBoth(el, () => onSensitive(el));
+      byKey(el, onSensitive);
       continue;
     }
 
     const label = _learnableQuestion(f, "");
     if (!label) continue;
 
-    const handler = () => {
-      if (f.type === "checkbox") return remember(label, el.checked ? "Yes" : "No");
+    const handler = (node) => {
+      if (f.type === "checkbox") return remember(label, node.checked ? "Yes" : "No");
       if (f.tag === "select") {
-        const opt = el.options && el.options[el.selectedIndex];
-        return remember(label, opt ? opt.text : el.value);
+        const opt = node.options && node.options[node.selectedIndex];
+        return remember(label, opt ? opt.text : node.value);
       }
-      remember(label, el.value);
+      remember(label, node.value);
     };
-    watchBoth(el, handler);
+    watchBoth(el, () => handler(el));
+    byKey(el, handler);
   }
 
   for (const group of radioGroups.values()) {
@@ -1696,9 +1742,11 @@ function watchForCorrections(report, onLearn, onSuggest) {
       for (const option of group) {
         const el = _el(option.ja_id);
         if (!el) continue;
-        watchBoth(el, () => {
-          if (el.checked) suggest(sensitive, option.label || el.value);
-        });
+        const onOption = (node) => {
+          if (node.checked) suggest(sensitive, option.label || node.value);
+        };
+        watchBoth(el, () => onOption(el));
+        byKey(el, onOption);
       }
       continue;
     }
@@ -1708,16 +1756,37 @@ function watchForCorrections(report, onLearn, onSuggest) {
     for (const option of group) {
       const el = _el(option.ja_id);
       if (!el) continue;
-      const handler = () => {
-        if (el.checked) remember(label, option.label || el.value);
+      const handler = (node) => {
+        if (node.checked) remember(label, option.label || node.value);
       };
-      el.addEventListener("change", handler);
-      watched.push([el, handler]);
+      const bound = () => handler(el);
+      el.addEventListener("change", bound);
+      watched.push([el, bound]);
+      byKey(el, handler);
     }
   }
 
+  const fromEvent = (target) => {
+    if (!target || !target.tagName) return;
+    const handler = delegated.get(keyOf(target));
+    if (handler) handler(target);
+  };
+
+  const onChange = (e) => fromEvent(e.target);
+  let pageTimer = null;
+  const onInput = (e) => {
+    const target = e.target;
+    clearTimeout(pageTimer);
+    pageTimer = setTimeout(() => fromEvent(target), 700);
+  };
+  document.addEventListener("change", onChange, true);
+  document.addEventListener("input", onInput, true);
+
   return () => {
     for (const [el, handler, type] of watched) el.removeEventListener(type || "change", handler);
+    document.removeEventListener("change", onChange, true);
+    document.removeEventListener("input", onInput, true);
+    clearTimeout(pageTimer);
   };
 }
 

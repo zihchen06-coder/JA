@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 204 tests passing, the whole suite green.
+`claude/happy-volta-yjo3xc`. 209 tests passing, the whole suite green.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -232,7 +232,6 @@ are DOM-behaviour bugs a mock can't reproduce.
   compiler to allow all 2^14 subsets of them. Structured-output schemas
   here require every property and use "" for absent, with `_pruneEmpty`
   dropping the blanks before anything is offered as an import.
-- **SPA re-renders drop watch-and-learn listeners** when elements are replaced.
 - **Corrections are still not learned automatically.** `watchForCorrections`
   skips every field the fill touched (`filler.js`, the `filled.has(...)`
   guards), so a wrong fill the applicant fixes by hand teaches nothing on

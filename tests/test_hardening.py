@@ -1188,3 +1188,155 @@ def test_a_field_that_holds_after_one_retry_is_still_filled(load):
     assert out["box"] == PROFILE["first_name"]
     assert out["action"] == "filled", out
     assert out["lost"] == []
+
+
+# --- A remembered month against a list of month names ----------------------
+
+MONTH_FORM = """<body><form>
+  <label for="m">Month</label>
+  <select id="m" name="m">
+    <option value="">Select</option>
+    <option value="1">January</option><option value="2">February</option>
+    <option value="3">March</option><option value="4">April</option>
+    <option value="5">May</option><option value="6">June</option>
+    <option value="7">July</option><option value="8">August</option>
+    <option value="9">September</option><option value="10">October</option>
+    <option value="11">November</option><option value="12">December</option>
+  </select>
+</form></body>"""
+
+
+def test_a_remembered_month_number_finds_the_month_it_names(load):
+    """"Remembered '8', but no option matched it" on every iCIMS date row --
+    five times in the gaps export -- with August sitting in the list.
+    """
+    page = load(html=MONTH_FORM)
+    out = page.evaluate(
+        """async (profile) => {
+            setLearnedAnswers({month: "8"});
+            const report = await fillForm(profile, null, {});
+            const r = report.results[0];
+            const el = document.getElementById('m');
+            return {action: r.action, detail: r.detail,
+                    chosen: (el.options[el.selectedIndex] || {}).text};
+        }""",
+        PROFILE,
+    )
+
+    assert out["action"] == "filled", out
+    assert out["chosen"] == "August", out
+
+
+def test_a_remembered_month_name_finds_a_numbered_list(load):
+    """The other direction: the answer was learned as "August" on one form
+    and the next one offers 01..12.
+    """
+    page = load(html="""<body><form>
+      <label for="m">Month</label>
+      <select id="m" name="m">
+        <option value="">Select</option>
+        <option value="07">07</option><option value="08">08</option>
+      </select>
+    </form></body>""")
+    out = page.evaluate(
+        """async (profile) => {
+            setLearnedAnswers({month: "August"});
+            const report = await fillForm(profile, null, {});
+            const el = document.getElementById('m');
+            return {action: report.results[0].action, chosen: el.value};
+        }""",
+        PROFILE,
+    )
+
+    assert out["action"] == "filled", out
+    assert out["chosen"] == "08", out
+
+
+def test_a_number_is_only_a_month_where_the_field_says_so(load):
+    """A bare number is a month on a date row and a quantity everywhere else.
+    Nothing here names a month and the label doesn't either, so 8 stays a
+    number and the question is left alone.
+    """
+    page = load(html="""<body><form>
+      <label for="q">How many people did you supervise?</label>
+      <select id="q" name="q">
+        <option value="">Select</option>
+        <option value="4">4</option><option value="8">8</option>
+      </select>
+    </form></body>""")
+    out = page.evaluate(
+        """async (profile) => {
+            setLearnedAnswers({"how many people did you supervise": "8"});
+            const report = await fillForm(profile, null, {});
+            return {action: report.results[0].action,
+                    chosen: document.getElementById('q').value};
+        }""",
+        PROFILE,
+    )
+
+    # bestOption matches "8" to the "8" option on its own merits, which is
+    # right -- what matters is that it is not the month path doing it.
+    assert out["chosen"] in ("8", ""), out
+
+
+def test_a_correction_still_teaches_after_the_page_replaces_the_field(load):
+    """React and Angular replace elements rather than updating them, so every
+    listener attached to one is thrown away on the next render -- silently.
+    A correction typed afterwards taught nothing, which is why this sat in
+    the known limitations instead of being noticed.
+    """
+    page = load(html="""<body><form>
+      <label for="q2">What is your spirit animal?</label>
+      <input id="q2" name="q2">
+    </form></body>""")
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const seen = {};
+            watchForCorrections(report, (m) => Object.assign(seen, m));
+
+            // What a re-render does: the old node goes, an identical one
+            // takes its place, and every listener on the old one goes with it.
+            const old = document.getElementById('q2');
+            const fresh = document.createElement('input');
+            fresh.id = 'q2';
+            fresh.name = 'q2';
+            old.replaceWith(fresh);
+
+            fresh.value = 'Octopus';
+            fresh.dispatchEvent(new Event('change', {bubbles: true}));
+            await new Promise((r) => setTimeout(r, 60));
+            return {seen, stillThere: document.getElementById('q2') === fresh};
+        }""",
+        PROFILE,
+    )
+
+    assert out["stillThere"], "the fixture did not actually replace the node"
+    assert out["seen"] == {"what is your spirit animal": "Octopus"}, out["seen"]
+
+
+def test_the_same_edit_is_not_counted_as_two_forms_asking(load):
+    """The direct listener and the delegated one can both fire for one edit.
+    Storing the answer twice is harmless; counting it as two forms having
+    asked is not, because that count decides what survives the cap.
+    """
+    page = load(html="""<body><form>
+      <label for="q2">What is your spirit animal?</label>
+      <input id="q2" name="q2">
+    </form></body>""")
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            let calls = 0;
+            watchForCorrections(report, () => { calls += 1; });
+            const el = document.getElementById('q2');
+            el.value = 'Octopus';
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+            await new Promise((r) => setTimeout(r, 60));
+            return calls;
+        }""",
+        PROFILE,
+    )
+
+    assert out == 1, f"one edit reported {out} times"

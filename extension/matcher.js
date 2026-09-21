@@ -614,6 +614,42 @@ function datePartCandidates(value, part) {
   return [];
 }
 
+// "8" and "August" are the same month, and no amount of string matching
+// gets one to the other. A remembered "8" came back "no option matched it"
+// on every iCIMS date row -- five times in the gaps export -- with the
+// answer already stored.
+//
+// Only a month: a bare number is a month here and a quantity everywhere
+// else, so this needs the field to say so. A list carrying an actual month
+// name says it; otherwise the label has to.
+function monthNumberOf(text) {
+  const raw = String(text == null ? "" : text).trim();
+  if (!raw) return null;
+  const named = _MONTHS[raw.toLowerCase()];
+  if (named) return named;
+  if (!/^\d{1,2}$/.test(raw)) return null;
+  const n = Number(raw);
+  return n >= 1 && n <= 12 ? n : null;
+}
+
+function _namesAMonth(text) {
+  return !!_MONTHS[String(text == null ? "" : text).trim().toLowerCase()];
+}
+
+function bestMonthOption(value, choices, label = "") {
+  const want = monthNumberOf(value);
+  if (want === null) return null;
+
+  const looksLikeMonths =
+    choices.some(_namesAMonth) || /\bmonth\b/.test(normalize(label));
+  if (!looksLikeMonths) return null;
+
+  for (let i = 0; i < choices.length; i++) {
+    if (monthNumberOf(choices[i]) === want) return i;
+  }
+  return null;
+}
+
 function semanticBool(choiceText) {
   const norm = normalize(choiceText);
   if (!norm) return null;
