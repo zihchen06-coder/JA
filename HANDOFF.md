@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 202 tests passing, the whole suite green.
+`claude/happy-volta-yjo3xc`. 204 tests passing, the whole suite green.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -108,7 +108,9 @@ shape statically, so it is the thing to update if this is restructured.
    sends it to Claude via the service worker, applies answers through
    `applyLlmAnswers()` which re-checks every guard.
 6. `verifyFilled()` — re-read every filled field ~350ms later, re-apply once,
-   downgrade to `needs_review` if the page cleared it.
+   then wait the same moment again before judging. Reading the value back on
+   the line after setting it only proves the write landed; a page that
+   clears on its next render passed that and was reported filled.
 7. Learn: from Claude's answers, from what was already on the page, and
    (ongoing) from what the user types afterwards.
 8. Record misses and the application row. Render results in the panel.

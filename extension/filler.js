@@ -1775,6 +1775,8 @@ async function verifyFilled(report, delayMs = 350) {
   await _sleep(delayMs);
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
   const lost = [];
+  // Re-set and still to be judged, once the page has had a moment with it.
+  const retried = [];
 
   for (const r of report.results) {
     if (r.action !== "filled" || !r.ja_id) continue;
@@ -1799,12 +1801,31 @@ async function verifyFilled(report, delayMs = 350) {
       } else if (el) {
         _setNativeValue(el, r.detail);
       }
-      recovered = !!_currentValue(el, f);
+      recovered = true;
     } catch (exc) {
       recovered = false;
     }
 
-    if (!recovered) {
+    // Whether it held is decided below, after the page has had the same
+    // moment to react that it was given the first time. Reading the value
+    // back on the line after setting it only proves the write landed: a page
+    // that clears the field on its next render passes that check and is
+    // reported as filled, and a green field that is actually empty is worse
+    // than a flagged one, because nobody looks at it again.
+    if (recovered) retried.push(r);
+    else {
+      r.action = "needs_review";
+      r.detail = `Set to '${r.detail}', but the page cleared it -- fill this one yourself.`;
+      _mark(r.ja_id, MARK_REVIEW);
+      lost.push(r.label || r.ja_id);
+    }
+  }
+
+  if (retried.length) {
+    await _sleep(delayMs);
+    for (const r of retried) {
+      const f = byId.get(r.ja_id);
+      if (_currentValue(_el(r.ja_id), f)) continue;
       r.action = "needs_review";
       r.detail = `Set to '${r.detail}', but the page cleared it -- fill this one yourself.`;
       _mark(r.ja_id, MARK_REVIEW);

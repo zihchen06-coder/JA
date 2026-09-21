@@ -1116,3 +1116,75 @@ def test_capping_still_works_on_plain_string_entries(load):
     )
 
     assert out == 2
+
+
+# --- Saying a field is filled when it isn't --------------------------------
+
+def test_a_field_the_page_clears_a_moment_later_is_not_reported_as_filled(load):
+    """verifyFilled re-set a cleared field and read the value back on the next
+    line, which only proves the write landed. A page that clears the field on
+    its next render passed that check and was reported filled -- a green field
+    that is actually empty, which nobody looks at again. Worse than a flag.
+    """
+    page = load(
+        html="""<body><form>
+            <label for="fn">First Name</label><input id="fn" name="fn">
+        </form>
+        <script>
+          // Clears whatever is put in it, on the tick after it is set --
+          // which is what a framework re-rendering from its own state does.
+          const el = document.getElementById('fn');
+          el.addEventListener('input', () => setTimeout(() => { el.value = ''; }, 30));
+        </script></body>"""
+    )
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const lost = await verifyFilled(report, 60);
+            const r = report.results.find((x) => x.canonical === 'first_name');
+            // The state the applicant would actually submit, read after the
+            // page has finished doing whatever it does.
+            await new Promise((res) => setTimeout(res, 120));
+            return {action: r.action, detail: r.detail, lost, box: document.getElementById('fn').value};
+        }""",
+        PROFILE,
+    )
+
+    assert out["box"] == "", "the fixture did not actually clear the field"
+    assert out["action"] == "needs_review", out
+    assert "cleared it" in out["detail"]
+    assert out["lost"] == ["First Name"]
+
+
+def test_a_field_that_holds_after_one_retry_is_still_filled(load):
+    """The other half. A page that merely lost the value once -- still
+    settling when the fill ran -- takes it on the retry and stays green.
+    """
+    page = load(
+        html="""<body><form>
+            <label for="fn">First Name</label><input id="fn" name="fn">
+        </form>
+        <script>
+          // Clears it once, then accepts whatever comes next.
+          const el = document.getElementById('fn');
+          let first = true;
+          el.addEventListener('input', () => {
+            if (!first) return;
+            first = false;
+            setTimeout(() => { el.value = ''; }, 10);
+          });
+        </script></body>"""
+    )
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const lost = await verifyFilled(report, 60);
+            const r = report.results.find((x) => x.canonical === 'first_name');
+            return {action: r.action, lost, box: document.getElementById('fn').value};
+        }""",
+        PROFILE,
+    )
+
+    assert out["box"] == PROFILE["first_name"]
+    assert out["action"] == "filled", out
+    assert out["lost"] == []
