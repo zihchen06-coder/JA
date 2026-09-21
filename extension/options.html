@@ -392,6 +392,33 @@
     <span id="status"></span>
   </div>
   <p class="note">Downloads everything on this page (not documents/credentials) as a local file -- paste its contents to Claude any time you want it kept somewhere durable, or to pick this profile back up in a future conversation.</p>
+
+  <div class="card" style="margin-top:20px;">
+    <div><strong>Move to another browser</strong></div>
+    <p class="note" style="margin:6px 0 12px;">A full backup: this profile, your settings, saved documents,
+      everything learned, the gaps list and your application history. Load it on the other
+      device under the same heading and it picks up exactly where this one left off.</p>
+
+    <div class="toggle-row" style="margin-bottom:12px;">
+      <div>
+        <div><strong>Include saved logins and API key</strong></div>
+        <div class="desc">Off by default, because the backup file is ordinary text on your
+          disk and anything in it can be read by anything that can read the file. Turn it on
+          only if you are moving devices and need your saved site passwords to come across,
+          and delete the file once the other browser has it.</div>
+      </div>
+      <label class="row"><input type="checkbox" id="backup-secrets" style="width:18px;height:18px;"></label>
+    </div>
+
+    <div class="row">
+      <button class="ghost" id="backup-export" type="button">Download backup</button>
+      <button class="ghost" id="backup-import-btn" type="button">Restore from backup&hellip;</button>
+      <input type="file" id="backup-import" accept="application/json,.json" style="display:none;">
+    </div>
+    <p class="note" id="backup-status" style="margin-top:10px;"></p>
+    <p class="note">Restoring replaces what is in this browser with what is in the file.
+      Anything the file does not carry is left alone.</p>
+  </div>
 </div>
 <script src="field_aliases.js"></script>
 <!-- For bestSelfIdChoice, matching a form's wording to one of this

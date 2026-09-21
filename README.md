@@ -68,6 +68,25 @@ has whatever forms you have shown it. Export the list and hand it over, and
 the top of it is exactly what to work on — a label that came back unfilled
 thirty times is worth an hour; one that appeared once is not.
 
+### Moving to another browser
+
+**Options → Move to another browser → Download backup** writes one JSON file
+holding everything this browser has: your profile, your settings, the resume
+and cover letter you saved, everything it has learned, the gaps list and your
+application history. Load it on the other device under the same heading and it
+picks up where this one left off.
+
+Saved site logins and your API key are **left out unless you tick the box**.
+The backup is ordinary text sitting on your disk, and anything that can read
+the file can read a password out of it — so it is a decision you make rather
+than something that happens because you pressed Download. Tick it when you are
+genuinely moving devices and need the logins to come across, then delete the
+file once the other browser has it.
+
+Restoring replaces what is in this browser for whatever the file carries, and
+leaves everything else alone. It asks first, and refuses a file that isn't one
+of its own backups.
+
 ### Applications
 
 One row per application, logged automatically: role, company, site, date,

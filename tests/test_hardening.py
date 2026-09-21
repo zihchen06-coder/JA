@@ -792,3 +792,166 @@ def test_an_employee_number_is_never_filled(load):
 
     assert out["filled"] == [], f"still matches something: {out['filled']}"
     assert out["broken"] == [], f"collateral damage: {out['broken']}"
+
+
+# --- Moving to another browser ---------------------------------------------
+
+BACKUP_SEED = {
+    "profile": {**PROFILE, "resume_file": {"name": "cv.pdf", "dataUrl": "data:application/pdf;base64,AAA"}},
+    "settings": {"use_llm": True, "manual_fill": True},
+    "credentials": {"workday.com": {"email": "jamie@example.com", "password": "hunter2"}},
+    "llm_api_key": "sk-ant-secret",
+    "learned_aliases": {"home telephone": "phone"},
+    "learned_answers": {"did you graduate": "Yes"},
+    "misses": {"site.com|q": {"host": "site.com", "label": "Q", "action": "skipped_no_match",
+                              "detail": "", "required": False, "type": "text", "count": 2, "last": 1}},
+    "applications": [{"url": "https://x/apply", "host": "x.com", "title": "Intern",
+                      "company": "x", "filled": 9, "review": 0, "blank": 0, "at": 1, "pages": 1}],
+    "profile_suggestions": {"linkedin_url": "https://linkedin.com/in/someone"},
+}
+
+
+def _backup_page(browser):
+    """The options page with the download intercepted, so a test can read
+    what the backup file would have contained.
+    """
+    page = _options_page(browser, seed={**BACKUP_SEED})
+    page.evaluate(
+        """() => {
+            window.__downloaded = null;
+            window.__confirmed = true;
+            window.confirm = () => window.__confirmed;
+            URL.createObjectURL = (blob) => { window.__blob = blob; return "blob:stub"; };
+            URL.revokeObjectURL = () => {};
+            HTMLAnchorElement.prototype.click = function () {
+                window.__downloaded = this.download;
+            };
+        }"""
+    )
+    return page
+
+
+def _exported(page, with_secrets):
+    return page.evaluate(
+        """async (withSecrets) => {
+            document.getElementById('backup-secrets').checked = withSecrets;
+            document.getElementById('backup-export').click();
+            await new Promise((r) => setTimeout(r, 80));
+            return {
+                name: window.__downloaded,
+                payload: JSON.parse(await window.__blob.text()),
+                status: document.getElementById('backup-status').textContent,
+            };
+        }""",
+        with_secrets,
+    )
+
+
+def test_a_backup_carries_everything_needed_to_pick_up_on_another_browser(browser):
+    """Distinct from "Export as JSON", which drops documents and credentials
+    because it is meant to be pasted into a chat. A device move has to carry
+    the resume with it or the other browser cannot apply for anything.
+    """
+    page = _backup_page(browser)
+    try:
+        out = _exported(page, False)
+    finally:
+        page.close()
+
+    data = out["payload"]["data"]
+    assert out["payload"]["ja_backup"] == 1
+    assert out["name"].startswith("ja-backup-") and out["name"].endswith(".json")
+    for key in ("profile", "settings", "learned_aliases", "learned_answers",
+                "misses", "applications", "profile_suggestions"):
+        assert key in data, f"{key} missing from the backup"
+    # The resume travels with it.
+    assert data["profile"]["resume_file"]["name"] == "cv.pdf"
+
+
+def test_a_backup_leaves_the_passwords_out_unless_they_are_asked_for(browser):
+    """The file is ordinary text on a disk. Anything that can read the file
+    can read a saved site password out of it, so it is a deliberate choice
+    rather than something that happens because you pressed Download.
+    """
+    page = _backup_page(browser)
+    try:
+        without = _exported(page, False)
+        with_them = _exported(page, True)
+    finally:
+        page.close()
+
+    assert "credentials" not in without["payload"]["data"]
+    assert "llm_api_key" not in without["payload"]["data"]
+    assert "hunter2" not in json.dumps(without["payload"])
+    assert without["payload"]["includes_secrets"] is False
+
+    # And it does carry them when asked, or moving devices loses the logins.
+    assert with_them["payload"]["data"]["llm_api_key"] == "sk-ant-secret"
+    assert with_them["payload"]["data"]["credentials"]["workday.com"]["password"] == "hunter2"
+    assert with_them["payload"]["includes_secrets"] is True
+    # And says so, rather than leaving it to be discovered.
+    assert "delete the file" in with_them["status"]
+
+
+def _restore(page, payload, confirmed=True):
+    return page.evaluate(
+        """async ({payload, confirmed}) => {
+            window.__confirmed = confirmed;
+            const input = document.getElementById('backup-import');
+            const file = new File([JSON.stringify(payload)], 'b.json', {type: 'application/json'});
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+            input.dispatchEvent(new Event('change', {bubbles: true}));
+            await new Promise((r) => setTimeout(r, 120));
+            const stored = await chrome.storage.local.get(
+                ['profile', 'learned_aliases', 'credentials', 'settings']);
+            return {stored, status: document.getElementById('backup-status').textContent};
+        }""",
+        {"payload": payload, "confirmed": confirmed},
+    )
+
+
+def test_restoring_replaces_only_what_the_file_carries(browser):
+    page = _backup_page(browser)
+    try:
+        out = _restore(page, {
+            "ja_backup": 1,
+            "saved_at": "2026-09-20T10:00:00.000Z",
+            "data": {"learned_aliases": {"mobile no": "phone"}},
+        })
+    finally:
+        page.close()
+
+    assert out["stored"]["learned_aliases"] == {"mobile no": "phone"}
+    # Untouched, because the file said nothing about them.
+    assert out["stored"]["credentials"]["workday.com"]["password"] == "hunter2"
+    assert out["stored"]["profile"]["first_name"] == PROFILE["first_name"]
+
+
+def test_a_file_that_is_not_a_backup_is_refused(browser):
+    """A profile export, a resume, or somebody's unrelated JSON would
+    otherwise be written straight into storage as if it belonged there.
+    """
+    page = _backup_page(browser)
+    try:
+        out = _restore(page, {"first_name": "Somebody", "last_name": "Else"})
+    finally:
+        page.close()
+
+    assert "isn't a backup file" in out["status"]
+    assert out["stored"]["profile"]["first_name"] == PROFILE["first_name"]
+
+
+def test_declining_the_confirmation_changes_nothing(browser):
+    page = _backup_page(browser)
+    try:
+        out = _restore(page, {
+            "ja_backup": 1,
+            "data": {"learned_aliases": {"mobile no": "phone"}},
+        }, confirmed=False)
+    finally:
+        page.close()
+
+    assert out["stored"]["learned_aliases"] == {"home telephone": "phone"}
+    assert "Left as it was" in out["status"]

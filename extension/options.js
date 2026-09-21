@@ -458,6 +458,105 @@ function initTabs() {
     URL.revokeObjectURL(url);
   };
 
+  // Everything this browser holds, so the same setup can be picked up on
+  // another one. Distinct from "Export as JSON" above, which deliberately
+  // drops documents and credentials because it is meant to be pasted into a
+  // chat -- this is a device move and has to carry the resume with it.
+  const BACKUP_KEYS = [
+    "profile", "settings", "learned_aliases", "learned_answers",
+    "misses", "applications", "profile_suggestions", "migrations",
+  ];
+  // Kept out unless asked for. The file is ordinary text on a disk: anything
+  // that can read the file can read a saved site password out of it.
+  const BACKUP_SECRET_KEYS = ["credentials", "llm_api_key"];
+
+  const backupStatus = (text, cls) => {
+    const el = document.getElementById("backup-status");
+    el.textContent = text;
+    el.className = cls ? `note ${cls}` : "note";
+  };
+
+  document.getElementById("backup-export").onclick = async () => {
+    const withSecrets = document.getElementById("backup-secrets").checked;
+    const keys = withSecrets ? [...BACKUP_KEYS, ...BACKUP_SECRET_KEYS] : BACKUP_KEYS;
+    const data = await chrome.storage.local.get(keys);
+
+    const payload = {
+      ja_backup: 1,
+      saved_at: new Date().toISOString(),
+      includes_secrets: withSecrets,
+      data,
+    };
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" })
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ja-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    backupStatus(
+      withSecrets
+        ? "Downloaded, with your saved logins and API key in it -- delete the file once the other browser has it."
+        : "Downloaded. Saved logins and the API key were left out; tick the box above if you need them too.",
+      "ok"
+    );
+  };
+
+  document.getElementById("backup-import-btn").onclick = () =>
+    document.getElementById("backup-import").click();
+
+  document.getElementById("backup-import").onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+
+    let payload;
+    try {
+      payload = JSON.parse(await file.text());
+    } catch (exc) {
+      backupStatus(`That file isn't readable as JSON (${exc}).`, "err");
+      return;
+    }
+    // A profile export, a resume, or somebody's unrelated JSON would
+    // otherwise be written straight into storage as if it belonged.
+    if (!payload || payload.ja_backup !== 1 || !payload.data || typeof payload.data !== "object") {
+      backupStatus("That isn't a backup file from this extension.", "err");
+      return;
+    }
+
+    const known = [...BACKUP_KEYS, ...BACKUP_SECRET_KEYS];
+    const restoring = {};
+    for (const key of known) {
+      if (Object.prototype.hasOwnProperty.call(payload.data, key)) {
+        restoring[key] = payload.data[key];
+      }
+    }
+    const names = Object.keys(restoring);
+    if (!names.length) {
+      backupStatus("That backup has nothing in it to restore.", "err");
+      return;
+    }
+
+    const saved = payload.saved_at ? new Date(payload.saved_at).toLocaleString() : "an unknown date";
+    if (!confirm(
+      `Restore ${names.length} item(s) from the backup taken on ${saved}?\n\n` +
+      `This replaces what is in this browser for: ${names.join(", ")}.`
+    )) {
+      backupStatus("Left as it was.", "");
+      return;
+    }
+
+    await chrome.storage.local.set(restoring);
+    // The form on this page was drawn from the old storage, so re-read it
+    // rather than leaving the two disagreeing until the next save wipes the
+    // restore out.
+    backupStatus("Restored. Reloading this page\u2026", "ok");
+    setTimeout(() => location.reload(), 600);
+  };
+
   const wireFileInput = (inputId, key, elId) => {
     document.getElementById(inputId).onchange = async (e) => {
       const file = e.target.files[0];
