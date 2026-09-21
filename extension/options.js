@@ -710,25 +710,35 @@ function renderLearned() {
 function renderLearnedAnswers() {
   const list = document.getElementById("answers-learned-list");
   const empty = document.getElementById("answers-learned-empty");
-  const entries = Object.entries(state.learnedAnswers || {}).sort();
+  // Most-asked first, the way the Gaps tab ranks: an answer eight forms have
+  // wanted is the one worth checking is still right.
+  const entries = Object.entries(state.learnedAnswers || {}).sort((a, b) => {
+    const n = (e) => (e && typeof e === "object" ? e.n || 0 : 0);
+    return n(b[1]) - n(a[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  });
   list.innerHTML = "";
   empty.style.display = entries.length ? "none" : "";
 
-  for (const [label, value] of entries) {
+  for (const [label, entry] of entries) {
+    const value = answerValueOf(entry);
+    const asked = entry && typeof entry === "object" ? entry.n || 0 : 0;
     const row = document.createElement("div");
     row.className = "cred-row";
     row.style.marginBottom = "8px";
     row.innerHTML = `
       <input readonly value="${esc(label)}">
-      <input data-answer="1" value="${esc(value)}">
-      <span></span>
+      <input data-answer="1" value="${esc(value === null ? "" : value)}">
+      <span class="note">${asked > 1 ? `asked on ${asked} forms` : ""}</span>
       <button class="danger" type="button">Forget</button>`;
     // Editable in place: a remembered answer you would rather phrase
     // differently is worth correcting once, not deleting and waiting to be
     // asked it again.
     row.querySelector("input[data-answer]").onchange = async (e) => {
-      state.learnedAnswers[label] = e.target.value;
+      // Corrected by hand, so the count starts over: whatever those earlier
+      // forms confirmed, it was not this answer.
+      state.learnedAnswers[label] = { v: e.target.value, n: 1, t: Date.now() };
       await chrome.storage.local.set({ learned_answers: state.learnedAnswers });
+      renderLearnedAnswers();
     };
     row.querySelector("button").onclick = async () => {
       delete state.learnedAnswers[label];

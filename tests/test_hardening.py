@@ -955,3 +955,164 @@ def test_declining_the_confirmation_changes_nothing(browser):
 
     assert out["stored"]["learned_aliases"] == {"home telephone": "phone"}
     assert "Left as it was" in out["status"]
+
+
+# --- The answer bank: the same question, asked differently -----------------
+
+RTX_CURRENT = ("Are you a CURRENT U.S. federal government civilian or military "
+               "(active duty or reserves) employee?")
+RTX_FORMER = ("Are you a FORMER U.S. federal government civilian or military "
+              "(active duty or reserves) employee?")
+
+
+def _answers(page, stored, asked):
+    return page.evaluate(
+        """({stored, asked}) => {
+            setLearnedAnswers(stored);
+            return asked.map((q) => learnedAnswerFor(q));
+        }""",
+        {"stored": stored, "asked": asked},
+    )
+
+
+def test_a_reworded_question_finds_the_answer_it_was_already_given(load):
+    """A remembered answer was keyed by one form's exact wording, so the same
+    question asked differently on the next site missed entirely even with the
+    answer sitting right there.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = _answers(
+        page,
+        {"did you previously work for rtx in any capacity": "No",
+         "which shift are you available for": "Either",
+         "please provide your major": "Mechanical Engineering"},
+        ["Have you previously worked for RTX in any capacity?",
+         "What shift are you available for?",
+         "Provide your major"],
+    )
+
+    assert out == ["No", "Either", "Mechanical Engineering"]
+
+
+def test_current_and_former_are_not_the_same_question(load):
+    """The reason this is a content-word rule and not a similarity score.
+    On a real RTX form these two score 0.952 against each other -- higher
+    than "Did you previously work" against "Have you previously worked",
+    which is 0.907 and genuinely the same question. No threshold separates
+    them; the word that differs does.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = _answers(page, {_norm(RTX_CURRENT): "Yes"}, [RTX_CURRENT, RTX_FORMER])
+
+    assert out[0] == "Yes", "the exact question it was taught"
+    assert out[1] is None, "FORMER answered from what was said about CURRENT"
+
+
+def test_questions_that_differ_only_in_meaning_never_cross(load):
+    """Every one of these scores high enough that a threshold would let it
+    through, and every one means something different.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = _answers(
+        page,
+        {"are you willing to relocate": "Yes",
+         "do you require sponsorship now": "No",
+         "are you 18 years of age or older": "Yes"},
+        ["Are you willing to travel?",
+         "Will you require sponsorship in the future?",
+         "Are you over 18 years of age?"],
+    )
+
+    assert out == [None, None, None], out
+
+
+def test_two_answers_under_one_wording_serve_neither(load):
+    """Two labels reducing to the same question but disagreeing about the
+    answer means the reduction cannot tell them apart. An exact match on
+    either still works; guessing between them does not.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = _answers(
+        page,
+        {"do you have a driver s licence": "Yes",
+         "do you have a drivers licence": "No"},
+        ["Do you have a driver's licence?",
+         "Have you got a drivers licence?"],
+    )
+
+    assert out[0] == "Yes", "an exact match is untouched by the ambiguity"
+    assert out[1] is None, "served an answer from two that disagree"
+
+
+def test_answers_stored_before_the_record_shape_still_work(load):
+    """The store held bare strings for a long time and some still will."""
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = _answers(
+        page,
+        {"did you graduate": "Yes",
+         "which shift are you available for": {"v": "Nights", "n": 4, "t": 1}},
+        ["Did you graduate?", "What shift are you available for?"],
+    )
+
+    assert out == ["Yes", "Nights"]
+
+
+def _norm(text):
+    import re
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", text.lower())).strip()
+
+
+# --- The answer bank: what it keeps when it runs out of room ---------------
+
+def test_an_answer_asked_for_again_is_the_same_answer_confirmed(load):
+    page = load(html="<body></body>", scripts=["llm.js"])
+    out = page.evaluate(
+        """() => {
+            let store = mergeLearnedAnswers({}, {"did you graduate": "Yes"}, 100);
+            store = mergeLearnedAnswers(store, {"did you graduate": "Yes"}, 200);
+            store = mergeLearnedAnswers(store, {"did you graduate": "Yes"}, 300);
+            const confirmed = {...store};
+            // Corrected: whatever those forms confirmed, it was not this.
+            const corrected = mergeLearnedAnswers(store, {"did you graduate": "No"}, 400);
+            return {confirmed, corrected};
+        }"""
+    )
+
+    assert out["confirmed"]["did you graduate"] == {"v": "Yes", "n": 3, "t": 300}
+    assert out["corrected"]["did you graduate"] == {"v": "No", "n": 1, "t": 400}
+
+
+def test_the_store_drops_what_nothing_has_asked_for(load):
+    """It used to drop whatever arrived first, so an answer eight forms wanted
+    could be evicted by one seen once. Misses were already ranked this way.
+    """
+    page = load(html="<body></body>", scripts=["llm.js"])
+    out = page.evaluate(
+        """() => {
+            const store = {
+                "asked often": {v: "A", n: 9, t: 1},
+                "asked once": {v: "B", n: 1, t: 50},
+                "asked twice": {v: "C", n: 2, t: 40},
+            };
+            const kept = capLearned(store, 2);
+            return {kept: Object.keys(kept).sort(), size: Object.keys(kept).length};
+        }"""
+    )
+
+    assert out["size"] == 2
+    assert out["kept"] == ["asked often", "asked twice"], out["kept"]
+
+
+def test_capping_still_works_on_plain_string_entries(load):
+    """learned_aliases are label -> field with no history to rank by, and so
+    are answers stored before the record shape.
+    """
+    page = load(html="<body></body>", scripts=["llm.js"])
+    out = page.evaluate(
+        """() => {
+            const kept = capLearned({a: "1", b: "2", c: "3"}, 2);
+            return Object.keys(kept).length;
+        }"""
+    )
+
+    assert out == 2

@@ -251,10 +251,41 @@ async function _postMessages(apiKey, body, useFallbacks) {
 // a lot of them. Extension storage is finite, so the stores that grow with
 // use are trimmed to the most recently added -- object key order is
 // insertion order, and a merge puts new entries last.
+// An answer carrying {v, n, t} is dropped on how little it has been wanted,
+// the way misses already are -- the one asked for on nine forms outlives the
+// one seen once, whichever arrived first. Bare-string entries (aliases, and
+// answers stored before the record shape) have nothing to sort on and keep
+// the old insertion-order behaviour; they sort last, so a record with any
+// history beats an entry with none.
 function capLearned(map, limit = 2000) {
   const entries = Object.entries(map || {});
   if (entries.length <= limit) return { ...(map || {}) };
-  return Object.fromEntries(entries.slice(entries.length - limit));
+
+  const weight = (e) => (e && typeof e === "object" ? [e.n || 0, e.t || 0] : [-1, -1]);
+  const ranked = entries
+    .map((pair, i) => ({ pair, i, w: weight(pair[1]) }))
+    .sort((a, b) => (b.w[0] - a.w[0]) || (b.w[1] - a.w[1]) || (b.i - a.i));
+  return Object.fromEntries(ranked.slice(0, limit).map((r) => r.pair));
+}
+
+// Merging, rather than overwriting: an answer asked for again is the same
+// answer confirmed, and that is the only record of how much any of this is
+// actually worth keeping. A changed answer replaces the old one and starts
+// its count over -- they corrected it, so the old count was counting
+// something else.
+function mergeLearnedAnswers(existing, incoming, now) {
+  const at = now || Date.now();
+  const out = { ...(existing || {}) };
+  for (const [label, value] of Object.entries(incoming || {})) {
+    if (value === null || value === undefined || value === "") continue;
+    const had = out[label];
+    const previous = had && typeof had === "object" ? had.v : had;
+    out[label] =
+      previous === value
+        ? { v: value, n: ((had && had.n) || 1) + 1, t: at }
+        : { v: value, n: 1, t: at };
+  }
+  return out;
 }
 
 // Misses carry their own count and timestamp, so the ones worth keeping are

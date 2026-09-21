@@ -279,16 +279,92 @@ function setLearnedAliases(map) {
 // every time and never being asked again. Answers only, never prose.
 var LEARNED_ANSWERS = {};
 
+// A remembered answer is stored either as the bare string it used to be, or
+// as {v, n, t} -- the answer, how many forms have asked for it, and when it
+// was last wanted. Both shapes are read; only the second is written.
+function answerValueOf(entry) {
+  if (entry === null || entry === undefined) return null;
+  if (typeof entry === "object") return entry.v === undefined ? null : entry.v;
+  return entry;
+}
+
+// Words that carry no meaning about what a question is asking. The point of
+// the list is what it leaves out: "current", "former", "now", "future",
+// "relocate", "travel" all stay, because those are exactly the words that
+// tell two near-identical questions apart.
+var _QUESTION_STOPWORDS = new Set([
+  "a", "an", "the", "is", "are", "was", "were", "be", "been", "do", "does",
+  "did", "have", "has", "had", "will", "would", "can", "could", "shall",
+  "should", "may", "might", "you", "your", "yours", "i", "my", "me", "we",
+  "our", "they", "their", "it", "its", "this", "that", "these", "those",
+  "to", "of", "in", "on", "at", "for", "with", "by", "from", "as", "and",
+  "or", "if", "any", "please", "kindly", "us", "provide", "enter", "select",
+  "specify", "tell", "state", "indicate", "what", "which",
+]);
+
+function _stem(word) {
+  return word.replace(/ies$/, "y").replace(/(ed|ing|es|s)$/, "");
+}
+
+// The question's meaning-bearing words, sorted, as one key. Two labels share
+// it when they are the same question worded differently.
+//
+// This is deliberately not a similarity score, and measuring is why. On a
+// real RTX form, "Are you a CURRENT U.S. federal government ... employee?"
+// and the FORMER version of the same sentence score 0.952 against each other
+// -- higher than "Did you previously work" against "Have you previously
+// worked", which is 0.907 and genuinely the same question. No threshold
+// separates those, so similarity is the wrong instrument: what matters is
+// whether the words that differ carry meaning. "current" and "former" do.
+// "did" and "have" do not. Tokens of one letter go too, so "driver's licence"
+// and "drivers licence" don't part company over the stray "s" normalize
+// leaves behind.
+function _contentKey(norm) {
+  const words = norm
+    .split(" ")
+    .filter((w) => w.length > 1 && !_QUESTION_STOPWORDS.has(w))
+    .map(_stem);
+  if (!words.length) return "";
+  return Array.from(new Set(words)).sort().join(" ");
+}
+
+// contentKey -> the one answer every label with that key agrees on. Two
+// labels sharing a key but not an answer means the key cannot tell them
+// apart, so neither is served from it -- an exact match on either still
+// works, and guessing between them does not.
+var LEARNED_ANSWER_INDEX = {};
+
 function setLearnedAnswers(map) {
   LEARNED_ANSWERS = map || {};
+  LEARNED_ANSWER_INDEX = {};
+  const conflicted = new Set();
+  for (const [label, entry] of Object.entries(LEARNED_ANSWERS)) {
+    const key = _contentKey(label);
+    if (!key || key === label || conflicted.has(key)) continue;
+    const value = answerValueOf(entry);
+    if (value === null) continue;
+    if (!Object.prototype.hasOwnProperty.call(LEARNED_ANSWER_INDEX, key)) {
+      LEARNED_ANSWER_INDEX[key] = value;
+    } else if (LEARNED_ANSWER_INDEX[key] !== value) {
+      conflicted.add(key);
+      delete LEARNED_ANSWER_INDEX[key];
+    }
+  }
 }
 
 function learnedAnswerFor(label) {
   const norm = normalize(label);
   if (!norm) return null;
-  return Object.prototype.hasOwnProperty.call(LEARNED_ANSWERS, norm)
-    ? LEARNED_ANSWERS[norm]
-    : null;
+  if (Object.prototype.hasOwnProperty.call(LEARNED_ANSWERS, norm)) {
+    return answerValueOf(LEARNED_ANSWERS[norm]);
+  }
+  // The same question, asked in different words. An exact hit above always
+  // wins; this only ever runs when the wording has never been seen before.
+  const key = _contentKey(norm);
+  if (key && Object.prototype.hasOwnProperty.call(LEARNED_ANSWER_INDEX, key)) {
+    return LEARNED_ANSWER_INDEX[key];
+  }
+  return null;
 }
 
 function matchField(label, minRatio = 0.72) {

@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 194 tests passing, the whole suite green.
+`claude/happy-volta-yjo3xc`. 202 tests passing, the whole suite green.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -128,7 +128,7 @@ shape statically, so it is the thing to update if this is restructured.
 
 | Store | Holds | Written from |
 |---|---|---|
-| `learned_answers` | label -> answer text | Questions the profile has no field for |
+| `learned_answers` | label -> `{v, n, t}` | Questions the profile has no field for |
 | `learned_aliases` | label -> profile field | Claude's declared `profile_field` |
 | `profile_suggestions` | profile field -> value | Gaps found on the page; **suggested, never written** |
 
@@ -150,6 +150,24 @@ field anywhere, so this is what generalises. Rule 5 still decides what
 lands: the reply goes through `sanitizeLearnedAliases`, and llm.js keeps
 its own copy of the refused field names so they are never offered to the
 model — that copy is not the gate, and says so.
+
+A learned answer is `{v, n, t}` — the answer, how many forms have asked for
+it, how recently. Bare strings from before the shape change are still read
+(`answerValueOf`), never written. `mergeLearnedAnswers` increments on a repeat
+and resets to 1 on a correction; `capLearned` evicts by how little a thing has
+been wanted rather than by what arrived first, the way `capMisses` already did.
+
+`learnedAnswerFor` tries the exact wording, then a **content key**: the
+question's meaning-bearing words, stemmed and sorted, with stopwords dropped.
+This is deliberately not a similarity score, and measuring is why — on a real
+RTX form, the CURRENT and FORMER federal-employee questions score **0.952**
+against each other, higher than "Did you previously work" vs "Have you
+previously worked" at **0.907**, which is genuinely the same question. No
+threshold separates those. What separates them is whether the differing words
+carry meaning, so `_QUESTION_STOPWORDS` is defined by what it leaves out:
+current, former, now, future, relocate, travel all stay. Two labels sharing a
+content key but disagreeing on the answer serve neither — an exact match on
+either still works, guessing between them does not.
 
 Capped in `background.js` (`capLearned`, `capMisses` in `llm.js`).
 

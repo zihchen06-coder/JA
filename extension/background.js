@@ -239,7 +239,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       const { learned_answers: existing } = await chrome.storage.local.get(["learned_answers"]);
       await chrome.storage.local.set({
-        learned_answers: capLearned({ ...(existing || {}), ...message.answers }),
+        learned_answers: capLearned(mergeLearnedAnswers(existing, message.answers)),
       });
     })();
     return;
