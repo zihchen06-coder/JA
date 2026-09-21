@@ -35,12 +35,63 @@ function _showBanner(html, tone) {
   setTimeout(() => banner.remove(), 15000);
 }
 
+// Pressed the icon on a page whose top frame has no fields of its own.
+// Either the application sits in an embedded frame -- Greenhouse and Lever
+// inside a company's own careers site, which is a lot of them -- and the
+// filling happened down there where no panel can draw, or there is no form
+// here at all. From the outside those looked identical: nothing happened.
+async function _reportWithoutOwnForm() {
+  const { settings } = await chrome.storage.local.get(["settings"]);
+  if (settings && settings.show_panel === false) return;
+
+  const panel = createPanel();
+  panel.log("No fields on the page itself -- looking for a form in an embedded frame\u2026", "muted");
+
+  const heard = await new Promise((resolve) => {
+    const done = (value) => {
+      chrome.runtime.onMessage.removeListener(listener);
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const listener = (msg) => {
+      if (msg && msg.type === "ja-tally") done(msg);
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    const timer = setTimeout(() => done(null), 4000);
+  });
+
+  if (!heard || (!heard.filled && !heard.review && !heard.blank)) {
+    panel.log("No application form found on this page.", "warn");
+    panel.log(
+      "If this is the job description, open the application itself and press the icon again.",
+      "muted"
+    );
+    return;
+  }
+
+  panel.log(`Filled ${heard.filled} field(s) in a frame on this page.`, "ok");
+  if (heard.review) panel.log(`${heard.review} flagged for you to answer.`, "warn");
+  if (heard.blank) panel.log(`${heard.blank} required field(s) left blank.`, "err");
+  panel.log(
+    "Those fields live in an embedded frame, so they are outlined on the form itself rather than listed here.",
+    "muted"
+  );
+  panel.log("Nothing was submitted.", "muted");
+}
+
 (async () => {
   // This runs in every frame on the page, and most of them are ads and
   // trackers with no form in them at all. Bail before doing anything --
   // before even reading storage -- so those frames stay silent instead of
   // each drawing their own banner.
-  if (!document.querySelector('input, select, textarea, button[aria-haspopup="listbox"]')) return;
+  if (!document.querySelector('input, select, textarea, button[aria-haspopup="listbox"]')) {
+    // Silent is right for an ad frame, and wrong for the page someone just
+    // pressed the icon on.
+    if (globalThis.__JA_VIA_CLICK && window.top === window) {
+      await _reportWithoutOwnForm();
+    }
+    return;
+  }
 
   const {
     profile,

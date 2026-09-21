@@ -1340,3 +1340,86 @@ def test_the_same_edit_is_not_counted_as_two_forms_asking(load):
     )
 
     assert out == 1, f"one edit reported {out} times"
+
+
+# --- Pressing the icon and getting nothing ---------------------------------
+
+def _no_form_page(browser, tally):
+    """A page with no fields of its own, run.js loaded. Its top-level block
+    bails immediately without the click marker, so the function under test
+    can be called directly.
+    """
+    page = browser.new_page()
+    page.add_init_script(
+        """(() => {
+            window.chrome = {
+                storage: {local: {get: async () => ({settings: {}}), set: async () => {}}},
+                runtime: {
+                    onMessage: {
+                        addListener: (fn) => { window.__listener = fn; },
+                        removeListener: () => {},
+                    },
+                    sendMessage: async () => ({}),
+                },
+            };
+        })();"""
+    )
+    page.goto("about:blank")
+    page.set_content("<body><p>A job description, with nothing to fill in.</p></body>")
+    for js in ["field_aliases.js", "matcher.js", "extractor.js", "credentials.js",
+               "filler.js", "panel.js", "run.js"]:
+        page.add_script_tag(path=os.path.join(EXT_DIR, js))
+    return page.evaluate(
+        """async (tally) => {
+            const done = _reportWithoutOwnForm();
+            // The panel goes up first and waits; the tally arrives from the
+            // service worker once every frame has reported.
+            await new Promise((r) => setTimeout(r, 30));
+            if (tally) window.__listener({type: 'ja-tally', ...tally});
+            await done;
+            const root = document.getElementById('ja-autofill-panel').shadowRoot;
+            return root.querySelector('.body').textContent;
+        }""",
+        tally,
+    ), page
+
+
+def test_pressing_the_icon_on_a_page_with_no_form_says_so(browser):
+    """It used to do nothing at all. run.js bails in a frame with no fields,
+    and on a job description that is every frame, so the icon looked broken.
+    """
+    text, page = _no_form_page(browser, {"filled": 0, "review": 0, "blank": 0})
+    try:
+        assert "No application form found" in text, text
+        assert "press the icon again" in text, text
+    finally:
+        page.close()
+
+
+def test_a_form_in_an_embedded_frame_is_reported_by_the_page_around_it(browser):
+    """Greenhouse and Lever inside a company's own careers site: the fill
+    happens in the child frame, where no panel can draw, and the top frame
+    has no fields of its own so it used to stay silent. Both together meant
+    a form that filled correctly and looked like nothing had happened.
+    """
+    text, page = _no_form_page(browser, {"filled": 12, "review": 2, "blank": 1})
+    try:
+        assert "Filled 12 field(s) in a frame on this page" in text, text
+        assert "2 flagged for you" in text, text
+        assert "1 required field(s) left blank" in text, text
+        assert "Nothing was submitted" in text, text
+    finally:
+        page.close()
+
+
+def test_only_a_click_makes_a_frame_with_no_fields_speak(browser):
+    """Ad and tracker frames run this too, and auto-fill runs it on every
+    page load across sixteen domains. Neither should draw anything.
+    """
+    src = open(os.path.join(EXT_DIR, "run.js"), encoding="utf-8").read()
+    bg = open(os.path.join(EXT_DIR, "background.js"), encoding="utf-8").read()
+
+    assert "if (globalThis.__JA_VIA_CLICK && window.top === window)" in src
+    # The click path asks for it; the page-load path does not.
+    assert "await runFill(tab.id, true);" in bg
+    assert "await runFill(tabId);" in bg

@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 209 tests passing, the whole suite green.
+`claude/happy-volta-yjo3xc`. 212 tests passing, the whole suite green.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -100,7 +100,10 @@ shape statically, so it is the thing to update if this is restructured.
 
 ### The fill, in order (`run.js`)
 
-1. Bail immediately if the frame has no form controls (runs in every frame).
+1. Bail if the frame has no form controls (runs in every frame). On a click
+   (`__JA_VIA_CLICK`, set by `runFill`) the top frame instead reports what
+   the other frames managed — pressing the icon and getting nothing at all
+   was the usual outcome on any page whose form is embedded.
 2. Load profile, settings, learned stores from `chrome.storage.local`.
 3. Draw the panel (top frame only).
 4. `fillForm()` — the deterministic pass. Alias matching, per-widget filling.
@@ -264,8 +267,11 @@ are DOM-behaviour bugs a mock can't reproduce.
   narrow: no id, no name, no aria-label, and a visible control beside it
   whose text says what it is for. A labelled hidden file input is still
   skipped; widen it from a real form, not from a guess.
-- **The panel only draws in the top frame**, so a form inside an iframe fills
-  correctly but reports through the badge only.
+- **The panel only draws in the top frame.** A form inside an iframe fills
+  correctly and is outlined in place, but cannot list its fields in a panel.
+  On a click the top frame now draws one anyway and reports the cross-frame
+  tally the service worker collected (`ja-tally`), so the fill is at least
+  visible. Field-by-field results from a child frame still aren't.
 - `ja/*.py` lacks all widget and AI support. Intentional.
 
 ---

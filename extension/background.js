@@ -67,13 +67,38 @@ chrome.runtime.onInstalled.addListener(() => {
   );
 });
 
-async function runFill(tabId) {
+async function runFill(tabId, viaClick) {
   resetTally(tabId);
   chrome.action.setBadgeText({ tabId, text: "" });
+
+  // Pressing the icon and getting nothing at all is the worst answer this
+  // can give, and it was the usual one on any page whose form sits in an
+  // embedded frame: run.js bails in a frame with no fields, the top frame
+  // of such a page often has none, and the panel only ever draws there.
+  // A click says so, so the top frame knows to speak up either way.
+  if (viaClick) {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        globalThis.__JA_VIA_CLICK = true;
+      },
+    });
+  }
+
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
     files: SCRIPT_FILES,
   });
+
+  // What every frame between them managed, back to the one that can show it.
+  if (viaClick) {
+    setTimeout(() => {
+      const t = tally.get(tabId) || { filled: 0, review: 0, blank: 0 };
+      chrome.tabs
+        .sendMessage(tabId, { type: "ja-tally", ...t }, { frameId: 0 })
+        .catch(() => {});
+    }, 1500);
+  }
 }
 
 // A multi-page application is the normal case on Workday and iCIMS -- five
@@ -105,7 +130,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     // application in an iframe. Injecting only the top frame does nothing at
     // all on those pages -- the form is in a child frame.
     lastFilled.set(tab.id, tab.url);
-    await runFill(tab.id);
+    await runFill(tab.id, true);
   } catch (exc) {
     console.error("Job Application Autofill: could not run on this page.", exc);
   }
