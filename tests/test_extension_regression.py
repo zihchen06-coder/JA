@@ -27,8 +27,7 @@ import os
 
 import pytest
 
-playwright_sync_api = pytest.importorskip("playwright.sync_api")
-sync_playwright = playwright_sync_api.sync_playwright
+pytest.importorskip("playwright.sync_api")
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(_HERE)
@@ -67,24 +66,11 @@ EXPECTED = {
 }
 
 
-@pytest.fixture(scope="module")
-def browser():
-    # Mirrors the CLI's own --browser-path / JA_BROWSER_PATH convention
-    # (see ja/browser.py) -- unset, this launches Playwright's normal
-    # installed Chromium, exactly what `playwright install chromium` sets
-    # up; only set it if you need to point at a specific binary.
-    browser_path = os.environ.get("JA_BROWSER_PATH") or None
-    with sync_playwright() as p:
-        kwargs = {"headless": True}
-        if browser_path:
-            kwargs["executable_path"] = browser_path
-        try:
-            b = p.chromium.launch(**kwargs)
-        except Exception as exc:  # noqa: BLE001
-            pytest.skip(f"Chromium not available for Playwright ({exc}). Run: playwright install chromium")
-            return
-        yield b
-        b.close()
+# The browser comes from conftest.py's session-scoped fixture. This module
+# used to start a second Playwright of its own, which worked only because it
+# happened to run before every other browser test: two sync Playwrights live
+# at once is an error, so a new test file sorting ahead of this one broke
+# every test below with "Sync API inside the asyncio loop".
 
 
 def _fill(browser, fname: str) -> dict:

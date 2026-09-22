@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-22, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/new-session-n7suz1`. 162 tests passing.
+`claude/new-session-n7suz1`. 169 tests passing.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -122,6 +122,22 @@ Sensitive and consent answers go **only** to `profile_suggestions`, never to
 
 Capped in `background.js` (`capLearned`, `capMisses` in `llm.js`).
 
+### Backup and restore (Options page)
+
+"Export profile" writes the profile as it is on the page; "Export
+everything" adds the settings and the four stores. Neither carries the
+saved documents, the site logins or the API key -- too large, too
+sensitive, and the file is meant to be pasted into a chat.
+
+The import takes either one, plus the `{fields: ...}` shape a resume parse
+returns. Two rules hold whatever the file says: only keys the file actually
+carries are written, so a restore never wipes what it doesn't mention, and
+`learned_aliases` goes through `sanitizeLearnedAliases` first -- an alias is
+consulted before every other check in `matchField`, so an imported one
+pointing at a self-ID field would be a way straight past the gate. That
+function and `UNLEARNABLE_FIELDS` live in `field_aliases.js` because the
+fill and the Options page both need them and share nothing else.
+
 ### Settings (all in `chrome.storage.local.settings`)
 
 | Key | Default | What it does |
@@ -142,6 +158,11 @@ Capped in `background.js` (`capLearned`, `capMisses` in `llm.js`).
 export JA_BROWSER_PATH=/opt/pw-browsers/chromium   # only if the default fails
 python3 -m pytest tests/ -q
 ```
+
+One browser for the whole suite, from `conftest.py`. Don't add a second
+`sync_playwright()` in a test module: two live at once is an error, and the
+one that used to be in `test_extension_regression.py` only worked because
+that file sorted before every other browser test.
 
 Tests run the extension's real JS in real headless Chromium. Most bugs here
 are DOM-behaviour bugs a mock can't reproduce.

@@ -101,6 +101,115 @@ function emptyProfile() {
   };
 }
 
+// What goes in a backup file.
+//
+// Documents are megabytes of base64 and credentials are saved site
+// passwords: neither belongs in a file meant to be read, pasted into a
+// chat, or mailed to yourself, and the API key is a secret that was never
+// part of the profile in the first place. Leaving them out is safe in both
+// directions, because restoring only ever writes the keys a file actually
+// carries -- see restoreStores.
+function exportableProfile() {
+  const { resume_file, cover_letter_file, ...rest } = gatherProfile();
+  return rest;
+}
+
+// Everything the tool knows that isn't a document, a password or a key: the
+// profile as it is on this page, the settings, and the four stores that
+// accumulate as applications get filled.
+var BACKUP_VERSION = 1;
+
+function fullBackup() {
+  return {
+    ja_backup: BACKUP_VERSION,
+    exported_at: new Date().toISOString(),
+    profile: exportableProfile(),
+    settings: state.settings || {},
+    learned_aliases: state.learned || {},
+    learned_answers: state.learnedAnswers || {},
+    profile_suggestions: state.suggestions || {},
+    misses: state.misses || {},
+    applications: state.applications || [],
+  };
+}
+
+// Extension storage is finite and a hand-edited file has no size to speak
+// of, so the stores that grow with use are trimmed the same way the service
+// worker trims them (llm.js, capLearned). The two runtimes share no file,
+// which is why this is written twice; the limits belong to the store.
+function _capMap(map, limit) {
+  const entries = Object.entries(_asObject(map));
+  return Object.fromEntries(entries.length > limit ? entries.slice(entries.length - limit) : entries);
+}
+
+// The stores behind the Learned, Gaps and Applications tabs, put back from
+// a backup file.
+//
+// Two rules hold whatever the file says. Only keys the file actually
+// carries are written, so a backup that predates a store -- or one with a
+// section deleted by hand -- adds rather than wipes, and the documents,
+// saved logins and API key it never contained are untouched. And the
+// learned aliases go through sanitizeLearnedAliases first: a mapping is
+// consulted before every other check when a label is matched, so one
+// pointing at a self-identification field would be a way past the gate
+// that exists to stop exactly that. A file is not a reason to relax it.
+async function restoreStores(data, profile) {
+  const writes = {};
+  const restored = [];
+
+  if (data.learned_aliases !== undefined) {
+    const clean = sanitizeLearnedAliases(_asObject(data.learned_aliases), profile);
+    const dropped = Object.keys(_asObject(data.learned_aliases)).length - Object.keys(clean).length;
+    writes.learned_aliases = _capMap(clean, 1000);
+    restored.push(
+      `${Object.keys(writes.learned_aliases).length} learned label(s)` +
+        (dropped ? `, ${dropped} refused as unsafe to learn` : "")
+    );
+  }
+  if (data.learned_answers !== undefined) {
+    writes.learned_answers = _capMap(data.learned_answers, 2000);
+    restored.push(`${Object.keys(writes.learned_answers).length} remembered answer(s)`);
+  }
+  if (data.profile_suggestions !== undefined) {
+    writes.profile_suggestions = _capMap(data.profile_suggestions, 200);
+    restored.push(`${Object.keys(writes.profile_suggestions).length} suggestion(s)`);
+  }
+  if (data.misses !== undefined) {
+    writes.misses = _capMap(data.misses, 2000);
+    restored.push(`${Object.keys(writes.misses).length} gap(s)`);
+  }
+  if (data.applications !== undefined) {
+    writes.applications = _asList(data.applications).slice(-500);
+    restored.push(`${writes.applications.length} application(s)`);
+  }
+  if (data.settings !== undefined) {
+    writes.settings = _asObject(data.settings);
+    restored.push("your settings");
+  }
+
+  if (!Object.keys(writes).length) return [];
+  await chrome.storage.local.set(writes);
+  if (writes.learned_aliases) state.learned = writes.learned_aliases;
+  if (writes.learned_answers) state.learnedAnswers = writes.learned_answers;
+  if (writes.profile_suggestions) state.suggestions = writes.profile_suggestions;
+  if (writes.misses) state.misses = writes.misses;
+  if (writes.applications) state.applications = writes.applications;
+  if (writes.settings) state.settings = writes.settings;
+  return restored;
+}
+
+function _download(name, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -300,6 +409,31 @@ function _asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+function renderSettings() {
+  const on = (id, value) => (document.getElementById(id).checked = !!value);
+  const s = state.settings || {};
+  on("s-auto-accounts", s.auto_create_accounts);
+  on("s-use-llm", s.use_llm);
+  on("s-tailor-cover", s.tailor_cover_letter);
+  on("s-route-saved", s.route_saved_answers);
+  // Two that are on unless they were turned off, so an absent key is on.
+  on("s-watch-learn", s.watch_and_learn !== false);
+  on("s-show-panel", s.show_panel !== false);
+  on("s-auto-fill", s.auto_fill_known_sites);
+}
+
+// The tabs a restored backup refills. Not the profile boxes: those hold
+// what the import just put there, waiting to be reviewed and saved, and
+// redrawing them from storage would throw that away.
+function renderStoredTabs() {
+  _section("Learned labels", renderLearned);
+  _section("Learned answers", renderLearnedAnswers);
+  _section("Profile suggestions", renderSuggestions);
+  _section("Gaps", renderMisses);
+  _section("Applications", renderApplications);
+  _section("Settings", renderSettings);
+}
+
 function loadIntoForm() {
   const p = state.profile;
   document.querySelectorAll("input[data-f], textarea[data-f]").forEach((el) => {
@@ -334,13 +468,7 @@ function loadIntoForm() {
     );
   });
 
-  document.getElementById("s-auto-accounts").checked = !!(state.settings && state.settings.auto_create_accounts);
-  document.getElementById("s-use-llm").checked = !!(state.settings && state.settings.use_llm);
-  document.getElementById("s-tailor-cover").checked = !!(state.settings && state.settings.tailor_cover_letter);
-  document.getElementById("s-route-saved").checked = !!(state.settings && state.settings.route_saved_answers);
-  document.getElementById("s-watch-learn").checked = !state.settings || state.settings.watch_and_learn !== false;
-  document.getElementById("s-show-panel").checked = !state.settings || state.settings.show_panel !== false;
-  document.getElementById("s-auto-fill").checked = !!(state.settings && state.settings.auto_fill_known_sites);
+  _section("Settings", renderSettings);
   _section("Learned labels", renderLearned);
   _section("Learned answers", renderLearnedAnswers);
   _section("Profile suggestions", renderSuggestions);
@@ -523,19 +651,11 @@ function initTabs() {
   document.getElementById("save").onclick = save;
 
   document.getElementById("export-profile").onclick = () => {
-    // Documents are large base64 blobs not worth pasting into a chat, and
-    // credentials are security-sensitive -- neither belongs in an export
-    // meant to be shared as plain text.
-    const { resume_file, cover_letter_file, ...exportable } = gatherProfile();
-    const blob = new Blob([JSON.stringify(exportable, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "ja-profile-backup.json";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    _download("ja-profile-backup.json", exportableProfile());
+  };
+
+  document.getElementById("export-all").onclick = () => {
+    _download("ja-backup.json", fullBackup());
   };
 
   const wireFileInput = (inputId, key, elId) => {
@@ -552,7 +672,7 @@ function initTabs() {
   wireFileInput("resume-input", "resume_file", "resume-current");
   wireFileInput("cover-input", "cover_letter_file", "cover-current");
 
-  document.getElementById("import-json-btn").onclick = () => {
+  document.getElementById("import-json-btn").onclick = async () => {
     const status = document.getElementById("import-status");
     const raw = document.getElementById("import-json").value.trim();
     if (!raw) return;
@@ -563,6 +683,12 @@ function initTabs() {
       status.className = "note";
       status.style.color = "var(--red)";
       status.textContent = "That's not valid JSON.";
+      return;
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      status.className = "note";
+      status.style.color = "var(--red)";
+      status.textContent = "That's JSON, but not a profile or a backup -- expected an object.";
       return;
     }
     const overwrite = document.getElementById("import-overwrite").checked;
@@ -604,23 +730,43 @@ function initTabs() {
 
     const norm = (s) => (s ?? "").toString().trim().toLowerCase();
 
-    // Scalar profile fields, as a resume parse returns them. Same rule as
-    // everything else here: a box you have already filled in is left alone
-    // unless you asked for it to be replaced.
-    Object.entries(data.fields || {}).forEach(([key, value]) => {
+    // Scalar profile fields. Three shapes arrive here and all three are
+    // the same thing: a resume parse returns them under `fields`, a full
+    // backup puts them under `profile`, and this tool's own profile export
+    // writes them at the top level -- which used to be read by nothing at
+    // all, so exporting a profile and importing it straight back silently
+    // dropped every name, address and date on it.
+    const scalars = {
+      ..._asObject(data.profile),
+      ..._asObject(data.fields),
+      ...(data.ja_backup ? {} : _asObject(data)),
+    };
+    Object.entries(scalars).forEach(([key, value]) => {
+      if (value === null || value === undefined) return;
+      // The lists and the answers are handled below, by identity rather
+      // than by overwriting a box.
+      if (typeof value === "object") return;
+
       const input = document.querySelector(`[data-f="${CSS.escape(key)}"]`);
-      if (!input || !value) return;
-      if (input.value.trim() && !overwrite) {
+      const boolInput = input ? null : document.querySelector(`[data-bool="${CSS.escape(key)}"]`);
+      const el = input || boolInput;
+      if (!el) return;
+      // A yes/no answer arrives as a boolean, and `false` is an answer --
+      // reading it as "nothing here" is how "no" turned into "unset".
+      const text = boolInput ? (value === true ? "true" : value === false ? "false" : "") : String(value);
+      if (!text) return;
+
+      if (el.value.trim() && !overwrite) {
         counts.skipped++;
         return;
       }
-      if (input.value.trim()) counts.updated++;
+      if (el.value.trim()) counts.updated++;
       else counts.added++;
-      input.value = value;
+      el.value = text;
     });
 
-    importList(data.education || [], eduList, eduRow, (e) => `${norm(e.school)}|${norm(e.degree)}`);
-    importList(data.experience || [], expList, expRow, (e) => `${norm(e.company)}|${norm(e.title)}`);
+    importList(_asList(scalars.education), eduList, eduRow, (e) => `${norm(e.school)}|${norm(e.degree)}`);
+    importList(_asList(scalars.experience), expList, expRow, (e) => `${norm(e.company)}|${norm(e.title)}`);
 
     // Keyed by keyword -> that row's answer textarea, so a row already
     // added (e.g. by "+ Add top 50 common questions") but still blank gets
@@ -633,7 +779,7 @@ function initTabs() {
       const kwInput = row.querySelector('[data-k="keyword"]');
       if (kwInput) existingRows.set(norm(kwInput.value), row.querySelector('[data-k="answer"]'));
     });
-    Object.entries(data.custom_answers || {}).forEach(([keyword, answer]) => {
+    Object.entries(_asObject(scalars.custom_answers)).forEach(([keyword, answer]) => {
       const existingAnswerEl = existingRows.get(norm(keyword));
       if (!existingAnswerEl) {
         answersList.appendChild(answerRow(keyword, answer));
@@ -650,8 +796,23 @@ function initTabs() {
       counts.skipped++;
     });
 
+    // The stores are written straight to storage: unlike the profile, they
+    // have no boxes on this page to review before saving.
+    let restored = [];
+    try {
+      restored = await restoreStores(data, gatherProfile());
+    } catch (exc) {
+      status.style.color = "var(--red)";
+      status.textContent = `The profile part imported, but the saved history didn't: ${exc && exc.message ? exc.message : exc}`;
+      document.getElementById("import-json").value = "";
+      return;
+    }
+    if (restored.length) renderStoredTabs();
+    renderWarnings();
+
     status.style.color = "var(--green)";
     status.textContent =
+      (restored.length ? `Put back ${restored.join(", ")}. ` : "") +
       `Added ${counts.added}, updated ${counts.updated}, left ${counts.skipped} alone` +
       (counts.skipped && !overwrite
         ? " (already had content -- tick \"Replace existing\" to overwrite those too)."

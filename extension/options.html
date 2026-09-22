@@ -199,8 +199,8 @@
         </div>
       </div>
 
-      <h3>Import education, work history &amp; answers</h3>
-      <p class="note">Paste a JSON snippet shaped like <code>{"education": [...], "experience": [...], "custom_answers": {...}}</code> (any of the three keys is optional) — ask Claude to generate this from your resume or your own written answers — and it's added to the Education &amp; Work and Answers tabs. Anything already there is matched up rather than duplicated (schools by school+degree, jobs by company+title, answers by keyword) and left as-is unless you tick Replace existing.</p>
+      <h3>Import a backup, or education, work history &amp; answers</h3>
+      <p class="note">Takes a whole backup file (from &ldquo;Export everything&rdquo; at the bottom of this page) or a snippet shaped like <code>{"education": [...], "experience": [...], "custom_answers": {...}}</code> — ask Claude to generate one from your resume or your own written answers. Profile values land in the boxes on the other tabs for you to check and <strong>Save</strong>; the learned labels, remembered answers, gaps and application history in a backup are put back straight away. Anything already here is matched up rather than duplicated (schools by school+degree, jobs by company+title, answers by keyword) and left as-is unless you tick Replace existing. Nothing a file doesn&rsquo;t mention is touched — your resume, saved logins and API key survive any import.</p>
       <textarea id="import-json" rows="4" placeholder='{"education": [...], "experience": [...], "custom_answers": {"why do you want to work": "..."}}'></textarea>
       <div class="row" style="margin-top:8px;">
         <button class="ghost" id="parse-resume" type="button">Read my resume with Claude</button>
@@ -395,10 +395,11 @@
 
   <div class="savebar">
     <button id="save">Save</button>
-    <button class="ghost" id="export-profile" type="button">Export as JSON</button>
+    <button class="ghost" id="export-profile" type="button">Export profile</button>
+    <button class="ghost" id="export-all" type="button">Export everything</button>
     <span id="status"></span>
   </div>
-  <p class="note">Downloads everything on this page (not documents/credentials) as a local file -- paste its contents to Claude any time you want it kept somewhere durable, or to pick this profile back up in a future conversation.</p>
+  <p class="note"><strong>Export profile</strong> downloads what is on this page as a local file. <strong>Export everything</strong> adds your settings and everything learned along the way: label mappings, remembered answers, profile suggestions, the gaps log and your application history. Either one can be pasted back into the Import box above, or handed to Claude to look over. Neither carries your saved documents, your site logins or your API key &mdash; too large, too sensitive, and none of them needs to leave this browser.</p>
 </div>
 <script src="field_aliases.js"></script>
 <script src="profile_check.js"></script>

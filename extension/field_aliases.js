@@ -291,5 +291,39 @@ var OPTION_CHOICES = {
   ],
 };
 
+// Fields a label must never be learned as.
+//
+// Prose, because it belongs to the job it was written for. And every
+// sensitive one, for a much sharper reason: a learned alias is consulted
+// before anything else in matchField, so a label learned as
+// "hispanic_latino" would pull that answer into any field carrying that
+// label -- and the self-ID gate would never fire, because it keys off the
+// question's own wording and "Did you graduate?" isn't sensitive. A mapping
+// is a shortcut past every check, so it may only ever point somewhere
+// ordinary.
+//
+// This lives here rather than in filler.js because it has two callers that
+// share nothing else: the fill, which sanitizes the store on load, and the
+// Options page, which has to apply the same rule to a backup file someone
+// could have hand-edited between the export and the import.
+var UNLEARNABLE_FIELDS = new Set([
+  "custom_answers", "cover_letter_text",
+  ...SELF_ID_FIELDS, ...CONSENT_FIELDS, "criminal_history",
+]);
+
+// Existing stores were written before the rules above, and an imported file
+// was never under them at all. Either way the mappings that would now be
+// refused are dropped rather than left to keep doing damage quietly.
+function sanitizeLearnedAliases(map, profile) {
+  const clean = {};
+  for (const [label, field] of Object.entries(map || {})) {
+    if (typeof field !== "string") continue;
+    if (UNLEARNABLE_FIELDS.has(field)) continue;
+    if (profile && !Object.prototype.hasOwnProperty.call(profile, field)) continue;
+    clean[label] = field;
+  }
+  return clean;
+}
+
 var TRUE_WORDS = new Set(["yes", "y", "true", "i am", "authorized", "agree", "eligible"]);
 var FALSE_WORDS = new Set(["no", "n", "false", "i am not", "not authorized", "disagree", "ineligible"]);

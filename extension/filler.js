@@ -1334,20 +1334,11 @@ function _applyLlmRadio(byId, candidate, value) {
 // worth remembering: next time it matches for free, instantly, with no API
 // call. Only mappings are learned, never the prose -- a cover letter or an
 // essay answer written for one job has no business being reused at another.
-// Fields a label must never be learned as.
-//
-// Prose, because it belongs to the job it was written for. And every
-// sensitive one, for a much sharper reason: a learned alias is consulted
-// before anything else in matchField, so a label learned as
-// "hispanic_latino" would pull that answer into any field carrying that
-// label -- and the self-ID gate would never fire, because it keys off the
-// question's own wording and "Did you graduate?" isn't sensitive. A mapping
-// is a shortcut past every check, so it may only ever point somewhere
-// ordinary.
-var _UNLEARNABLE_FIELDS = new Set([
-  "custom_answers", "cover_letter_text",
-  ...SELF_ID_FIELDS, ...CONSENT_FIELDS, "criminal_history",
-]);
+// Fields a label must never be learned as, and the sweep that drops any
+// mapping pointing at one. Both live in field_aliases.js now: the Options
+// page has to apply the same rule to an imported backup, and it does not
+// load this file. One definition, so the two can't drift.
+var _UNLEARNABLE_FIELDS = UNLEARNABLE_FIELDS;
 
 // A remembered mapping is only as good as the evidence for it. "No" appears
 // verbatim in several profile fields at once, so matching an answer's text
@@ -1369,19 +1360,6 @@ function _uniqueProfileFieldFor(profile, value) {
     found = key;
   }
   return found;
-}
-
-// Existing stores were written before the rules above, so they hold mappings
-// that would now be refused. Dropped on load rather than left to keep doing
-// damage quietly.
-function sanitizeLearnedAliases(map, profile) {
-  const clean = {};
-  for (const [label, field] of Object.entries(map || {})) {
-    if (_UNLEARNABLE_FIELDS.has(field)) continue;
-    if (profile && !Object.prototype.hasOwnProperty.call(profile, field)) continue;
-    clean[label] = field;
-  }
-  return clean;
 }
 
 function learnFromAnswers(report, answers, profile, sources) {
