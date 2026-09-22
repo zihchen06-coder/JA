@@ -561,3 +561,95 @@ def test_the_options_page_renders_hostile_stored_text_as_text(browser):
     assert out["pwned"] is False
     assert out["images"] == 0
     assert "<img" in out["shown"]
+
+
+def test_one_field_blowing_up_does_not_take_the_form_with_it(load):
+    """A page whose script swaps a node out mid-fill, a widget that throws
+    when it is opened -- any of those used to abort fillForm itself, so
+    every field after the bad one was never attempted and run.js, with
+    nothing catching it either, drew no panel at all: the applicant saw a
+    form that looked untouched. One bad field is now one bad result.
+
+    The written-answer path is the one used here because it sets its value
+    outside the try that guards the final set-the-value step -- most of
+    what a field can do (the sensitive gate, a work-history block, a custom
+    widget being opened) happens before that guard.
+    """
+    page = load(html="""
+      <form>
+        <label for="a">First Name</label><input id="a" name="first_name">
+        <label for="bad">Why do you want to work here?</label>
+        <textarea id="bad" name="why"></textarea>
+        <label for="c">Email</label><input id="c" name="email">
+      </form>""")
+    # Stand in for the page misbehaving on one element and not the others.
+    page.evaluate(
+        """() => {
+            const real = window._setNativeValue;
+            window._setNativeValue = (el, value) => {
+                if (el && el.id === "bad") throw new TypeError("node is detached");
+                return real(el, value);
+            };
+        }"""
+    )
+    report = _fill(page, PROFILE)
+    by_label = {r["label"]: r for r in report["results"]}
+
+    assert by_label["Why do you want to work here?"]["action"] == "error"
+    assert "node is detached" in by_label["Why do you want to work here?"]["detail"]
+    # The fields on either side of it were still filled -- the one after it
+    # is the half that used to be lost.
+    assert by_label["First Name"]["action"] == "filled"
+    assert by_label["Email"]["action"] == "filled"
+    assert page.evaluate("() => document.getElementById('c').value") == PROFILE["email"]
+
+
+def test_a_radio_group_blowing_up_does_not_take_the_form_with_it(load):
+    """Radio groups are answered after every other field, so a throw in one
+    used to cost only itself -- but it also skipped every group after it.
+    """
+    page = load(html="""
+      <form>
+        <fieldset><legend>Are you legally authorized to work?</legend>
+          <label><input type="radio" name="auth" value="y"> Yes</label>
+          <label><input type="radio" name="auth" value="n"> No</label>
+        </fieldset>
+        <fieldset><legend>Are you at least 18 years old?</legend>
+          <label><input type="radio" name="age" value="y"> Yes</label>
+          <label><input type="radio" name="age" value="n"> No</label>
+        </fieldset>
+      </form>""")
+    page.evaluate(
+        """() => {
+            const real = window._setChecked;
+            window._setChecked = (el, checked) => {
+                if (el && el.name === "auth") throw new TypeError("detached");
+                return real(el, checked);
+            };
+        }"""
+    )
+    report = _fill(page, PROFILE)
+    actions = {r["label"]: r["action"] for r in report["results"]}
+
+    assert actions["Are you legally authorized to work?"] == "error"
+    # The group after the bad one is the whole point.
+    assert actions["Are you at least 18 years old?"] == "filled"
+    assert page.evaluate("() => document.querySelector('input[name=age]').checked") is True
+
+
+def test_a_field_that_blew_up_is_reported_as_a_gap(load):
+    """It is a question left unanswered like any other, so it belongs in the
+    log that says which questions keep going unanswered.
+    """
+    page = load(html="""
+      <form>
+        <label for="bad">Why do you want to work here?</label>
+        <textarea id="bad" name="why"></textarea>
+      </form>""")
+    page.evaluate(
+        """() => { window._setNativeValue = () => { throw new Error("boom"); }; }"""
+    )
+    report = _fill(page, PROFILE)
+    missed = page.evaluate("(report) => missedFields(report)", report)
+    assert [m["label"] for m in missed] == ["Why do you want to work here?"]
+    assert missed[0]["action"] == "error"

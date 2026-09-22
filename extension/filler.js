@@ -349,7 +349,16 @@ async function fillForm(profile, creds, opts) {
   }
   for (const group of byName.values()) {
     const before = report.results.length;
-    _handleRadioGroup(profile, report, group);
+    try {
+      _handleRadioGroup(profile, report, group);
+    } catch (exc) {
+      report.results.length = before;
+      const head = group[0];
+      addResult(report, head.group_label || head.label || head.name || head.ja_id, null, "error",
+        `Couldn't answer this one (${_errorText(exc)}) -- check it yourself.`,
+        group.some((o) => o.required));
+      _markSafely(head.ja_id, MARK_REVIEW);
+    }
     // A radio group's result belongs to the whole group; the first option's
     // id stands for it, the same handle llmFieldsFor offers it under.
     for (let i = before; i < report.results.length; i++) {
@@ -360,13 +369,47 @@ async function fillForm(profile, creds, opts) {
   return report;
 }
 
-// Stamps every result a field produced with that field's id, without
-// threading it through the thirty-odd addResult call sites below.
+// One field is not the form. A page whose script replaces a node mid-fill,
+// a custom widget that throws when it is opened, a select whose options are
+// gone by the time they are read -- any of those used to abort fillForm
+// itself, so every field after the bad one was never attempted and run.js,
+// which had nothing catching it either, showed no panel and no banner at
+// all. The fill would simply appear not to have happened.
+//
+// So each field is isolated: whatever it throws becomes that field's own
+// outcome, marked on the page and counted in the gaps log like any other
+// question left unanswered, and the next field is tried.
 async function _handleSimpleField(profile, report, f, creds) {
   const before = report.results.length;
-  await _handleSimpleFieldInner(profile, report, f, creds);
+  try {
+    await _handleSimpleFieldInner(profile, report, f, creds);
+  } catch (exc) {
+    // A field gets one outcome, so anything recorded before the throw is
+    // replaced: it described a fill that did not finish.
+    report.results.length = before;
+    addResult(report, f.label || f.name || f.ja_id, null, "error",
+      `Couldn't fill this one (${_errorText(exc)}) -- check it yourself.`, !!f.required);
+    _markSafely(f.ja_id, MARK_REVIEW);
+  }
   for (let i = before; i < report.results.length; i++) {
     report.results[i].ja_id = f.ja_id;
+  }
+}
+
+// Long stack traces and DOM objects both read as noise in the panel, and an
+// exception is not guaranteed to be an Error at all.
+function _errorText(exc) {
+  const text = exc && exc.message ? String(exc.message) : String(exc);
+  return text.length > 120 ? `${text.slice(0, 117)}...` : text;
+}
+
+// Drawing the outline is itself a DOM call on a page that just proved it
+// can misbehave, and failing to draw it must not lose the result.
+function _markSafely(jaId, color) {
+  try {
+    _mark(jaId, color);
+  } catch (exc) {
+    /* the result still stands; only the outline is missing */
   }
 }
 

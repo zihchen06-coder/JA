@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-22, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/new-session-n7suz1`. 145 tests passing.
+`claude/new-session-n7suz1`. 162 tests passing.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -38,6 +38,12 @@ code with a test, not by prompting:
 6. **No real personal data in the repo.** Test fixtures use a fake identity
    (`tests/fixtures/profile.json`, "Jamie Rivera"). Real forms captured as
    fixtures have had emails and OAuth state scrubbed.
+7. **Nothing fails in silence.** One field that throws is that field's own
+   result, not the end of the fill (`_handleSimpleField`); a run that throws
+   anywhere draws a banner saying so (`run.js`); a section of the Options
+   page that throws doesn't take the sections after it (`_section`). Silence
+   reads as "the extension did nothing", and what comes next is submitting a
+   form the applicant believes was filled.
 
 ---
 
@@ -61,7 +67,10 @@ extension/
   filler.js         ~1700 lines. The fill itself, all the guards, all learning.
   llm.js            Claude API. Runs in the service worker only (API key).
   panel.js          The on-page side panel, in a shadow root.
-  options.js/html   The Options page. 11 tabs.
+  options.js/html   The Options page. 11 tabs. Each section renders on its
+                    own, so one bad stored value can't blank the page.
+  profile_check.js  What a form will do with what's saved: the findings
+                    shown above the Save bar. Options page only.
 tests/
   conftest.py                  Shared browser fixture + `load` helper.
   test_extension_regression.py Behaviour against saved real forms.

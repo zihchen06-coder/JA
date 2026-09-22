@@ -274,6 +274,32 @@ function renderCredentials() {
   }
 }
 
+// Stored data outlives the code that wrote it, and an import can put
+// anything in `profile`. One section throwing used to leave every section
+// after it unrendered -- the bug in commit 423eecb, which is how the
+// options page ended up drawing nothing at all. Each section is drawn on
+// its own now, and one that fails says so where it would have been.
+function _section(what, fn) {
+  try {
+    fn();
+  } catch (exc) {
+    const status = document.getElementById("status");
+    if (status) {
+      status.className = "err";
+      status.textContent = `${what} couldn't be drawn (${exc && exc.message ? exc.message : exc}). ` +
+        "The rest of this page still works.";
+    }
+  }
+}
+
+function _asList(value) {
+  return Array.isArray(value) ? value.filter((v) => v && typeof v === "object") : [];
+}
+
+function _asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
 function loadIntoForm() {
   const p = state.profile;
   document.querySelectorAll("input[data-f], textarea[data-f]").forEach((el) => {
@@ -288,17 +314,25 @@ function loadIntoForm() {
     el.value = v === true ? "true" : v === false ? "false" : "";
   });
 
-  const eduList = document.getElementById("edu-list");
-  eduList.innerHTML = "";
-  (p.education || []).forEach((e) => eduList.appendChild(eduRow(e)));
+  _section("Education", () => {
+    const eduList = document.getElementById("edu-list");
+    eduList.innerHTML = "";
+    _asList(p.education).forEach((e) => eduList.appendChild(eduRow(e)));
+  });
 
-  const expList = document.getElementById("exp-list");
-  expList.innerHTML = "";
-  (p.experience || []).forEach((e) => expList.appendChild(expRow(e)));
+  _section("Experience", () => {
+    const expList = document.getElementById("exp-list");
+    expList.innerHTML = "";
+    _asList(p.experience).forEach((e) => expList.appendChild(expRow(e)));
+  });
 
-  const answersList = document.getElementById("answers-list");
-  answersList.innerHTML = "";
-  Object.entries(p.custom_answers || {}).forEach(([k, v]) => answersList.appendChild(answerRow(k, v)));
+  _section("Answers", () => {
+    const answersList = document.getElementById("answers-list");
+    answersList.innerHTML = "";
+    Object.entries(_asObject(p.custom_answers)).forEach(([k, v]) =>
+      answersList.appendChild(answerRow(k, typeof v === "string" ? v : ""))
+    );
+  });
 
   document.getElementById("s-auto-accounts").checked = !!(state.settings && state.settings.auto_create_accounts);
   document.getElementById("s-use-llm").checked = !!(state.settings && state.settings.use_llm);
@@ -307,15 +341,64 @@ function loadIntoForm() {
   document.getElementById("s-watch-learn").checked = !state.settings || state.settings.watch_and_learn !== false;
   document.getElementById("s-show-panel").checked = !state.settings || state.settings.show_panel !== false;
   document.getElementById("s-auto-fill").checked = !!(state.settings && state.settings.auto_fill_known_sites);
-  renderLearned();
-  renderLearnedAnswers();
-  renderSuggestions();
-  renderMisses();
-  renderApplications();
+  _section("Learned labels", renderLearned);
+  _section("Learned answers", renderLearnedAnswers);
+  _section("Profile suggestions", renderSuggestions);
+  _section("Gaps", renderMisses);
+  _section("Applications", renderApplications);
   document.getElementById("llm-key").value = state.llmApiKey || "";
 
-  renderCredentials();
-  renderDocs();
+  _section("Saved logins", renderCredentials);
+  _section("Documents", renderDocs);
+  renderWarnings();
+}
+
+// What a form will do with what is on this page. Drawn from the boxes as
+// they are now rather than from what was last saved, so an offered fix and
+// a hand edit both show their effect immediately.
+function renderWarnings() {
+  const holder = document.getElementById("profile-warnings");
+  if (!holder) return;
+  holder.innerHTML = "";
+  let findings = [];
+  try {
+    findings = profileWarnings(gatherProfile()) || [];
+  } catch (exc) {
+    // A broken check must not take the Options page down with it -- every
+    // other tab on this page is how the applicant edits their data.
+    findings = [];
+  }
+  for (const finding of findings) {
+    const row = document.createElement("div");
+    row.className = `chk ${finding.level}`;
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.textContent = "\u25cf";
+    const msg = document.createElement("span");
+    msg.className = "msg";
+    msg.textContent = finding.message;
+    row.appendChild(dot);
+    row.appendChild(msg);
+    if (finding.fix) {
+      const input = document.querySelector(`[data-f="${finding.field}"]`);
+      if (input) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ghost";
+        btn.textContent = `Use "${finding.fix}"`;
+        btn.onclick = () => {
+          input.value = finding.fix;
+          // Not saved yet, deliberately: the applicant still presses Save,
+          // so a fix they didn't want is one page reload away from undone.
+          renderWarnings();
+          document.getElementById("status").textContent = "Changed -- press Save to keep it.";
+          document.getElementById("status").className = "";
+        };
+        row.appendChild(btn);
+      }
+    }
+    holder.appendChild(row);
+  }
 }
 
 function gatherProfile() {
@@ -382,6 +465,7 @@ async function save() {
   status.className = "ok";
   status.textContent = "Saved.";
   setTimeout(() => (status.textContent = ""), 2500);
+  renderWarnings();
 }
 
 function initTabs() {

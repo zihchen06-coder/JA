@@ -85,6 +85,20 @@
   .cred-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 10px; align-items: center; }
   .cred-row input[readonly] { color: var(--muted); }
   .note { color: var(--muted); font-size: 12px; }
+  #profile-warnings { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+  .chk {
+    display: flex; gap: 10px; align-items: flex-start; font-size: 13px;
+    border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px; padding: 10px 12px;
+  }
+  .chk .dot { font-size: 11px; line-height: 20px; }
+  .chk .msg { flex: 1; }
+  .chk.error { border-left-color: var(--red); }
+  .chk.error .dot { color: var(--red); }
+  .chk.warn { border-left-color: var(--amber); }
+  .chk.warn .dot { color: var(--amber); }
+  .chk.info { border-left-color: var(--muted); }
+  .chk.info .dot { color: var(--muted); }
+  .chk button { padding: 5px 10px; font-size: 12px; }
   .savebar { position: sticky; bottom: 0; padding-top: 12px; }
 </style>
 </head>
@@ -374,6 +388,11 @@
     </div>
   </div>
 
+  <!-- What a form will do with what is saved here. Rendered on load and
+       after every save, so a value that will be rejected is seen now rather
+       than on the application that rejects it. -->
+  <div id="profile-warnings"></div>
+
   <div class="savebar">
     <button id="save">Save</button>
     <button class="ghost" id="export-profile" type="button">Export as JSON</button>
@@ -382,6 +401,7 @@
   <p class="note">Downloads everything on this page (not documents/credentials) as a local file -- paste its contents to Claude any time you want it kept somewhere durable, or to pick this profile back up in a future conversation.</p>
 </div>
 <script src="field_aliases.js"></script>
+<script src="profile_check.js"></script>
 <script src="options.js"></script>
 </body>
 </html>

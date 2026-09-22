@@ -35,7 +35,32 @@ function _showBanner(html, tone) {
   setTimeout(() => banner.remove(), 15000);
 }
 
-(async () => {
+// The service worker is not always there to receive these: MV3 stops it
+// when idle, a reload from chrome://extensions leaves this page talking to
+// an extension that no longer exists, and either way sendMessage rejects.
+// Every message here is a note for later -- a remembered label, a row in
+// the log -- and none of them is worth taking the fill down with it.
+async function _send(message) {
+  try {
+    return await chrome.runtime.sendMessage(message);
+  } catch (exc) {
+    return null;
+  }
+}
+
+// The work after the fill is a list of independent errands: verify, record
+// the misses, log the application, start watching. Each one stands alone,
+// so a failure in any of them says so and the rest still run.
+async function _step(panel, what, fn) {
+  try {
+    return await fn();
+  } catch (exc) {
+    panel?.log(`${what} didn't finish: ${_errorText(exc)}`, "err");
+    return null;
+  }
+}
+
+async function _run() {
   // This runs in every frame on the page, and most of them are ads and
   // trackers with no form in them at all. Bail before doing anything --
   // before even reading storage -- so those frames stay silent instead of
@@ -58,7 +83,7 @@ function _showBanner(html, tone) {
         "fill in your name/email/phone, then click the icon again on the application page.",
       "warn"
     );
-    chrome.runtime.sendMessage({ type: "ja-fill-done", filled: 0, review: 0, blank: 0, setupNeeded: true });
+    _send({ type: "ja-fill-done", filled: 0, review: 0, blank: 0, setupNeeded: true });
     return;
   }
 
@@ -79,7 +104,7 @@ function _showBanner(html, tone) {
   const safeAliases = sanitizeLearnedAliases(learnedAliases || {}, profile);
   setLearnedAliases(safeAliases);
   if (Object.keys(safeAliases).length !== Object.keys(learnedAliases || {}).length) {
-    chrome.runtime.sendMessage({ type: "ja-learned-replace", learned: safeAliases });
+    _send({ type: "ja-learned-replace", learned: safeAliases });
   }
   setLearnedAnswers(learnedAnswers || {});
 
@@ -114,7 +139,7 @@ function _showBanner(html, tone) {
     if (pending.length) {
       panel?.log(`Asking Claude about ${pending.length} field(s) it didn't recognise\u2026`, "info");
       try {
-        const reply = await chrome.runtime.sendMessage({
+        const reply = await _send({
           type: "ja-llm-resolve",
           request: {
             profile,
@@ -124,22 +149,27 @@ function _showBanner(html, tone) {
             routeSavedAnswers: !!(settings && settings.route_saved_answers),
           },
         });
-        if (reply && reply.error) {
+        if (!reply) {
+          // _send swallowed a rejection: the worker is asleep, restarting,
+          // or was reloaded out from under this page.
+          claudeError = "The extension's background worker didn't answer -- click the icon again.";
+          panel?.log(claudeError, "err");
+        } else if (reply.error) {
           claudeError = reply.error;
           panel?.log(reply.error, "err");
-        } else if (reply) {
+        } else {
           panel?.showThinking(reply.thinking);
           claudeFilled = await applyLlmAnswers(report, reply.answers, reply.skipped, profile);
           const learned = learnFromAnswers(report, reply.answers, profile, reply.sources);
           learnedCount = Object.keys(learned).length;
           if (learnedCount) {
-            chrome.runtime.sendMessage({ type: "ja-learned", learned });
+            _send({ type: "ja-learned", learned });
           }
           // Short answers to questions the profile has no field for -- the
           // ones that would otherwise cost an API call on every form.
           const remembered = rememberableAnswers(report, reply.answers, reply.sources);
           if (Object.keys(remembered).length) {
-            chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: remembered });
+            _send({ type: "ja-learned-answers", answers: remembered });
           }
           panel?.log(`Claude filled ${claudeFilled}.`, claudeFilled ? "ok" : "muted");
           const declined = Object.keys(reply.skipped || {}).length;
@@ -153,7 +183,10 @@ function _showBanner(html, tone) {
   }
 
   // Setting a value and it staying set are different claims -- check.
-  const lost = await verifyFilled(report);
+  // Re-reading touches every filled element on a page that has had 350ms to
+  // change underneath them, so this is the most likely thing here to throw;
+  // the counts below are still worth showing if it does.
+  const lost = (await _step(panel, "Checking what stayed filled", () => verifyFilled(report))) || [];
   if (lost.length) {
     panel?.log(`${lost.length} field(s) were cleared by the page after filling.`, "warn");
   }
@@ -186,20 +219,22 @@ function _showBanner(html, tone) {
   // when it has been turned off.
   if (!panel) _showBanner(parts.join(""), blankRequired ? "warn" : "ok");
 
-  chrome.runtime.sendMessage({ type: "ja-fill-done", filled, review, blank: blankRequired, setupNeeded: false });
+  _send({ type: "ja-fill-done", filled, review, blank: blankRequired, setupNeeded: false });
 
   // What this form asked that couldn't be answered, kept across applications
   // so the recurring gaps become visible instead of being re-discovered one
   // form at a time.
-  const misses = missedFields(report);
-  if (misses.length) {
-    chrome.runtime.sendMessage({ type: "ja-misses", host: location.hostname, misses });
-  }
+  await _step(panel, "Recording the unanswered questions", async () => {
+    const misses = missedFields(report);
+    if (misses.length) {
+      _send({ type: "ja-misses", host: location.hostname, misses });
+    }
+  });
 
   // One row per application, from the top frame only -- an embedded form
   // would otherwise log itself alongside the page hosting it.
   if (window.top === window) {
-    chrome.runtime.sendMessage({
+    _send({
       type: "ja-applied",
       entry: {
         url: location.href.slice(0, 400),
@@ -223,7 +258,7 @@ function _showBanner(html, tone) {
     // was left the way it was.
     const history = [];
     panel.onAsk(async (text) => {
-      const reply = await chrome.runtime.sendMessage({
+      const reply = await _send({
         type: "ja-chat",
         request: {
           profile,
@@ -238,9 +273,17 @@ function _showBanner(html, tone) {
           fields: llmFieldsFor(report),
         },
       });
-      if (!reply) return "No reply came back.";
+      if (!reply) return "No reply came back -- the background worker may have been asleep. Try again.";
       if (reply.error) return reply.error;
-      const changed = await applyLlmAnswers(report, reply.answers, {}, profile);
+      // Applying an answer touches the page, which can throw; the reply is
+      // still worth showing, and an answer box that goes silent on an error
+      // looks like the extension hanging.
+      let changed = 0;
+      try {
+        changed = await applyLlmAnswers(report, reply.answers, {}, profile);
+      } catch (exc) {
+        return `${reply.reply}\n\n(Couldn't apply that to the page: ${_errorText(exc)})`;
+      }
       history.push({ role: "user", content: text });
       history.push({ role: "assistant", content: reply.reply });
       return changed ? `${reply.reply}\n\n(${changed} field(s) changed.)` : reply.reply;
@@ -250,16 +293,17 @@ function _showBanner(html, tone) {
   // Whatever arrived already filled -- typed before clicking, put there by
   // another autofill extension, or remembered by the site -- is an answer
   // too, and was being stepped over in silence.
-  if (!settings || settings.watch_and_learn !== false) {
+  await _step(panel, "Reading what was already on the page", async () => {
+    if (settings && settings.watch_and_learn === false) return;
     const prefilled = learnFromPrefilled(report, profile);
     const learnedNow = Object.keys(prefilled.answers).length;
     if (learnedNow) {
-      chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: prefilled.answers });
+      _send({ type: "ja-learned-answers", answers: prefilled.answers });
       panel?.log(`Remembered ${learnedNow} answer(s) already on this page.`, "info");
     }
     const gaps = Object.keys(prefilled.suggestions).length;
     if (gaps) {
-      chrome.runtime.sendMessage({
+      _send({
         type: "ja-profile-suggestions",
         suggestions: prefilled.suggestions,
       });
@@ -268,18 +312,38 @@ function _showBanner(html, tone) {
         "info"
       );
     }
-  }
+  });
 
   // From here on, whatever the applicant types into what was left blank is
   // noticed and kept, so the same question fills itself next time. No API
   // call, no prompting, and their own answer rather than anyone's reading
   // of it.
-  if (!settings || settings.watch_and_learn !== false) {
+  await _step(panel, "Watching for what you type next", async () => {
+    if (settings && settings.watch_and_learn === false) return;
     watchForCorrections(
       report,
-      (learned) => chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: learned }),
+      (learned) => _send({ type: "ja-learned-answers", answers: learned }),
       (suggested) =>
-        chrome.runtime.sendMessage({ type: "ja-profile-suggestions", suggestions: suggested })
+        _send({ type: "ja-profile-suggestions", suggestions: suggested })
     );
+  });
+}
+
+// Nothing above is allowed to fail in silence. Without this, an exception
+// anywhere in the run left the page exactly as it was -- no panel, no
+// banner, no badge -- which reads as an extension that did nothing rather
+// than one that broke, and the applicant's next move is to submit a form
+// they believe was filled.
+(async () => {
+  try {
+    await _run();
+  } catch (exc) {
+    _showBanner(
+      "<strong>Autofill stopped early</strong><br>" +
+        `${_errorText(exc)}<br><br>Whatever was filled before this is on the page ` +
+        "and outlined; everything else is yours to fill in. Nothing was submitted.",
+      "warn"
+    );
+    _send({ type: "ja-fill-error", message: _errorText(exc) });
   }
 })();
