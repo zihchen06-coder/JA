@@ -110,3 +110,26 @@ def test_unmatched_required_field_is_reported():
     )
     assert actions == []
     assert len(report.unmatched_required) == 1
+
+
+def test_a_question_with_no_answer_written_yet_is_left_alone():
+    """A keyword with a blank answer is a question the applicant means to get
+    to, not an answer of "". Matching one blanked the box and reported it
+    filled, which hid the question from the report they read afterwards.
+    """
+    profile = Profile(**{**BASE.__dict__, "custom_answers": {"why do you want to work": ""}})
+    actions, report = run([field(label="Why do you want to work here?", has_value=False)], profile)
+    assert actions == []
+    assert report.results[0].action == "skipped_no_match"
+
+
+def test_a_blank_answer_does_not_shadow_a_written_one():
+    """Both keywords match this label, and the blank one is listed first."""
+    profile = Profile(**{**BASE.__dict__, "custom_answers": {
+        "why do you want to work": "",
+        "tell us about yourself": "Written out properly.",
+    }})
+    label = "Tell us about yourself, and why do you want to work here?"
+    actions, report = run([field(tag="textarea", label=label, has_value=False)], profile)
+    assert actions == [("fill", '[data-ja-id="ja-0"]', "Written out properly.")]
+    assert report.results[0].canonical == "custom_answers"

@@ -183,6 +183,13 @@ function _promptProfile(profile, withAnswers) {
   delete copy.cover_letter_file;
   for (const field of _SENSITIVE_PROFILE_FIELDS) delete copy[field];
   if (!withAnswers) delete copy.custom_answers;
+  // An unanswered keyword says nothing about the applicant, and sending one
+  // reads as though they had nothing to say to that question.
+  else if (copy.custom_answers && typeof copy.custom_answers === "object") {
+    copy.custom_answers = Object.fromEntries(
+      Object.entries(copy.custom_answers).filter(([, a]) => a !== null && a !== undefined && a !== "")
+    );
+  }
   return copy;
 }
 

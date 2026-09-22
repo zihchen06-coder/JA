@@ -310,6 +310,13 @@ function _matchCustomAnswer(label, profile) {
   const normLabel = normalize(label);
   if (!normLabel) return null;
   for (const [keyword, answer] of Object.entries(profile.custom_answers || {})) {
+    // A keyword the applicant hasn't answered yet is a prompt to themselves,
+    // not an answer -- the Options page seeds the common questions as blank
+    // rows on purpose. Treating one as a match typed an empty string into
+    // the box, reported it filled, and by settling the field hid the
+    // question from both the AI pass and the gaps log: the three things
+    // that exist to catch a question this profile can't answer.
+    if (!_isAnswered(answer)) continue;
     if (normLabel.includes(normalize(keyword))) return answer;
   }
   return null;

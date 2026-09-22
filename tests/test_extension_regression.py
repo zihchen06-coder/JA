@@ -542,7 +542,7 @@ def test_llm_blank_values_become_skips_not_empty_fills(browser):
     assert out["result"]["skipped"] == {"ja-1": "sensitive"}
 
 
-def _llm_call_with_fields(browser, fields):
+def _llm_call_with_fields(browser, fields, profile=None):
     page = browser.new_page()
     try:
         page.goto("about:blank")
@@ -563,7 +563,7 @@ def _llm_call_with_fields(browser, fields):
                 });
                 return sent.system[0].text;
             }""",
-            {"profile": PROFILE, "fields": fields},
+            {"profile": profile or PROFILE, "fields": fields},
         )
     finally:
         page.close()
@@ -594,6 +594,82 @@ def test_written_answers_are_only_sent_when_a_page_asks_an_open_question(browser
         {"ja_id": "ja-1", "label": "Why do you want to work here?", "type": "text", "options": []},
     ])
     assert answer_text in with_question
+
+
+def test_a_question_with_no_answer_written_yet_is_left_for_the_applicant(browser):
+    """The Answers tab seeds the common questions as blank rows for the
+    applicant to fill in, so a blank one is the normal state of a question
+    they haven't got to yet -- not an answer of "". Matching one used to type
+    nothing into the box and report it filled, which also settled the field:
+    the AI pass was never offered it and the gaps log never counted it, so
+    the question they most needed to notice was the one made invisible.
+    """
+    page = browser.new_page()
+    try:
+        page.set_content(
+            """<form>
+                 <label for="q">Why do you want to work here?</label>
+                 <textarea id="q" name="q"></textarea>
+               </form>"""
+        )
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        profile = {**PROFILE, "custom_answers": {"why do you want to work": ""}}
+        report = page.evaluate("(profile) => fillForm(profile, null)", profile)
+        offered = page.evaluate("(report) => llmFieldsFor(report)", report)
+        missed = page.evaluate("(report) => missedFields(report)", report)
+        typed = page.evaluate("() => document.getElementById('q').value")
+    finally:
+        page.close()
+
+    result = _result_for(report, "why do you want to work here")
+    assert result["action"] == "skipped_no_match"
+    assert typed == ""
+    # Non-emptiness first: "not filled" is trivially true of an empty offer.
+    assert offered and any("why do you want to work" in f["label"].lower() for f in offered)
+    assert any("why do you want to work" in m["label"].lower() for m in missed)
+
+
+def test_a_blank_answer_does_not_shadow_a_written_one(browser):
+    """Two keywords can match the same label, and the blank one is often
+    first -- the Answers tab lists them in the order they were added.
+    """
+    page = browser.new_page()
+    try:
+        page.set_content(
+            """<form>
+                 <label for="q">Tell us about yourself, and why do you want to work here?</label>
+                 <textarea id="q" name="q"></textarea>
+               </form>"""
+        )
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        profile = {**PROFILE, "custom_answers": {
+            "why do you want to work": "",
+            "tell us about yourself": "Written out properly.",
+        }}
+        report = page.evaluate("(profile) => fillForm(profile, null)", profile)
+    finally:
+        page.close()
+
+    assert _result_for(report, "tell us about yourself")["detail"] == "Written out properly."
+
+
+def test_unanswered_questions_are_not_sent_to_the_api(browser):
+    """An empty answer tells Claude nothing about the applicant, and reads as
+    though they had nothing to say to that question.
+    """
+    profile = {**PROFILE, "custom_answers": {
+        "why do you want to work": "",
+        "tell us about yourself": "Written out properly.",
+    }}
+    sent = _llm_call_with_fields(
+        browser,
+        [{"ja_id": "ja-1", "label": "Tell us about yourself", "type": "textarea", "options": []}],
+        profile=profile,
+    )
+    assert "Written out properly." in sent
+    assert "why do you want to work" not in sent
 
 
 def _fill_with(browser, fname, overrides):
