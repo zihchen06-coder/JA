@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-22, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/new-session-n7suz1`. 169 tests passing.
+`claude/new-session-n7suz1`. 180 tests passing.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -109,16 +109,31 @@ tests/
   `extractor.js`, `_setIcimsValue()`/`_icimsSearch()` in `filler.js`.
 - Both have frozen fixtures: `workday_questions.html`, `icims_profile.html`.
 
-### Learning (three stores, different rules)
+### Learning (four stores, different rules)
 
 | Store | Holds | Written from |
 |---|---|---|
 | `learned_answers` | label -> answer text | Questions the profile has no field for |
+| `learned_fields` | markup token -> {answer, label, host} | **Learn this page**; survives a reworded question |
 | `learned_aliases` | label -> profile field | Claude's declared `profile_field` |
 | `profile_suggestions` | profile field -> value | Gaps found on the page; **suggested, never written** |
 
 Sensitive and consent answers go **only** to `profile_suggestions`, never to
-`learned_answers`. That routing is the safety property — see rule 5.
+`learned_answers` or `learned_fields`. That routing is the safety property —
+see rule 5. Both of those stores are consulted before the gate that reads
+what a question is asking, so an answer sitting in either is a way straight
+past it: a markup match says "this is the same box", which is no reason to
+answer a question that has to be answered by hand.
+
+**Learn this page** (the panel button, `learnPageNow` in `filler.js`) reads
+the DOM as it stands when it is pressed, which is the point. The watcher set
+up after a fill can only watch fields that existed at fill time, so the next
+step of a Workday application, anything rendered late, and any page reached
+without clicking the icon were all unlearnable — most of what there was to
+learn. A markup token comes from `data-automation-id`, `name` or `id` with
+generated indices and uuids stripped and generic words ("input", "answer",
+"field") dropped: `markupToken` in `matcher.js`. `--phoneNumber` becomes
+"phone number"; `input-14` becomes nothing, on purpose.
 
 Capped in `background.js` (`capLearned`, `capMisses` in `llm.js`).
 
