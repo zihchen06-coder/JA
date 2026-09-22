@@ -14,17 +14,20 @@ var _PANEL_CSS = `
   :host { all: initial; }
   * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   .wrap {
-    position: fixed; top: 12px; right: 12px; bottom: 12px; width: 340px;
+    position: fixed; width: 340px;
     z-index: 2147483647; display: flex; flex-direction: column;
     background: #0f172a; color: #e2e8f0; border: 1px solid rgba(148,163,184,.25);
     border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.45);
     font-size: 13px; line-height: 1.5; overflow: hidden;
   }
-  .wrap.min { bottom: auto; height: auto; }
+  .wrap.min { height: auto !important; bottom: auto !important; }
   header {
     display: flex; align-items: center; gap: 8px; padding: 10px 12px;
     border-bottom: 1px solid rgba(148,163,184,.18); flex: 0 0 auto;
+    cursor: grab;
   }
+  .wrap.dragging header { cursor: grabbing; }
+  .wrap.dragging { user-select: none; }
   header strong { font-size: 13px; font-weight: 600; flex: 1; }
   header button {
     background: transparent; border: none; color: #94a3b8; cursor: pointer;
@@ -72,6 +75,14 @@ var _PANEL_CSS = `
   .msg.me::before { content: "you  "; color: #64748b; }
   .msg.it { color: #cbd5e1; }
   .msg.it::before { content: "claude  "; color: #38bdf8; }
+  .ai-toggle {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 6px; color: #94a3b8; font-size: 11.5px;
+  }
+  .ai-toggle input[type="checkbox"] {
+    width: 13px; height: 13px; accent-color: #38bdf8; cursor: pointer; flex-shrink: 0;
+  }
+  .ai-toggle label { cursor: pointer; }
   .row { display: flex; gap: 6px; }
   textarea {
     flex: 1; resize: none; background: rgba(15,23,42,.9); color: #e2e8f0;
@@ -79,6 +90,7 @@ var _PANEL_CSS = `
     font-size: 12.5px; min-height: 34px; max-height: 110px; outline: none;
   }
   textarea:focus { border-color: #38bdf8; }
+  textarea:disabled { opacity: .4; cursor: default; }
   .send {
     background: #38bdf8; color: #0f172a; border: none; border-radius: 8px;
     padding: 0 12px; font-weight: 600; cursor: pointer; font-size: 12.5px;
@@ -118,24 +130,86 @@ function createPanel() {
     <div class="body"></div>
     <div class="chat">
       <div class="msgs"></div>
+      <div class="ai-toggle">
+        <input type="checkbox" id="ja-ai-cb">
+        <label for="ja-ai-cb">AI assist</label>
+      </div>
       <div class="row">
-        <textarea placeholder="Ask about this form&hellip;" rows="1"></textarea>
-        <button class="send">Ask</button>
+        <textarea placeholder="Ask about this form&hellip;" rows="1" disabled></textarea>
+        <button class="send" disabled>Ask</button>
       </div>
     </div>`;
   root.appendChild(wrap);
   document.documentElement.appendChild(host);
 
+  // Initial position: right side, full viewport height
+  wrap.style.left = (window.innerWidth - 340 - 12) + "px";
+  wrap.style.top = "12px";
+  wrap.style.bottom = "12px";
+
   const body = wrap.querySelector(".body");
   const msgs = wrap.querySelector(".msgs");
   const input = wrap.querySelector("textarea");
   const send = wrap.querySelector(".send");
+  const aiCb = wrap.querySelector("#ja-ai-cb");
+  const header = wrap.querySelector("header");
 
-  wrap.querySelector(".close").onclick = () => host.remove();
+  // --- Drag to reposition ---
+  let dragging = false, dragOX = 0, dragOY = 0;
+
+  const onMouseMove = (e) => {
+    if (!dragging) return;
+    const maxX = Math.max(0, window.innerWidth - 340);
+    const maxY = Math.max(0, window.innerHeight - 50);
+    wrap.style.left = Math.max(0, Math.min(maxX, e.clientX - dragOX)) + "px";
+    wrap.style.top = Math.max(0, Math.min(maxY, e.clientY - dragOY)) + "px";
+  };
+
+  const onMouseUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    wrap.classList.remove("dragging");
+  };
+
+  document.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mouseup", onMouseUp);
+
+  header.addEventListener("mousedown", (e) => {
+    if (e.target.closest("button")) return;
+    e.preventDefault();
+    const rect = wrap.getBoundingClientRect();
+    // On first drag, lock the height so the panel doesn't stretch to the bottom as it moves
+    if (!wrap.style.height || wrap.style.height === "auto") {
+      wrap.style.height = rect.height + "px";
+      wrap.style.bottom = "auto";
+    }
+    dragging = true;
+    dragOX = e.clientX - rect.left;
+    dragOY = e.clientY - rect.top;
+    wrap.classList.add("dragging");
+  });
+
+  // --- AI assist toggle ---
+  let hasAskHandler = false;
+
+  const syncSendState = () => {
+    const on = aiCb.checked;
+    input.disabled = !on;
+    send.disabled = !on || !hasAskHandler;
+  };
+
+  aiCb.addEventListener("change", syncSendState);
+
+  // --- Close / minimize ---
+  wrap.querySelector(".close").onclick = () => {
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+    host.remove();
+  };
+
   wrap.querySelector(".min").onclick = () => wrap.classList.toggle("min");
+
   const learnBtn = wrap.querySelector(".learn");
-  // Nothing to press until run.js has wired it up, which it only does once
-  // the fill it reports on has finished.
   learnBtn.disabled = true;
 
   const scroll = (el) => {
@@ -143,8 +217,6 @@ function createPanel() {
   };
 
   const api = {
-    // A step of the fill, as it happens -- the panel exists so this is
-    // visible rather than inferred from a number at the end.
     log(text, tone = "muted") {
       const line = document.createElement("div");
       line.className = "line";
@@ -155,9 +227,6 @@ function createPanel() {
       return line;
     },
 
-    // Claude's own reasoning for this page, when the API returned a summary
-    // of it. Collapsed: it is there to be opened when something looks wrong,
-    // not to be read every time.
     showThinking(text) {
       if (!text) return;
       const details = document.createElement("details");
@@ -171,9 +240,6 @@ function createPanel() {
       scroll(body);
     },
 
-    // Every field, grouped by what happened to it. Clicking one scrolls to
-    // it and flashes it, so "what went wrong" is something you can point at
-    // rather than something you have to hunt for.
     showResults(report) {
       const groups = [
         ["Filled", "f", (r) => r.action === "filled"],
@@ -204,14 +270,12 @@ function createPanel() {
       scroll(body);
     },
 
-    // Pressing it re-reads the page as it stands, so it is worth pressing
-    // again on the next step of a multi-page application.
     onLearnPage(handler) {
       learnBtn.disabled = false;
       learnBtn.onclick = async () => {
         learnBtn.disabled = true;
         const was = learnBtn.textContent;
-        learnBtn.textContent = "Learning\u2026";
+        learnBtn.textContent = "Learning…";
         try {
           await handler();
         } finally {
@@ -230,8 +294,17 @@ function createPanel() {
       return div;
     },
 
-    // handler(text) -> Promise<string>, whatever it resolves to is shown.
+    // Called by run.js once the settings are loaded -- matches the panel's
+    // AI assist checkbox to whatever the user has set in Options.
+    setAiEnabled(on) {
+      aiCb.checked = !!on;
+      syncSendState();
+    },
+
     onAsk(handler) {
+      hasAskHandler = true;
+      syncSendState();
+
       const ask = async () => {
         const text = input.value.trim();
         if (!text) return;
@@ -245,7 +318,7 @@ function createPanel() {
           pending.textContent = String(exc);
         }
         scroll(msgs);
-        send.disabled = false;
+        syncSendState();
       };
       send.onclick = ask;
       input.onkeydown = (e) => {
