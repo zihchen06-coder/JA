@@ -1,8 +1,8 @@
 # Handoff
 
-State of this project as of 2026-09-17, written so a new conversation can
+State of this project as of 2026-09-22, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/job-application-automation-tp32l1`. 139 tests passing.
+`claude/new-session-n7suz1`. 145 tests passing.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -137,6 +137,11 @@ python3 -m pytest tests/ -q
 Tests run the extension's real JS in real headless Chromium. Most bugs here
 are DOM-behaviour bugs a mock can't reproduce.
 
+A test needing a binary fixture builds it itself (see `_docx_bytes`). The one
+that read a saved `sample_resume.docx` could never pass in a fresh clone: the
+`*.docx` line in `.gitignore`, there to keep the applicant's real resume out
+of the repo, had silently kept the fixture out of every commit too.
+
 **Two lessons learned the hard way, both worth keeping:**
 
 1. **Verify a new test actually fails without the fix.** Twice in this project
@@ -196,7 +201,7 @@ about what the site probably does.
 
 ## Conventions
 
-- Work on `claude/job-application-automation-tp32l1`. Commit and push when a
+- Work on `claude/new-session-n7suz1`. Commit and push when a
   change is complete and tests pass.
 - Commit messages explain **why**, including what was wrong before. Several in
   the log are worth reading as documentation — `3721399` (the sensitive-alias

@@ -1406,14 +1406,57 @@ def test_what_a_form_could_not_answer_is_recorded(browser):
         assert m["key"] and m["action"] and "type" in m
 
 
-def test_the_docx_reader_gets_the_text_out(browser):
+# The text Word would have laid down for the fake identity, in the markup it
+# actually emits: a run carries its properties, a tab is its own element, and
+# an ampersand arrives as an entity. docxText strips all of that back out.
+_DOCX_BODY = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+    "<w:body>"
+    "<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Jamie Rivera</w:t></w:r></w:p>"
+    "<w:p><w:r><w:t>Test Engineer at Test Industries</w:t></w:r>"
+    "<w:r><w:tab/></w:r><w:r><w:t>2021 to Present</w:t></w:r></w:p>"
+    "<w:p><w:r><w:t>B.S. Engineering, State University &amp; Co</w:t></w:r></w:p>"
+    "</w:body></w:document>"
+)
+
+def _docx_bytes(compression):
+    """A .docx is a ZIP of XML parts, so the test can lay one down itself.
+
+    It used to read tests/fixtures/sample_resume.docx, which the `*.docx`
+    line in .gitignore -- there to keep the applicant's real resume out of
+    the repo -- had quietly kept out of every commit, so the test could only
+    ever pass on the machine it was written on. Building the file here keeps
+    that rule intact and costs only what a frozen sample was worth: this is
+    Word's structure and markup rather than a file Word itself wrote.
+    """
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression) as z:
+        # Written in Word's order, so word/document.xml is not the first
+        # entry -- walking past the ones before it is half of what docxText
+        # does, and a single-entry file would never exercise it.
+        z.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        z.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
+        z.writestr("word/document.xml", _DOCX_BODY)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("compression", ["deflated", "stored"])
+def test_the_docx_reader_gets_the_text_out(browser, compression):
     """The applicant's resume is a .docx, and a Word file is a ZIP whose
     word/document.xml holds the text -- readable here without a library
-    because Chrome can inflate a raw deflate stream itself.
+    because Chrome can inflate a raw deflate stream itself. Stored entries
+    have no deflate stream to inflate, and a zip writer is free to use them
+    for a part this small, so both paths are worth holding down.
     """
-    with open(os.path.join(FIXTURES_DIR, "sample_resume.docx"), "rb") as f:
-        import base64
-        b64 = base64.b64encode(f.read()).decode()
+    import base64
+    import zipfile
+
+    method = zipfile.ZIP_DEFLATED if compression == "deflated" else zipfile.ZIP_STORED
+    b64 = base64.b64encode(_docx_bytes(method)).decode()
 
     page = browser.new_page()
     try:
@@ -1436,6 +1479,10 @@ def test_the_docx_reader_gets_the_text_out(browser):
     assert "Test Engineer at Test Industries" in text
     # XML entities come back as the characters they stand for.
     assert "State University & Co" in text
+    # A paragraph ends a line and a tab survives as one, so a resume's
+    # layout still reads as a resume once the markup is gone.
+    assert "Test Engineer at Test Industries\t2021 to Present" in text
+    assert text.splitlines()[0] == "Jamie Rivera"
 
 
 def test_it_learns_from_another_extension_filling_the_same_form(browser):
