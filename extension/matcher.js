@@ -144,6 +144,77 @@ function setLearnedAnswers(map) {
   LEARNED_ANSWERS = map || {};
 }
 
+// --- Remembering a field by its markup, not its wording --------------------
+//
+// A label is the fragile half of a question. The same form asked again by
+// the same system says "Why do you want to work here?" one time and "Why
+// are you interested in working at Acme?" the next, and an answer stored
+// under the first is no use for the second. What doesn't move is what the
+// page calls the control in its own markup: Workday's data-automation-id,
+// the name attribute, the id.
+//
+// Those are stored as tokens rather than raw: an id like "input-14" is a
+// generated index that changes on the next render, and "input" on its own
+// would collide with every text box on the internet. What survives both is
+// the meaningful part -- "--phoneNumber" and "formField-countryCode" reduce
+// to "phone number" and "country code", which are worth matching on.
+var LEARNED_FIELDS = {};
+
+function setLearnedFields(map) {
+  LEARNED_FIELDS = map || {};
+}
+
+// Words too common to identify anything on their own.
+var _GENERIC_MARKUP_WORDS = new Set([
+  "input", "text", "field", "value", "select", "option", "answer", "question",
+  "form", "data", "item", "entry", "box", "control", "element", "row", "col",
+  "container", "wrapper", "label", "req", "required", "optional", "edit",
+]);
+
+// Long enough to mean something. Short of this a token is as likely to be
+// an abbreviation two systems use differently as a real question.
+var _MIN_SIGNATURE_LENGTH = 6;
+
+function markupToken(raw) {
+  const words = String(raw || "")
+    // A generated id carries a uuid or an index that changes per render.
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, " ")
+    .replace(/\d+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[^A-Za-z]+/g, " ")
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !_GENERIC_MARKUP_WORDS.has(w));
+  if (!words.length) return null;
+  const token = words.join(" ");
+  return token.length >= _MIN_SIGNATURE_LENGTH ? token : null;
+}
+
+// Every handle this field offers, best first. More than one because a form
+// that drops its name attribute may still carry the automation id, and the
+// entry is stored under all of them so either one finds it again.
+function fieldSignatures(f) {
+  if (!f) return [];
+  const seen = new Set();
+  for (const raw of [f.automation_id, f.name, f.id]) {
+    const token = markupToken(raw);
+    if (token) seen.add(token);
+  }
+  return Array.from(seen);
+}
+
+// An answer remembered for this control's markup. Consulted only where a
+// remembered answer is already allowed -- after the gate that reads what a
+// question is asking, never instead of it.
+function learnedFieldAnswer(f) {
+  for (const signature of fieldSignatures(f)) {
+    const entry = LEARNED_FIELDS[signature];
+    if (entry && typeof entry.answer === "string" && entry.answer !== "") return entry.answer;
+  }
+  return null;
+}
+
 function learnedAnswerFor(label) {
   const norm = normalize(label);
   if (!norm) return null;

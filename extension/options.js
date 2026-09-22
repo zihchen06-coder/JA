@@ -127,6 +127,7 @@ function fullBackup() {
     settings: state.settings || {},
     learned_aliases: state.learned || {},
     learned_answers: state.learnedAnswers || {},
+    learned_fields: state.learnedFields || {},
     profile_suggestions: state.suggestions || {},
     misses: state.misses || {},
     applications: state.applications || [],
@@ -170,6 +171,10 @@ async function restoreStores(data, profile) {
     writes.learned_answers = _capMap(data.learned_answers, 2000);
     restored.push(`${Object.keys(writes.learned_answers).length} remembered answer(s)`);
   }
+  if (data.learned_fields !== undefined) {
+    writes.learned_fields = _capMap(data.learned_fields, 2000);
+    restored.push(`${Object.keys(writes.learned_fields).length} answer(s) filed by markup`);
+  }
   if (data.profile_suggestions !== undefined) {
     writes.profile_suggestions = _capMap(data.profile_suggestions, 200);
     restored.push(`${Object.keys(writes.profile_suggestions).length} suggestion(s)`);
@@ -191,6 +196,7 @@ async function restoreStores(data, profile) {
   await chrome.storage.local.set(writes);
   if (writes.learned_aliases) state.learned = writes.learned_aliases;
   if (writes.learned_answers) state.learnedAnswers = writes.learned_answers;
+  if (writes.learned_fields) state.learnedFields = writes.learned_fields;
   if (writes.profile_suggestions) state.suggestions = writes.profile_suggestions;
   if (writes.misses) state.misses = writes.misses;
   if (writes.applications) state.applications = writes.applications;
@@ -428,6 +434,7 @@ function renderSettings() {
 function renderStoredTabs() {
   _section("Learned labels", renderLearned);
   _section("Learned answers", renderLearnedAnswers);
+  _section("Learned by markup", renderLearnedFields);
   _section("Profile suggestions", renderSuggestions);
   _section("Gaps", renderMisses);
   _section("Applications", renderApplications);
@@ -471,6 +478,7 @@ function loadIntoForm() {
   _section("Settings", renderSettings);
   _section("Learned labels", renderLearned);
   _section("Learned answers", renderLearnedAnswers);
+  _section("Learned by markup", renderLearnedFields);
   _section("Profile suggestions", renderSuggestions);
   _section("Gaps", renderMisses);
   _section("Applications", renderApplications);
@@ -615,11 +623,12 @@ function initTabs() {
 
   const stored = await chrome.storage.local.get([
     "profile", "settings", "credentials", "llm_api_key", "learned_aliases",
-    "learned_answers", "misses", "applications", "profile_suggestions",
+    "learned_answers", "learned_fields", "misses", "applications", "profile_suggestions",
   ]);
   state.llmApiKey = stored.llm_api_key || "";
   state.learned = stored.learned_aliases || {};
   state.learnedAnswers = stored.learned_answers || {};
+  state.learnedFields = stored.learned_fields || {};
   state.misses = stored.misses || {};
   state.suggestions = stored.profile_suggestions || {};
   state.applications = stored.applications || [];
@@ -844,6 +853,35 @@ function renderLearned() {
       delete state.learned[label];
       await chrome.storage.local.set({ learned_aliases: state.learned });
       renderLearned();
+    };
+    list.appendChild(row);
+  }
+}
+
+// Answers filed under what the page calls the control rather than under the
+// question's wording. Shown with the label they were learned beside, since
+// "phone number -> Mobile" is readable and the raw handle often isn't.
+function renderLearnedFields() {
+  const list = document.getElementById("fields-learned-list");
+  const empty = document.getElementById("fields-learned-empty");
+  const entries = Object.entries(state.learnedFields || {}).sort();
+  list.innerHTML = "";
+  empty.style.display = entries.length ? "none" : "";
+
+  for (const [signature, entry] of entries) {
+    const held = entry && typeof entry === "object" ? entry : { answer: String(entry || "") };
+    const row = document.createElement("div");
+    row.className = "cred-row";
+    row.style.marginBottom = "8px";
+    row.innerHTML = `
+      <input readonly value="${esc(signature)}">
+      <input readonly value="${esc(held.answer || "")}">
+      <span class="note">${esc(held.label || held.host || "")}</span>
+      <button class="danger" type="button">Forget</button>`;
+    row.querySelector("button").onclick = async () => {
+      delete state.learnedFields[signature];
+      await chrome.storage.local.set({ learned_fields: state.learnedFields });
+      renderLearnedFields();
     };
     list.appendChild(row);
   }

@@ -213,6 +213,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
+  // Answers remembered by what the page calls the control, rather than by
+  // how it worded the question. Same cap as the label-keyed store.
+  if (message?.type === "ja-learned-fields") {
+    (async () => {
+      const { learned_fields: existing } = await chrome.storage.local.get(["learned_fields"]);
+      await chrome.storage.local.set({
+        learned_fields: capLearned({ ...(existing || {}), ...message.fields }, 2000),
+      });
+    })();
+    return;
+  }
+
   if (message?.type === "ja-learned-replace") {
     chrome.storage.local.set({ learned_aliases: message.learned });
     return;

@@ -31,6 +31,11 @@ var _PANEL_CSS = `
     font-size: 15px; padding: 2px 6px; border-radius: 6px;
   }
   header button:hover { background: rgba(148,163,184,.15); color: #e2e8f0; }
+  header button.learn {
+    font-size: 11.5px; color: #38bdf8; border: 1px solid rgba(56,189,248,.4);
+    padding: 3px 8px; white-space: nowrap;
+  }
+  header button.learn:disabled { opacity: .55; cursor: default; }
   .body { flex: 1 1 auto; overflow-y: auto; padding: 10px 12px; }
   .wrap.min .body, .wrap.min .chat { display: none; }
   .line { display: flex; gap: 7px; align-items: baseline; margin-bottom: 4px; color: #cbd5e1; }
@@ -106,6 +111,7 @@ function createPanel() {
   wrap.innerHTML = `
     <header>
       <strong>Autofill</strong>
+      <button class="learn" title="Keep every answer on this page, so the next form like it fills itself">Learn this page</button>
       <button class="min" title="Collapse">&minus;</button>
       <button class="close" title="Close">&times;</button>
     </header>
@@ -127,6 +133,10 @@ function createPanel() {
 
   wrap.querySelector(".close").onclick = () => host.remove();
   wrap.querySelector(".min").onclick = () => wrap.classList.toggle("min");
+  const learnBtn = wrap.querySelector(".learn");
+  // Nothing to press until run.js has wired it up, which it only does once
+  // the fill it reports on has finished.
+  learnBtn.disabled = true;
 
   const scroll = (el) => {
     el.scrollTop = el.scrollHeight;
@@ -192,6 +202,23 @@ function createPanel() {
         }
       }
       scroll(body);
+    },
+
+    // Pressing it re-reads the page as it stands, so it is worth pressing
+    // again on the next step of a multi-page application.
+    onLearnPage(handler) {
+      learnBtn.disabled = false;
+      learnBtn.onclick = async () => {
+        learnBtn.disabled = true;
+        const was = learnBtn.textContent;
+        learnBtn.textContent = "Learning\u2026";
+        try {
+          await handler();
+        } finally {
+          learnBtn.textContent = was;
+          learnBtn.disabled = false;
+        }
+      };
     },
 
     say(text, who) {

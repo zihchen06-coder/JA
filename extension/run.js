@@ -73,8 +73,10 @@ async function _run() {
     credentials: savedCreds,
     learned_aliases: learnedAliases,
     learned_answers: learnedAnswers,
+    learned_fields: learnedFields,
   } = await chrome.storage.local.get([
     "profile", "settings", "credentials", "learned_aliases", "learned_answers",
+    "learned_fields",
   ]);
 
   if (!profile || REQUIRED_FIELDS.some((f) => !profile[f])) {
@@ -107,6 +109,7 @@ async function _run() {
     _send({ type: "ja-learned-replace", learned: safeAliases });
   }
   setLearnedAnswers(learnedAnswers || {});
+  setLearnedFields(learnedFields || {});
 
   // Only the top frame draws a panel. This script runs in every frame, and a
   // panel inside an embedded application iframe would be clipped to that
@@ -252,6 +255,44 @@ async function _run() {
     if (blankRequired) panel.log(`${blankRequired} required field(s) still blank.`, "err");
     panel.log("Nothing submitted. Check the highlighted fields, then submit yourself.", "muted");
     panel.showResults(report);
+
+    // Learning the page is a separate act from filling it: it reads the DOM
+    // as it stands when the button is pressed, which is what makes it work
+    // on a step this fill never saw.
+    panel.onLearnPage(async () => {
+      let learned;
+      try {
+        learned = learnPageNow(profile);
+      } catch (exc) {
+        panel.log(`Couldn't read this page: ${_errorText(exc)}`, "err");
+        return;
+      }
+      const answers = Object.keys(learned.answers).length;
+      const markup = Object.keys(learned.markup).length;
+      const gaps = Object.keys(learned.suggestions).length;
+
+      if (answers) _send({ type: "ja-learned-answers", answers: learned.answers });
+      if (markup) _send({ type: "ja-learned-fields", fields: learned.markup });
+      if (gaps) _send({ type: "ja-profile-suggestions", suggestions: learned.suggestions });
+
+      if (!answers && !markup && !gaps) {
+        panel.log("Nothing to learn here -- no answers on this page yet.", "warn");
+        return;
+      }
+      panel.log(
+        `Learned ${answers} answer(s) by question and ${markup} by the page's own markup.`,
+        "ok"
+      );
+      if (gaps) {
+        panel.log(`${gaps} of them look like profile values -- see Options, Learned tab.`, "info");
+      }
+      if (learned.skipped.length) {
+        panel.log(
+          `Couldn't keep ${learned.skipped.length}: ${learned.skipped.slice(0, 3).join(", ")}.`,
+          "warn"
+        );
+      }
+    });
 
     // Asking about the form is asking about this exact fill, so the chat
     // gets the same report the panel is showing -- including why each field

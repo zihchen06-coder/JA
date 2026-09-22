@@ -280,6 +280,10 @@ function extractFields() {
         widget: "listbox_button",
         name: el.getAttribute("name") || "",
         id: el.id || "",
+        // What the page calls this control in its own markup. Workday's
+        // data-automation-id survives a redesign that rewrites every label,
+        // which makes it the steadiest handle on "the same question again".
+        automation_id: el.getAttribute("data-automation-id") || "",
         required: listboxButtonRequired(el),
         label: listboxButtonLabel(el),
         section: sectionLabel(el),
@@ -319,6 +323,7 @@ function extractFields() {
       type,
       name: el.getAttribute("name") || "",
       id: el.id || "",
+      automation_id: el.getAttribute("data-automation-id") || "",
       // i_required is iCIMS's own flag; its forms set nothing else, so
       // without it every required field there reads as optional and none of
       // the ones left blank get the red outline that asks to be looked at.
