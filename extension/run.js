@@ -117,10 +117,10 @@ async function _run() {
   // panels fighting over the same corner.
   const wantPanel = window.top === window && !(settings && settings.show_panel === false);
   const panel = wantPanel ? createPanel() : null;
-  panel?.setAiEnabled(useLlm);
   panel?.log(`Found ${fieldsData.length} field(s) on this page.`);
 
   const useLlm = !!(settings && settings.use_llm);
+  panel?.setAiEnabled(useLlm);
   const report = await fillForm(profile, creds, {
     tailorCoverLetter: useLlm && !!(settings && settings.tailor_cover_letter),
     answerSensitive: useLlm && !!(settings && settings.route_saved_answers),
