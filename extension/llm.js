@@ -606,3 +606,66 @@ async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
     return { error: `Could not read the result: ${exc}` };
   }
 }
+
+
+// ---------------------------------------------------------------------------
+// A cover letter for one job, on demand from the panel's button.
+//
+// Plain text back, no schema: it is one letter, and structured output would
+// only add a way for the request to be rejected. Written in the applicant's
+// own voice from what is really in their profile and resume -- a letter that
+// claims experience they don't have is worse than none.
+// ---------------------------------------------------------------------------
+
+var COVER_LETTER_RULES = `Write a cover letter for this applicant for the job
+given, in the applicant's own first person.
+
+Voice: casual and down to earth, like a real student writing to a real person.
+Plain words and short sentences. No buzzwords or stiff phrases ("I am excited
+to leverage my skills", "passionate", "dynamic", "synergy" and the like).
+
+Content: only what the profile and resume actually say. Never invent a job,
+project, skill, tool, number or result. If the posting asks for something
+they haven't done, don't claim it; lean on the real things that are closest.
+Name the role and company. Pick the one or two parts of their background that
+fit this job best and say concretely what they did.
+
+Shape: three short paragraphs, well under one page: why this role, what they
+bring, a brief close. No placeholders like [Company], no "Dear Hiring Manager"
+line unless a name is given, no signature block beyond their first name.
+
+If the job block is thin or missing, stay general about the company rather than
+guessing what it does. Reply with the letter text only.`;
+
+async function coverLetterWithClaude({ apiKey, profile, resume, job }) {
+  if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
+  const jobBlock = job && (job.title || job.description)
+    ? `The job:\n${JSON.stringify(job, null, 1)}`
+    : "No job details could be read from this page.";
+  const result = await _postMessages(
+    apiKey,
+    {
+      model: RESUME_MODEL,
+      max_tokens: 1500,
+      output_config: { effort: "low" },
+      system: [
+        {
+          type: "text",
+          text: `${COVER_LETTER_RULES}\n\nThe applicant's profile:\n${JSON.stringify(
+            _promptProfile(profile, true), null, 1
+          )}${_resumeBlock(resume)}`,
+        },
+      ],
+      messages: [{ role: "user", content: jobBlock }],
+    },
+    false,
+    60000
+  );
+  if (!result.ok) return { error: _apiErrorMessage(result) };
+  if (!result.body || typeof result.body !== "object") {
+    return { error: `Unreadable reply from the API: ${result.raw.slice(0, 200)}` };
+  }
+  const block = (result.body.content || []).find((b) => b.type === "text");
+  const letter = block && String(block.text || "").trim();
+  return letter ? { letter } : { error: "No letter came back." };
+}

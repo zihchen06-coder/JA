@@ -145,6 +145,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "ja-cover-letter") {
+    (async () => {
+      try {
+        const { llm_api_key: apiKey } = await chrome.storage.local.get(["llm_api_key"]);
+        sendResponse(await coverLetterWithClaude({ ...message.request, apiKey }));
+      } catch (exc) {
+        sendResponse({ error: String(exc) });
+      }
+    })();
+    return true;
+  }
+
   if (message?.type === "ja-parse-resume") {
     (async () => {
       try {

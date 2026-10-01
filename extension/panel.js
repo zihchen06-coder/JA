@@ -132,6 +132,9 @@ function createPanel() {
         <button class="tool primary fill" title="Fill this page again from your profile">Autofill</button>
         <label class="ai" title="Let Claude answer the questions your profile can't"><input type="checkbox" class="aibox"> AI assist</label>
       </div>
+      <div class="tools">
+        <button class="tool cover" title="Write a cover letter for this job and put it in the form">Tailor cover letter</button>
+      </div>
       <div class="row">
         <textarea placeholder="Ask about this form&hellip;" rows="1"></textarea>
         <button class="send">Ask</button>
@@ -146,6 +149,7 @@ function createPanel() {
   const send = wrap.querySelector(".send");
   const fillBtn = wrap.querySelector(".fill");
   const aiBox = wrap.querySelector(".aibox");
+  const coverBtn = wrap.querySelector(".cover");
   let learnedList = null;
 
   wrap.querySelector(".close").onclick = () => host.remove();
@@ -247,6 +251,20 @@ function createPanel() {
         fillBtn.disabled = true;
         fillBtn.textContent = "Filling\u2026";
         handler();
+      };
+    },
+
+    // handler() -> Promise; the button is busy until it settles.
+    onCoverLetter(handler) {
+      coverBtn.onclick = async () => {
+        coverBtn.disabled = true;
+        coverBtn.textContent = "Writing\u2026";
+        try {
+          await handler();
+        } finally {
+          coverBtn.disabled = false;
+          coverBtn.textContent = "Tailor cover letter";
+        }
       };
     },
 

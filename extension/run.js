@@ -240,6 +240,39 @@ function _showBanner(html, tone) {
       }
     });
 
+    // Writes a letter for this job and puts it in the form's cover letter box
+    // when there is one; with only a file upload, it is shown here instead.
+    panel.onCoverLetter(async () => {
+      const reply = await chrome.runtime.sendMessage({
+        type: "ja-cover-letter",
+        request: { profile, resume: resumeText || "", job },
+      });
+      if (!reply) return panel.say("No reply came back.", "it");
+      if (reply.error) return panel.say(reply.error, "it");
+      const target = (report.fields || []).find(
+        (f) => f.tag === "textarea" && matchField(f.label || f.group_label || "") === "cover_letter_text"
+      );
+      const el = target && _el(target.ja_id);
+      const note = job.title ? "" : " (I couldn't read the job off this page, so it's general.)";
+      if (el) {
+        _setNativeValue(el, reply.letter);
+        _mark(target.ja_id, MARK_FILLED);
+        panel.say(`Put a cover letter for this job in the form. Read it before you submit.${note}`, "it");
+      } else {
+        let copied = false;
+        try {
+          await navigator.clipboard.writeText(reply.letter);
+          copied = true;
+        } catch (exc) {
+          /* the page may not allow clipboard access; the text is below */
+        }
+        panel.say(
+          `There's no cover letter box on this page${copied ? ", so I copied it to your clipboard" : ""}:${note}\n\n${reply.letter}`,
+          "it"
+        );
+      }
+    });
+
     // Asking about the form is asking about this exact fill, so the chat
     // gets the same report the panel is showing -- including why each field
     // was left the way it was.

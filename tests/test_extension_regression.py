@@ -2017,3 +2017,55 @@ def test_a_yes_no_question_mentioning_degree_still_reaches_the_remembered_answer
         PROFILE,
     )
     assert value == "B.S."
+
+
+def test_cover_letter_request_is_plain_text_and_carries_job_resume_and_voice_rules(browser):
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        out = page.evaluate(
+            """async (profile) => {
+                let sent = null;
+                window.fetch = async (url, init) => {
+                    sent = JSON.parse(init.body);
+                    return {ok: true, status: 200, text: async () => JSON.stringify(
+                        {content: [{type: "text", text: "  Hi, I'm Jamie.  "}]})};
+                };
+                const result = await coverLetterWithClaude({
+                    apiKey: "k", profile, resume: "Machined parts at Acme Tooling",
+                    job: {title: "Propulsion Intern", company: "Rocketco"}});
+                const missing = await coverLetterWithClaude({apiKey: "", profile, job: {}});
+                return {sent, result, missing};
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+    assert out["result"] == {"letter": "Hi, I'm Jamie."}
+    assert "format" not in out["sent"]["output_config"]
+    system = out["sent"]["system"][0]["text"]
+    assert "Machined parts at Acme Tooling" in system
+    assert "never invent" in system.lower()
+    assert "resume_file" not in system
+    assert "Propulsion Intern" in out["sent"]["messages"][0]["content"]
+    assert "API key" in out["missing"]["error"]
+
+
+def test_panel_cover_letter_button_is_busy_until_the_handler_finishes(load):
+    page = load(html="<body></body>", scripts=["panel.js"])
+    out = page.evaluate(
+        """async () => {
+            const panel = createPanel();
+            let release;
+            panel.onCoverLetter(() => new Promise((r) => { release = r; }));
+            const btn = document.getElementById("ja-autofill-panel").shadowRoot.querySelector(".cover");
+            btn.click();
+            const during = {disabled: btn.disabled, text: btn.textContent};
+            release();
+            await new Promise((r) => setTimeout(r, 20));
+            return {during, after: {disabled: btn.disabled, text: btn.textContent}};
+        }"""
+    )
+    assert out["during"] == {"disabled": True, "text": "Writing…"}
+    assert out["after"] == {"disabled": False, "text": "Tailor cover letter"}
