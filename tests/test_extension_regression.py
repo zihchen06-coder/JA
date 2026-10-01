@@ -1895,29 +1895,32 @@ def test_learned_answers_carry_over_to_a_slightly_reworded_question(load):
     assert out["short"] is None
 
 
-def test_panel_has_autofill_and_learned_buttons_and_lists_what_was_learned(load):
+def test_panel_has_autofill_button_and_ai_toggle_and_lists_what_was_learned(load):
     page = load(html="<body></body>", scripts=["panel.js"])
     out = page.evaluate(
         """async () => {
             const panel = createPanel();
             let filled = 0;
+            const flips = [];
             panel.onFill(() => { filled += 1; });
-            panel.onLearned(async () => "3 answers remembered");
+            panel.onAiToggle(true, (on) => flips.push(on));
             panel.learn("phone type", "Mobile");
             const root = document.getElementById("ja-autofill-panel").shadowRoot;
+            const startedOn = root.querySelector(".aibox").checked;
             root.querySelector(".fill").click();
-            root.querySelector(".learned").click();
-            await new Promise((r) => setTimeout(r, 50));
+            root.querySelector(".aibox").click();
             return {
-                filled,
+                filled, startedOn, flips,
+                hasLearnedButton: !!root.querySelector(".learned"),
                 learned: root.querySelector(".learned-row").textContent,
-                said: root.querySelector(".msg.it").textContent,
             };
         }"""
     )
     assert out["filled"] == 1
+    assert out["startedOn"] is True
+    assert out["flips"] == [False]
+    assert out["hasLearnedButton"] is False
     assert "phone type" in out["learned"] and "Mobile" in out["learned"]
-    assert out["said"] == "3 answers remembered"
 
 
 # --- Gaps found in a real autofill-gaps export --------------------------------

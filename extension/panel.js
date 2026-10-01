@@ -87,6 +87,12 @@ var _PANEL_CSS = `
   }
   .tool.primary { background: #22c55e; border-color: #22c55e; color: #052e16; font-weight: 600; }
   .tool:disabled { opacity: .5; cursor: default; }
+  .ai {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: rgba(148,163,184,.12); border: 1px solid rgba(148,163,184,.25);
+    border-radius: 8px; padding: 6px 8px; cursor: pointer; font-size: 12px; user-select: none;
+  }
+  .ai input { margin: 0; cursor: pointer; accent-color: #38bdf8; }
   .learned-row { color: #cbd5e1; font-size: 12px; margin-bottom: 3px; word-break: break-word; }
   .learned-row .arrow { color: #64748b; }
 `;
@@ -124,7 +130,7 @@ function createPanel() {
       <div class="msgs"></div>
       <div class="tools">
         <button class="tool primary fill" title="Fill this page again from your profile">Autofill</button>
-        <button class="tool learned" title="What the extension has learned">What I learned</button>
+        <label class="ai" title="Let Claude answer the questions your profile can't"><input type="checkbox" class="aibox"> AI assist</label>
       </div>
       <div class="row">
         <textarea placeholder="Ask about this form&hellip;" rows="1"></textarea>
@@ -139,7 +145,7 @@ function createPanel() {
   const input = wrap.querySelector("textarea");
   const send = wrap.querySelector(".send");
   const fillBtn = wrap.querySelector(".fill");
-  const learnedBtn = wrap.querySelector(".learned");
+  const aiBox = wrap.querySelector(".aibox");
   let learnedList = null;
 
   wrap.querySelector(".close").onclick = () => host.remove();
@@ -235,8 +241,7 @@ function createPanel() {
       scroll(body);
     },
 
-    // handler() for the Autofill button, handler() -> string for the learned
-    // button (shown in the chat).
+    // handler() for the Autofill button.
     onFill(handler) {
       fillBtn.onclick = () => {
         fillBtn.disabled = true;
@@ -245,15 +250,11 @@ function createPanel() {
       };
     },
 
-    onLearned(handler) {
-      learnedBtn.onclick = async () => {
-        learnedBtn.disabled = true;
-        try {
-          api.say(await handler(), "it");
-        } finally {
-          learnedBtn.disabled = false;
-        }
-      };
+    // The AI assist switch, showing the saved setting; handler(on) is called
+    // when it is flipped.
+    onAiToggle(initial, handler) {
+      aiBox.checked = !!initial;
+      aiBox.onchange = () => handler(aiBox.checked);
     },
 
     say(text, who) {

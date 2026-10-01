@@ -226,32 +226,18 @@ function _showBanner(html, tone) {
     panel.showResults(report);
 
     panel.onFill(() => chrome.runtime.sendMessage({ type: "ja-refill" }));
-    panel.onLearned(async () => {
-      const stored = await chrome.storage.local.get([
-        "learned_aliases", "learned_answers", "profile_suggestions",
+    // Flipping it saves the setting, so it holds on the next form too, and
+    // takes effect on the next Autofill press.
+    panel.onAiToggle(useLlm, async (on) => {
+      const { settings: current, llm_api_key: key } = await chrome.storage.local.get([
+        "settings", "llm_api_key",
       ]);
-      const aliases = Object.entries(stored.learned_aliases || {});
-      const answers = Object.entries(stored.learned_answers || {});
-      const gaps = Object.entries(stored.profile_suggestions || {});
-      if (!aliases.length && !answers.length && !gaps.length) {
-        return "Nothing saved yet. It keeps answers you type into blanks, and what the AI " +
-          "looked up from your profile, so the next form fills them itself.";
+      await chrome.storage.local.set({ settings: { ...(current || {}), use_llm: on } });
+      if (on && !key) {
+        panel.say("AI assist is on, but there's no API key saved yet -- add one under Options \u2192 AI assist.", "it");
+      } else {
+        panel.say(on ? "AI assist on. Press Autofill to use it on this page." : "AI assist off.", "it");
       }
-      const recent = (list, fmt) => list.slice(-8).reverse().map(fmt).join("\n");
-      const parts = [];
-      if (answers.length) {
-        parts.push(`${answers.length} answer(s) remembered, newest first:\n` +
-          recent(answers, ([k, v]) => `  ${k} \u2192 ${v}`));
-      }
-      if (aliases.length) {
-        parts.push(`${aliases.length} wording(s) tied to your profile:\n` +
-          recent(aliases, ([k, v]) => `  ${k} \u2192 ${String(v).replace(/_/g, " ")}`));
-      }
-      if (gaps.length) {
-        parts.push(`${gaps.length} value(s) waiting for you to add to your profile ` +
-          `(Options \u2192 Learned): ${gaps.slice(-8).map(([k]) => k.replace(/_/g, " ")).join(", ")}`);
-      }
-      return parts.join("\n\n");
     });
 
     // Asking about the form is asking about this exact fill, so the chat
