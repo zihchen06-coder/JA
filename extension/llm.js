@@ -199,7 +199,7 @@ function _savedAnswers(profile) {
   return out;
 }
 
-async function _postMessages(apiKey, body, useFallbacks) {
+async function _postMessages(apiKey, body, useFallbacks, timeoutMs) {
   const headers = {
     "content-type": "application/json",
     "x-api-key": apiKey,
@@ -211,12 +211,31 @@ async function _postMessages(apiKey, body, useFallbacks) {
   if (useFallbacks) headers["anthropic-beta"] = FALLBACK_BETA;
 
   const payload = useFallbacks ? { ...body, fallbacks: "default" } : body;
-  const response = await fetch(ANTHROPIC_URL, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  });
-  const text = await response.text();
+  // A request that never answers otherwise leaves the caller spinning
+  // forever; only the resume read sets a limit, the rest are short.
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  let response;
+  let text;
+  try {
+    response = await fetch(ANTHROPIC_URL, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined,
+    });
+    text = await response.text();
+  } catch (exc) {
+    if (controller && controller.signal.aborted) {
+      return {
+        ok: false, status: 0, body: null,
+        raw: `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for the resume to be read.`,
+      };
+    }
+    throw exc;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   let parsed = null;
   try {
     parsed = JSON.parse(text);
@@ -512,6 +531,8 @@ Dates as YYYY-MM. A job still held ends "Present". Newest first.
 Each experience description: one or two sentences of what they actually did,
 drawn from the bullets, not a rewrite of them.`;
 
+var RESUME_MODEL = "claude-sonnet-5-5";
+
 var RESUME_SHAPE = `
 
 Reply with one JSON object and nothing else, no code fence, shaped like:
@@ -548,14 +569,17 @@ async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   const result = await _postMessages(
     apiKey,
     {
-      model: LLM_MODEL,
-      max_tokens: 8000,
+      // Reading a document into fields is extraction, not reasoning, and the
+      // applicant is watching a spinner -- the fast model at low effort.
+      model: RESUME_MODEL,
+      max_tokens: 4000,
       // No json_schema format: the API rejects this nested schema as "too
       // complex", so the shape is asked for in words and checked below.
-      output_config: { effort: "medium" },
+      output_config: { effort: "low" },
       messages: [{ role: "user", content }],
     },
-    false
+    false,
+    90000
   );
   if (!result.ok) return { error: _apiErrorMessage(result) };
   // A 200 whose body isn't JSON: a proxy's error page, a captive portal, a
