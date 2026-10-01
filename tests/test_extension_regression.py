@@ -1918,3 +1918,99 @@ def test_panel_has_autofill_and_learned_buttons_and_lists_what_was_learned(load)
     assert out["filled"] == 1
     assert "phone type" in out["learned"] and "Mobile" in out["learned"]
     assert out["said"] == "3 answers remembered"
+
+
+# --- Gaps found in a real autofill-gaps export --------------------------------
+
+
+def test_remembered_answer_fills_a_workday_dropdown_that_has_no_options_until_opened(browser):
+    """Workday's list only exists once opened, and the remembered-answer path
+    read the empty pre-open list: "Remembered 'No', but no option matched it"
+    ten times a day on every Workday question.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'workday_questions.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                const fieldset = document.querySelector('button[aria-haspopup="listbox"]')
+                    .closest('fieldset');
+                fieldset.querySelector('b').textContent = 'Zorp status of your widget?';
+                setLearnedAnswers({'zorp status of your widget': 'Yes'});
+                const report = await fillForm(profile, null);
+                const row = report.results.find((r) => r.label.includes('Zorp'));
+                const button = fieldset.querySelector('button[aria-haspopup="listbox"]');
+                return {row, shown: button.textContent.trim(),
+                        open: document.querySelectorAll('[role="listbox"]').length};
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+    assert out["row"] is not None, "the question was never reported on"
+    assert out["row"]["action"] == "filled", out["row"]
+    assert out["shown"] == "Yes"
+    assert out["open"] == 0
+
+
+def test_short_answer_finds_its_longer_option(load):
+    page = load(html="<body></body>")
+    out = page.evaluate(
+        """() => {
+            const race = [
+                {value: "0", text: "Select One"},
+                {value: "1", text: "Asian (Not Hispanic or Latino) (United States of America)"},
+                {value: "2", text: "Black or African American (Not Hispanic or Latino)"},
+            ];
+            return {asian: bestOption("Asian", race)};
+        }"""
+    )
+    assert out["asian"] == "1"
+
+
+def test_phone_extension_is_not_filled_with_the_phone_number(load):
+    page = load(html="<body><form><label for='e'>Phone Extension</label>"
+                     "<input id='e' type='text'></form></body>")
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null);
+            return {value: document.getElementById('e').value,
+                    actions: report.results.map((r) => r.action)};
+        }""",
+        PROFILE,
+    )
+    assert out["value"] == ""
+    assert "filled" not in out["actions"]
+
+
+def test_a_yes_no_question_mentioning_degree_still_reaches_the_remembered_answers(load):
+    page = load(html="<body><form><label for='d'>Has this degree been completed?</label>"
+                     "<select id='d'><option value=''>Select</option>"
+                     "<option value='y'>Yes</option><option value='n'>No</option><option value='x'>Not Specified</option></select>"
+                     "</form></body>")
+    out = page.evaluate(
+        """async (profile) => {
+            setLearnedAnswers({"has this degree been completed": "Yes"});
+            const report = await fillForm({...profile, degree: "B.S."}, null);
+            setLearnedAnswers({});
+            return {shown: document.getElementById('d').selectedOptions[0].text,
+                    actions: report.results.map((r) => r.action)};
+        }""",
+        PROFILE,
+    )
+    # Before: matched the word "degree", found no option for 'B.S.', and was
+    # skipped without the remembered answer ever being tried.
+    assert out["shown"] == "Yes", out
+    # ...while a plain "Degree" box still gets the degree.
+    page2 = load(html="<body><form><label for='d'>Degree</label>"
+                      "<input id='d' type='text'></form></body>")
+    value = page2.evaluate(
+        """async (profile) => {
+            await fillForm({...profile, degree: "B.S."}, null);
+            return document.getElementById('d').value;
+        }""",
+        PROFILE,
+    )
+    assert value == "B.S."

@@ -133,6 +133,12 @@ function setLearnedAliases(map) {
   LEARNED_ALIASES = map || {};
 }
 
+function isLearnedAliasLabel(label) {
+  const norm = normalize(label);
+  return !!norm && (Object.prototype.hasOwnProperty.call(LEARNED_ALIASES, norm) ||
+    _nearLearned(LEARNED_ALIASES, norm) !== null);
+}
+
 // Short factual answers to questions the profile has no field for at all --
 // "Phone type: Mobile", "Did you graduate? Yes", "Which shift? Either".
 // These recur across applications far more than odd labels for known fields
@@ -234,6 +240,10 @@ function matchFieldByName(name, elemId = "") {
   return matchField(words, 1.1);
 }
 
+function _containsWholeWord(haystack, needle) {
+  return (" " + haystack + " ").includes(" " + needle + " ");
+}
+
 function bestOption(targetValue, options, minRatio = 0.5) {
   const normTarget = normalize(String(targetValue));
   if (!normTarget) return null;
@@ -245,6 +255,13 @@ function bestOption(targetValue, options, minRatio = 0.5) {
     if (text === normTarget) return opt.value;
     let ratio = fuzzyRatio(text, normTarget);
     if (normTarget.includes(text) || text.includes(normTarget)) ratio += 0.25;
+    // "Asian" is the right pick from "Asian (Not Hispanic or Latino) (United
+    // States of America)" however short it is next to it, which the length-
+    // based ratio above scores as a poor match. Whole words only: "male" must
+    // not find "female".
+    if (_containsWholeWord(text, normTarget) || _containsWholeWord(normTarget, text)) {
+      ratio = Math.max(ratio, 0.6);
+    }
     if (ratio > bestScore) {
       bestScore = ratio;
       bestValue = opt.value;

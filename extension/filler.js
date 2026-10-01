@@ -455,6 +455,15 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
     }
 
     canonical = matchField(label);
+    // "Has this degree been completed?" contains the word "degree" and is not
+    // asking for one. A yes/no question or a paragraph of instructions that
+    // merely mentions a field is a question for the learned answers or the AI
+    // pass, not a request for that field's value. A mapping that was learned
+    // for this exact wording is the exception -- that was a deliberate choice.
+    if (canonical && !BOOLEAN_FIELDS.has(canonical) && !isLearnedAliasLabel(label) &&
+        _isQuestionNotFieldName(label)) {
+      canonical = null;
+    }
     if (canonical === "cover_letter_text" && report.opts.tailorCoverLetter) {
       // One saved cover letter pasted into every application reads worse
       // than none. Left for the second pass, which knows what job this is.
@@ -487,7 +496,7 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
       // here to stop.
       const remembered = learnedAnswerFor(label);
       if (remembered !== null) {
-        _fillRemembered(report, f, label, remembered, required);
+        await _fillRemembered(report, f, label, remembered, required);
         return;
       }
       if (required) _mark(f.ja_id, MARK_BLANK);
@@ -543,6 +552,17 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
 // whichever widget it came from -- a real <select>'s <option>s, an iCIMS
 // widget's <li>s, or the popup a Workday listbox button just rendered --
 // so the decision is made the same way for all three.
+var _QUESTION_START_RE =
+  /^(has|have|had|are|is|do|does|did|will|would|can|could|were|was|should|if)\b/;
+
+function _isQuestionNotFieldName(label) {
+  const norm = normalize(label);
+  if (_QUESTION_START_RE.test(norm)) return true;
+  // Real field names are a few words; a long label holding a question mark is
+  // a sentence about a field.
+  return norm.split(" ").length > 15 && /\?/.test(label);
+}
+
 function _optionText(options, optionValue) {
   const match = options.find((o) => o.value === optionValue);
   return match ? match.text || "" : "";
@@ -645,7 +665,7 @@ async function _fillSelectLike(profile, report, f, el, canonical, value, label, 
 // with this time. A dropdown or radio group gets the option that matches it,
 // not the raw text, so the same saved "Yes" works on a form that spells it
 // "Yes, I did".
-function _fillRemembered(report, f, label, value, required) {
+async function _fillRemembered(report, f, label, value, required) {
   value = _scalar(value);
   if (value === null || value === "") {
     addResult(report, label, "learned", "skipped_no_data", "", required);
@@ -660,16 +680,48 @@ function _fillRemembered(report, f, label, value, required) {
   }
 
   if (f.tag === "select") {
-    const optionValue = bestOption(value, f.options || []);
+    // A Workday dropdown has no options in the page until it is opened, so
+    // looking at f.options here saw an empty list and reported "no option
+    // matched" for every remembered answer on every Workday question.
+    let options = f.options || [];
+    let opened = null;
+    if (f.widget === "listbox_button") {
+      opened = await _openListbox(el);
+      if (!opened) {
+        _mark(f.ja_id, MARK_REVIEW);
+        addResult(report, label, "learned", "needs_review",
+          "Could not open this dropdown automatically -- pick an answer here yourself.", required);
+        return;
+      }
+      options = opened.options;
+      f.options = options;
+    }
+    let optionValue = bestOption(value, options);
+    // "No" against "No, I have not" and the like.
     if (optionValue === null || optionValue === undefined) {
+      const want = semanticBool(value);
+      const byMeaning = want === null
+        ? null
+        : options.filter((o) => semanticBool(o.text || "") === want);
+      if (byMeaning && byMeaning.length === 1) optionValue = byMeaning[0].value;
+    }
+    if (optionValue === null || optionValue === undefined) {
+      if (opened) _closeListbox(el, opened);
       if (required) _mark(f.ja_id, MARK_BLANK);
       addResult(report, label, "learned", "skipped_no_match",
         `Remembered '${value}', but no option matched it.`, required);
       return;
     }
-    if (f.widget === "icims") {
+    if (opened) {
+      if (!_clickListboxOption(el, opened, Number(optionValue))) {
+        _mark(f.ja_id, MARK_REVIEW);
+        addResult(report, label, "learned", "needs_review",
+          "This dropdown didn't take the remembered answer -- set it here yourself.", required);
+        return;
+      }
+    } else if (f.widget === "icims") {
       _openIcims(el);
-      if (!_setIcimsValue(el, optionValue, _optionText(f.options || [], optionValue))) {
+      if (!_setIcimsValue(el, optionValue, _optionText(options, optionValue))) {
         _mark(f.ja_id, MARK_REVIEW);
         addResult(report, label, "learned", "needs_review",
           "This dropdown didn't take the remembered answer -- set it here yourself.", required);
@@ -679,7 +731,7 @@ function _fillRemembered(report, f, label, value, required) {
       _setSelectValue(el, optionValue);
     }
     _mark(f.ja_id, MARK_FILLED);
-    addResult(report, label, "learned", "filled", _optionText(f.options || [], optionValue), required);
+    addResult(report, label, "learned", "filled", _optionText(options, optionValue), required);
     return;
   }
 
