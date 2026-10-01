@@ -28,7 +28,7 @@ itself. For each field, return the exact text to put in it.
 Rules, most important first:
 
 1. Never invent anything about the applicant. Every answer must be
-   supported by the profile. If the profile doesn't contain what a field is
+   supported by the profile or the resume. If the profile doesn't contain what a field is
    asking for, return an empty value and say why in skip_reason. Never
    guess at employers, job titles, dates, schools, degrees, GPAs,
    certifications, clearances, references, licence numbers, salary figures,
@@ -253,7 +253,14 @@ function _apiErrorMessage(result) {
 
 // fields: [{ja_id, label, group_label, section, type, required, options}]
 // Returns {answers: {ja_id: value}, skipped: {ja_id: reason}} or {error}.
-async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeSavedAnswers }) {
+function _resumeBlock(resume) {
+  return resume
+    ? `\n\nThe applicant's resume, in their own words. Anything it states is` +
+        ` as good as the profile for a matter of record:\n${String(resume).slice(0, 20000)}`
+    : "";
+}
+
+async function resolveWithClaude({ apiKey, profile, resume, fields, pageUrl, job, routeSavedAnswers }) {
   if (!apiKey) return { error: "No API key saved." };
   if (!fields || !fields.length) return { answers: {}, skipped: {} };
 
@@ -282,7 +289,7 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeS
           _promptProfile(profile, _needsWrittenVoice(fields)),
           null,
           1
-        )}`,
+        )}${_needsWrittenVoice(fields) ? _resumeBlock(resume) : ""}`,
         // Stable across every application, so it caches; the fields below
         // are the only part that changes per page.
         cache_control: { type: "ephemeral" },
@@ -417,7 +424,7 @@ var CHAT_OUTPUT_SCHEMA = {
   additionalProperties: false,
 };
 
-async function chatWithClaude({ apiKey, profile, report, fields, job, history, message }) {
+async function chatWithClaude({ apiKey, profile, resume, report, fields, job, history, message }) {
   if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
 
   const turns = (history || []).slice(-8).map((t) => ({
@@ -435,7 +442,7 @@ async function chatWithClaude({ apiKey, profile, report, fields, job, history, m
           _promptProfile(profile, true),
           null,
           1
-        )}`,
+        )}${_resumeBlock(resume)}`,
         cache_control: { type: "ephemeral" },
       },
     ],
@@ -491,59 +498,6 @@ async function chatWithClaude({ apiKey, profile, report, fields, job, history, m
 // applicant should see it before it becomes their answers.
 // ---------------------------------------------------------------------------
 
-var RESUME_SCHEMA = {
-  type: "object",
-  properties: {
-    education: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          school: { type: "string" },
-          degree: { type: "string" },
-          field_of_study: { type: "string" },
-          graduation_year: { type: "string" },
-        },
-        required: ["school", "degree", "field_of_study", "graduation_year"],
-        additionalProperties: false,
-      },
-    },
-    experience: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          company: { type: "string" },
-          title: { type: "string" },
-          location: { type: "string" },
-          start_date: { type: "string", description: "YYYY-MM" },
-          end_date: { type: "string", description: 'YYYY-MM, or "Present"' },
-          description: { type: "string" },
-        },
-        required: ["company", "title", "location", "start_date", "end_date", "description"],
-        additionalProperties: false,
-      },
-    },
-    fields: {
-      type: "object",
-      description: "Scalar profile fields the resume states outright. Omit any it doesn't.",
-      properties: {
-        first_name: { type: "string" }, last_name: { type: "string" },
-        email: { type: "string" }, phone: { type: "string" },
-        city: { type: "string" }, state: { type: "string" },
-        linkedin_url: { type: "string" }, github_url: { type: "string" },
-        portfolio_url: { type: "string" }, gpa: { type: "string" },
-        education_level: { type: "string" }, languages: { type: "string" },
-        current_company: { type: "string" }, current_title: { type: "string" },
-      },
-      required: [],
-      additionalProperties: false,
-    },
-  },
-  required: ["education", "experience", "fields"],
-  additionalProperties: false,
-};
-
 var RESUME_RULES = `Read this resume and return what it says, as structured
 data for a job-application profile.
 
@@ -557,6 +511,23 @@ repeated on every form.
 Dates as YYYY-MM. A job still held ends "Present". Newest first.
 Each experience description: one or two sentences of what they actually did,
 drawn from the bullets, not a rewrite of them.`;
+
+var RESUME_SHAPE = `
+
+Reply with one JSON object and nothing else, no code fence, shaped like:
+{"education":[{"school":"","degree":"","field_of_study":"","graduation_year":""}],
+"experience":[{"company":"","title":"","location":"","start_date":"YYYY-MM","end_date":"YYYY-MM or Present","description":""}],
+"fields":{"first_name":"","last_name":"","email":"","phone":"","city":"","state":"","linkedin_url":"","github_url":"","portfolio_url":"","gpa":"","education_level":"","languages":"","current_company":"","current_title":""}}
+Leave out any key in "fields" the resume doesn't state. Use [] for a section it doesn't have.`;
+
+// Models sometimes wrap JSON in a fence or a sentence; take the outermost
+// object rather than failing on the wrapper.
+function _jsonObjectFrom(text) {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("no JSON object in the reply");
+  return JSON.parse(text.slice(start, end + 1));
+}
 
 async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
@@ -572,14 +543,16 @@ async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   } else {
     return { error: "Could not read any text out of that file." };
   }
-  content.push({ type: "text", text: RESUME_RULES });
+  content.push({ type: "text", text: RESUME_RULES + RESUME_SHAPE });
 
   const result = await _postMessages(
     apiKey,
     {
       model: LLM_MODEL,
       max_tokens: 8000,
-      output_config: { effort: "medium", format: { type: "json_schema", schema: RESUME_SCHEMA } },
+      // No json_schema format: the API rejects this nested schema as "too
+      // complex", so the shape is asked for in words and checked below.
+      output_config: { effort: "medium" },
       messages: [{ role: "user", content }],
     },
     false
@@ -594,11 +567,17 @@ async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   const block = (result.body.content || []).find((b) => b.type === "text");
   if (!block) return { error: "Nothing came back." };
   try {
-    const parsed = JSON.parse(block.text);
-    if (!parsed || typeof parsed !== "object") {
+    const raw = _jsonObjectFrom(block.text);
+    if (!raw || typeof raw !== "object") {
       return { error: "The result came back in a shape this can't read." };
     }
-    return { parsed };
+    return {
+      parsed: {
+        education: Array.isArray(raw.education) ? raw.education : [],
+        experience: Array.isArray(raw.experience) ? raw.experience : [],
+        fields: raw.fields && typeof raw.fields === "object" ? raw.fields : {},
+      },
+    };
   } catch (exc) {
     return { error: `Could not read the result: ${exc}` };
   }

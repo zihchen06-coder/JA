@@ -1811,3 +1811,110 @@ def test_an_unset_profile_yes_no_does_not_untick_a_box_you_ticked(browser):
 
     assert out["stillTicked"] is True
     assert out["action"] == "skipped_no_data"
+
+
+# --- Resume reading, near-match learning, panel buttons -----------------------
+
+
+def test_resume_parse_sends_no_strict_schema_and_reads_a_fenced_reply(browser):
+    """The API rejected the nested resume schema as "too complex", so the
+    request carries no json_schema format and the reply is read leniently.
+    """
+    fenced = "Here you go:\n```json\n" + json.dumps({
+        "education": [{"school": "Penn State", "degree": "BS", "field_of_study": "ME",
+                       "graduation_year": "2028"}],
+        "experience": "not a list",
+        "fields": {"first_name": "Jamie"},
+    }) + "\n```"
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        out = page.evaluate(
+            """async (fenced) => {
+                let sent = null;
+                window.fetch = async (url, init) => {
+                    sent = JSON.parse(init.body);
+                    return {ok: true, status: 200, text: async () => JSON.stringify(
+                        {content: [{type: "text", text: fenced}]})};
+                };
+                const result = await parseResumeWithClaude({apiKey: "k", text: "Jamie, Penn State"});
+                return {sent, result};
+            }""",
+            fenced,
+        )
+    finally:
+        page.close()
+    assert "format" not in out["sent"]["output_config"]
+    parsed = out["result"]["parsed"]
+    assert parsed["education"][0]["school"] == "Penn State"
+    assert parsed["experience"] == []
+    assert parsed["fields"] == {"first_name": "Jamie"}
+
+
+def test_resume_text_reaches_the_chat_prompt(browser):
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        system = page.evaluate(
+            """async (profile) => {
+                let sent = null;
+                window.fetch = async (url, init) => {
+                    sent = JSON.parse(init.body);
+                    return {ok: true, status: 200, text: async () => JSON.stringify(
+                        {content: [{type: "text", text: '{"reply":"hi","answers":[]}'}]})};
+                };
+                await chatWithClaude({apiKey: "k", profile, resume: "Machined parts at Acme Tooling",
+                                      report: {results: []}, fields: [], message: "hi"});
+                return sent.system[0].text;
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+    assert "Machined parts at Acme Tooling" in system
+
+
+def test_learned_answers_carry_over_to_a_slightly_reworded_question(load):
+    page = load(html="<body></body>")
+    out = page.evaluate(
+        """() => {
+            setLearnedAnswers({"are you legally authorized to work in the united states": "Yes"});
+            return {
+                same: learnedAnswerFor("Are you legally authorized to work in the United States?"),
+                reworded: learnedAnswerFor("Are you legally authorized to work in United States?"),
+                unrelated: learnedAnswerFor("Have you ever been employed by this company?"),
+                short: learnedAnswerFor("Gender identity"),
+            };
+        }"""
+    )
+    assert out["same"] == "Yes"
+    assert out["reworded"] == "Yes"
+    assert out["unrelated"] is None
+    assert out["short"] is None
+
+
+def test_panel_has_autofill_and_learned_buttons_and_lists_what_was_learned(load):
+    page = load(html="<body></body>", scripts=["panel.js"])
+    out = page.evaluate(
+        """async () => {
+            const panel = createPanel();
+            let filled = 0;
+            panel.onFill(() => { filled += 1; });
+            panel.onLearned(async () => "3 answers remembered");
+            panel.learn("phone type", "Mobile");
+            const root = document.getElementById("ja-autofill-panel").shadowRoot;
+            root.querySelector(".fill").click();
+            root.querySelector(".learned").click();
+            await new Promise((r) => setTimeout(r, 50));
+            return {
+                filled,
+                learned: root.querySelector(".learned-row").textContent,
+                said: root.querySelector(".msg.it").textContent,
+            };
+        }"""
+    )
+    assert out["filled"] == 1
+    assert "phone type" in out["learned"] and "Mobile" in out["learned"]
+    assert out["said"] == "3 answers remembered"

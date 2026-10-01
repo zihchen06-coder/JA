@@ -48,8 +48,9 @@ function _showBanner(html, tone) {
     credentials: savedCreds,
     learned_aliases: learnedAliases,
     learned_answers: learnedAnswers,
+    resume_text: resumeText,
   } = await chrome.storage.local.get([
-    "profile", "settings", "credentials", "learned_aliases", "learned_answers",
+    "profile", "settings", "credentials", "learned_aliases", "learned_answers", "resume_text",
   ]);
 
   if (!profile || REQUIRED_FIELDS.some((f) => !profile[f])) {
@@ -118,6 +119,7 @@ function _showBanner(html, tone) {
           type: "ja-llm-resolve",
           request: {
             profile,
+            resume: resumeText || "",
             fields: pending,
             pageUrl: location.href,
             job,
@@ -134,12 +136,17 @@ function _showBanner(html, tone) {
           learnedCount = Object.keys(learned).length;
           if (learnedCount) {
             chrome.runtime.sendMessage({ type: "ja-learned", learned });
+            for (const [label, field] of Object.entries(learned)) {
+              panel?.learn(label, `your ${field.replace(/_/g, " ")}`);
+            }
           }
           // Short answers to questions the profile has no field for -- the
           // ones that would otherwise cost an API call on every form.
           const remembered = rememberableAnswers(report, reply.answers, reply.sources);
           if (Object.keys(remembered).length) {
             chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: remembered });
+            learnedCount += Object.keys(remembered).length;
+            for (const [label, answer] of Object.entries(remembered)) panel?.learn(label, answer);
           }
           panel?.log(`Claude filled ${claudeFilled}.`, claudeFilled ? "ok" : "muted");
           const declined = Object.keys(reply.skipped || {}).length;
@@ -218,6 +225,35 @@ function _showBanner(html, tone) {
     panel.log("Nothing submitted. Check the highlighted fields, then submit yourself.", "muted");
     panel.showResults(report);
 
+    panel.onFill(() => chrome.runtime.sendMessage({ type: "ja-refill" }));
+    panel.onLearned(async () => {
+      const stored = await chrome.storage.local.get([
+        "learned_aliases", "learned_answers", "profile_suggestions",
+      ]);
+      const aliases = Object.entries(stored.learned_aliases || {});
+      const answers = Object.entries(stored.learned_answers || {});
+      const gaps = Object.entries(stored.profile_suggestions || {});
+      if (!aliases.length && !answers.length && !gaps.length) {
+        return "Nothing saved yet. It keeps answers you type into blanks, and what the AI " +
+          "looked up from your profile, so the next form fills them itself.";
+      }
+      const recent = (list, fmt) => list.slice(-8).reverse().map(fmt).join("\n");
+      const parts = [];
+      if (answers.length) {
+        parts.push(`${answers.length} answer(s) remembered, newest first:\n` +
+          recent(answers, ([k, v]) => `  ${k} \u2192 ${v}`));
+      }
+      if (aliases.length) {
+        parts.push(`${aliases.length} wording(s) tied to your profile:\n` +
+          recent(aliases, ([k, v]) => `  ${k} \u2192 ${String(v).replace(/_/g, " ")}`));
+      }
+      if (gaps.length) {
+        parts.push(`${gaps.length} value(s) waiting for you to add to your profile ` +
+          `(Options \u2192 Learned): ${gaps.slice(-8).map(([k]) => k.replace(/_/g, " ")).join(", ")}`);
+      }
+      return parts.join("\n\n");
+    });
+
     // Asking about the form is asking about this exact fill, so the chat
     // gets the same report the panel is showing -- including why each field
     // was left the way it was.
@@ -227,6 +263,7 @@ function _showBanner(html, tone) {
         type: "ja-chat",
         request: {
           profile,
+          resume: resumeText || "",
           job,
           message: text,
           history,
@@ -241,6 +278,13 @@ function _showBanner(html, tone) {
       if (!reply) return "No reply came back.";
       if (reply.error) return reply.error;
       const changed = await applyLlmAnswers(report, reply.answers, {}, profile);
+      if (changed) {
+        const kept = rememberableAnswers(report, reply.answers, {});
+        if (Object.keys(kept).length) {
+          chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: kept });
+          for (const [label, answer] of Object.entries(kept)) panel.learn(label, answer);
+        }
+      }
       history.push({ role: "user", content: text });
       history.push({ role: "assistant", content: reply.reply });
       return changed ? `${reply.reply}\n\n(${changed} field(s) changed.)` : reply.reply;
@@ -256,6 +300,7 @@ function _showBanner(html, tone) {
     if (learnedNow) {
       chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: prefilled.answers });
       panel?.log(`Remembered ${learnedNow} answer(s) already on this page.`, "info");
+      for (const [label, answer] of Object.entries(prefilled.answers)) panel?.learn(label, answer);
     }
     const gaps = Object.keys(prefilled.suggestions).length;
     if (gaps) {
@@ -277,7 +322,10 @@ function _showBanner(html, tone) {
   if (!settings || settings.watch_and_learn !== false) {
     watchForCorrections(
       report,
-      (learned) => chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: learned }),
+      (learned) => {
+        chrome.runtime.sendMessage({ type: "ja-learned-answers", answers: learned });
+        for (const [label, answer] of Object.entries(learned)) panel?.learn(label, answer);
+      },
       (suggested) =>
         chrome.runtime.sendMessage({ type: "ja-profile-suggestions", suggestions: suggested })
     );

@@ -50,6 +50,19 @@ async function runFill(tabId) {
 // walks the pages; they just arrive already filled.
 const lastFilled = new Map();
 
+// Every store that grows with use is read, merged and written back. Two of
+// those arriving at once -- the AI pass and the page-already-filled pass both
+// report learning within milliseconds of each other -- each read the same
+// "before", and whichever wrote last erased the other's entries -- which is
+// how a fill could say it learned something and the next form not know it.
+// One at a time, in arrival order.
+let writeChain = Promise.resolve();
+function serial(task) {
+  const run = writeChain.then(task);
+  writeChain = run.catch((exc) => console.error("Job Application Autofill: save failed.", exc));
+  return run;
+}
+
 chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
   if (info.status !== "complete" || !tab.url || !isKnownAts(tab.url)) return;
   const { settings } = await chrome.storage.local.get(["settings"]);
@@ -136,7 +149,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       try {
         const { llm_api_key: apiKey } = await chrome.storage.local.get(["llm_api_key"]);
-        sendResponse(await parseResumeWithClaude({ ...message.request, apiKey }));
+        const reply = await parseResumeWithClaude({ ...message.request, apiKey });
+        // Kept so the chat and the AI pass can read the resume itself, not
+        // only the schools and jobs that were imported from it.
+        if (reply && reply.parsed) {
+          const text = message.request.text || JSON.stringify(reply.parsed);
+          await serial(() => chrome.storage.local.set({ resume_text: String(text).slice(0, 20000) }));
+        }
+        sendResponse(reply);
       } catch (exc) {
         sendResponse({ error: String(exc) });
       }
@@ -145,7 +165,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "ja-misses") {
-    (async () => {
+    serial(async () => {
       const { misses } = await chrome.storage.local.get(["misses"]);
       const store = misses || {};
       for (const miss of message.misses || []) {
@@ -163,12 +183,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         };
       }
       await chrome.storage.local.set({ misses: capMisses(store) });
-    })();
+    });
     return;
   }
 
   if (message?.type === "ja-applied") {
-    (async () => {
+    serial(async () => {
       const { applications } = await chrome.storage.local.get(["applications"]);
       const list = applications || [];
       const last = list[list.length - 1];
@@ -187,44 +207,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Keeping every application ever would grow without limit; the recent
       // few hundred is what anyone actually looks back over.
       await chrome.storage.local.set({ applications: list.slice(-500) });
-    })();
+    });
     return;
   }
 
   if (message?.type === "ja-learned-answers") {
-    (async () => {
+    serial(async () => {
       const { learned_answers: existing } = await chrome.storage.local.get(["learned_answers"]);
       await chrome.storage.local.set({
         learned_answers: capLearned({ ...(existing || {}), ...message.answers }),
       });
-    })();
+    });
     return;
   }
 
   if (message?.type === "ja-profile-suggestions") {
-    (async () => {
+    serial(async () => {
       const { profile_suggestions: existing } = await chrome.storage.local.get([
         "profile_suggestions",
       ]);
       await chrome.storage.local.set({
         profile_suggestions: capLearned({ ...(existing || {}), ...message.suggestions }, 200),
       });
-    })();
+    });
     return;
   }
 
   if (message?.type === "ja-learned-replace") {
-    chrome.storage.local.set({ learned_aliases: message.learned });
+    serial(() => chrome.storage.local.set({ learned_aliases: message.learned }));
+    return;
+  }
+
+  // The panel's Autofill button: run the same fill the toolbar icon does,
+  // on the tab the panel is in.
+  if (message?.type === "ja-refill") {
+    if (tabId) {
+      runFill(tabId).catch((exc) =>
+        console.error("Job Application Autofill: could not run on this page.", exc));
+    }
     return;
   }
 
   if (message?.type === "ja-learned") {
-    (async () => {
+    serial(async () => {
       const { learned_aliases: existing } = await chrome.storage.local.get(["learned_aliases"]);
       await chrome.storage.local.set({
         learned_aliases: capLearned({ ...(existing || {}), ...message.learned }, 1000),
       });
-    })();
+    });
     return;
   }
 

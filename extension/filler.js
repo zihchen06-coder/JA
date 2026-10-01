@@ -1339,6 +1339,7 @@ function learnFromAnswers(report, answers, profile, sources) {
   const learned = {};
 
   for (const [jaId, value] of Object.entries(answers || {})) {
+    if (report.appliedIds && !report.appliedIds.has(jaId)) continue;
     const f = byId.get(jaId);
     const label = normalize(f && f.label);
     if (!label || !value) continue;
@@ -1432,6 +1433,9 @@ async function applyLlmAnswers(report, answers, skipped, profile) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
   const candidates = new Map(_llmCandidates(report).map((c) => [c.descriptor.ja_id, c]));
   let filled = 0;
+  // Which answers really landed. Learning from the rest taught the extension
+  // answers the guards had just refused.
+  report.appliedIds = report.appliedIds || new Set();
 
   for (const [jaId, value] of Object.entries(answers || {})) {
     // Only fields this side offered up in the first place. An answer for
@@ -1475,6 +1479,7 @@ async function applyLlmAnswers(report, answers, skipped, profile) {
 
     if (f.tag === "select") _mark(jaId, MARK_FILLED);
     filled += 1;
+    report.appliedIds.add(jaId);
     const result = report.results.find((r) => r.ja_id === jaId);
     if (result) {
       result.action = "filled";
@@ -1658,6 +1663,7 @@ function rememberableAnswers(report, answers, sources) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
   const out = {};
   for (const [jaId, value] of Object.entries(answers || {})) {
+    if (report.appliedIds && !report.appliedIds.has(jaId)) continue;
     if ((sources || {})[jaId]) continue;
     const f = byId.get(jaId);
     if (!f || f.tag === "textarea") continue;

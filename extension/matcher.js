@@ -147,9 +147,31 @@ function setLearnedAnswers(map) {
 function learnedAnswerFor(label) {
   const norm = normalize(label);
   if (!norm) return null;
-  return Object.prototype.hasOwnProperty.call(LEARNED_ANSWERS, norm)
-    ? LEARNED_ANSWERS[norm]
-    : null;
+  if (Object.prototype.hasOwnProperty.call(LEARNED_ANSWERS, norm)) return LEARNED_ANSWERS[norm];
+  return _nearLearned(LEARNED_ANSWERS, norm);
+}
+
+// The next form rarely words a question exactly the way the last one did
+// ("Are you legally authorized to work in the US?" vs "...in the United
+// States?"), and exact-only lookup is why a remembered answer so often didn't
+// carry over. Close, long labels count; short ones never do, since two short
+// questions that look alike ("Gender" / "Gender identity") are different.
+var _NEAR_LEARNED_RATIO = 0.9;
+var _NEAR_LEARNED_MIN_LENGTH = 16;
+
+function _nearLearned(map, norm) {
+  if (norm.length < _NEAR_LEARNED_MIN_LENGTH) return null;
+  let best = null;
+  let bestScore = _NEAR_LEARNED_RATIO;
+  for (const key of Object.keys(map)) {
+    if (key.length < _NEAR_LEARNED_MIN_LENGTH) continue;
+    const score = fuzzyRatio(key, norm);
+    if (score >= bestScore) {
+      bestScore = score;
+      best = key;
+    }
+  }
+  return best === null ? null : map[best];
 }
 
 function matchField(label, minRatio = 0.72) {
@@ -162,6 +184,8 @@ function matchField(label, minRatio = 0.72) {
   if (Object.prototype.hasOwnProperty.call(LEARNED_ALIASES, norm)) {
     return LEARNED_ALIASES[norm];
   }
+  const nearAlias = _nearLearned(LEARNED_ALIASES, norm);
+  if (nearAlias !== null) return nearAlias;
 
   let bestField = null;
   let bestKey = [-1, -1];

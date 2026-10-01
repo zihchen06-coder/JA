@@ -79,6 +79,16 @@ var _PANEL_CSS = `
     padding: 0 12px; font-weight: 600; cursor: pointer; font-size: 12.5px;
   }
   .send:disabled { opacity: .5; cursor: default; }
+  .tools { display: flex; gap: 6px; margin-bottom: 8px; }
+  .tool {
+    flex: 1; background: rgba(148,163,184,.12); color: #e2e8f0;
+    border: 1px solid rgba(148,163,184,.25); border-radius: 8px;
+    padding: 6px 8px; cursor: pointer; font-size: 12px;
+  }
+  .tool.primary { background: #22c55e; border-color: #22c55e; color: #052e16; font-weight: 600; }
+  .tool:disabled { opacity: .5; cursor: default; }
+  .learned-row { color: #cbd5e1; font-size: 12px; margin-bottom: 3px; word-break: break-word; }
+  .learned-row .arrow { color: #64748b; }
 `;
 
 function _panelFlash(el) {
@@ -112,6 +122,10 @@ function createPanel() {
     <div class="body"></div>
     <div class="chat">
       <div class="msgs"></div>
+      <div class="tools">
+        <button class="tool primary fill" title="Fill this page again from your profile">Autofill</button>
+        <button class="tool learned" title="What the extension has learned">What I learned</button>
+      </div>
       <div class="row">
         <textarea placeholder="Ask about this form&hellip;" rows="1"></textarea>
         <button class="send">Ask</button>
@@ -124,6 +138,9 @@ function createPanel() {
   const msgs = wrap.querySelector(".msgs");
   const input = wrap.querySelector("textarea");
   const send = wrap.querySelector(".send");
+  const fillBtn = wrap.querySelector(".fill");
+  const learnedBtn = wrap.querySelector(".learned");
+  let learnedList = null;
 
   wrap.querySelector(".close").onclick = () => host.remove();
   wrap.querySelector(".min").onclick = () => wrap.classList.toggle("min");
@@ -192,6 +209,51 @@ function createPanel() {
         }
       }
       scroll(body);
+    },
+
+    // Something kept for next time, shown the moment it is kept -- "it says
+    // it learns" is only believable if you can read what.
+    learn(label, value) {
+      if (!learnedList) {
+        const h = document.createElement("h4");
+        h.textContent = "Learned on this page";
+        learnedList = document.createElement("div");
+        body.append(h, learnedList);
+      }
+      const row = document.createElement("div");
+      row.className = "learned-row";
+      const l = document.createElement("span");
+      l.textContent = label;
+      const arrow = document.createElement("span");
+      arrow.className = "arrow";
+      arrow.textContent = "  \u2192  ";
+      const v = document.createElement("span");
+      v.className = "ok";
+      v.textContent = value;
+      row.append(l, arrow, v);
+      learnedList.appendChild(row);
+      scroll(body);
+    },
+
+    // handler() for the Autofill button, handler() -> string for the learned
+    // button (shown in the chat).
+    onFill(handler) {
+      fillBtn.onclick = () => {
+        fillBtn.disabled = true;
+        fillBtn.textContent = "Filling\u2026";
+        handler();
+      };
+    },
+
+    onLearned(handler) {
+      learnedBtn.onclick = async () => {
+        learnedBtn.disabled = true;
+        try {
+          api.say(await handler(), "it");
+        } finally {
+          learnedBtn.disabled = false;
+        }
+      };
     },
 
     say(text, who) {
