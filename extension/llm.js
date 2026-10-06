@@ -30,15 +30,6 @@ function _wantsFallbacks(model) {
   return /^claude-(opus|fable|mythos)/.test(String(model));
 }
 
-// Only sent if the schema itself is refused; otherwise the schema does this.
-var RESUME_JSON_FALLBACK =
-  'Reply with JSON only -- no prose, no code fence. Shape: ' +
-  '{"education":[{"school","degree","field_of_study","graduation_year"}],' +
-  '"experience":[{"company","title","location","start_date","end_date","description"}],' +
-  '"fields":{"first_name","last_name","email","phone","city","state",' +
-  '"linkedin_url","github_url","portfolio_url","gpa","education_level",' +
-  '"languages","current_company","current_title"}}. ' +
-  'Use "" for anything the resume does not state.';
 var FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
 var LLM_SYSTEM_RULES = `You are helping one job applicant fill in a job
@@ -49,7 +40,7 @@ itself. For each field, return the exact text to put in it.
 Rules, most important first:
 
 1. Never invent anything about the applicant. Every answer must be
-   supported by the profile. If the profile doesn't contain what a field is
+   supported by the profile or the resume. If the profile doesn't contain what a field is
    asking for, return an empty value and say why in skip_reason. Never
    guess at employers, job titles, dates, schools, degrees, GPAs,
    certifications, clearances, references, licence numbers, salary figures,
@@ -227,7 +218,7 @@ function _savedAnswers(profile) {
   return out;
 }
 
-async function _postMessages(apiKey, body, useFallbacks) {
+async function _postMessages(apiKey, body, useFallbacks, timeoutMs) {
   const headers = {
     "content-type": "application/json",
     "x-api-key": apiKey,
@@ -239,12 +230,31 @@ async function _postMessages(apiKey, body, useFallbacks) {
   if (useFallbacks) headers["anthropic-beta"] = FALLBACK_BETA;
 
   const payload = useFallbacks ? { ...body, fallbacks: "default" } : body;
-  const response = await fetch(ANTHROPIC_URL, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  });
-  const text = await response.text();
+  // A request that never answers otherwise leaves the caller spinning
+  // forever; only the resume read sets a limit, the rest are short.
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  let response;
+  let text;
+  try {
+    response = await fetch(ANTHROPIC_URL, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined,
+    });
+    text = await response.text();
+  } catch (exc) {
+    if (controller && controller.signal.aborted) {
+      return {
+        ok: false, status: 0, body: null,
+        raw: `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for the resume to be read.`,
+      };
+    }
+    throw exc;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   let parsed = null;
   try {
     parsed = JSON.parse(text);
@@ -312,7 +322,14 @@ function _apiErrorMessage(result) {
 
 // fields: [{ja_id, label, group_label, section, type, required, options}]
 // Returns {answers: {ja_id: value}, skipped: {ja_id: reason}} or {error}.
-async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeSavedAnswers }) {
+function _resumeBlock(resume) {
+  return resume
+    ? `\n\nThe applicant's resume, in their own words. Anything it states is` +
+        ` as good as the profile for a matter of record:\n${String(resume).slice(0, 20000)}`
+    : "";
+}
+
+async function resolveWithClaude({ apiKey, profile, resume, fields, pageUrl, job, routeSavedAnswers }) {
   if (!apiKey) return { error: "No API key saved." };
   if (!fields || !fields.length) return { answers: {}, skipped: {} };
 
@@ -341,7 +358,7 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeS
           _promptProfile(profile, _needsWrittenVoice(fields)),
           null,
           1
-        )}`,
+        )}${_needsWrittenVoice(fields) ? _resumeBlock(resume) : ""}`,
         // Stable across every application, so it caches; the fields below
         // are the only part that changes per page.
         cache_control: { type: "ephemeral" },
@@ -481,7 +498,7 @@ var CHAT_OUTPUT_SCHEMA = {
   additionalProperties: false,
 };
 
-async function chatWithClaude({ apiKey, profile, report, fields, job, history, message }) {
+async function chatWithClaude({ apiKey, profile, resume, report, fields, job, history, message }) {
   if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
 
   const turns = (history || []).slice(-8).map((t) => ({
@@ -499,7 +516,7 @@ async function chatWithClaude({ apiKey, profile, report, fields, job, history, m
           _promptProfile(profile, true),
           null,
           1
-        )}`,
+        )}${_resumeBlock(resume)}`,
         cache_control: { type: "ephemeral" },
       },
     ],
@@ -554,70 +571,6 @@ async function chatWithClaude({ apiKey, profile, report, fields, job, history, m
 // straight into the profile -- a parse is a reading of a document, and the
 // applicant should see it before it becomes their answers.
 // ---------------------------------------------------------------------------
-
-var RESUME_SCHEMA = {
-  type: "object",
-  properties: {
-    education: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          school: { type: "string" },
-          degree: { type: "string" },
-          field_of_study: { type: "string" },
-          graduation_year: { type: "string" },
-        },
-        required: ["school", "degree", "field_of_study", "graduation_year"],
-        additionalProperties: false,
-      },
-    },
-    experience: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          company: { type: "string" },
-          title: { type: "string" },
-          location: { type: "string" },
-          start_date: { type: "string", description: "YYYY-MM" },
-          end_date: { type: "string", description: 'YYYY-MM, or "Present"' },
-          description: { type: "string" },
-        },
-        required: ["company", "title", "location", "start_date", "end_date", "description"],
-        additionalProperties: false,
-      },
-    },
-    fields: {
-      type: "object",
-      description: "Scalar profile fields the resume states outright. Omit any it doesn't.",
-      properties: {
-        first_name: { type: "string" }, last_name: { type: "string" },
-        email: { type: "string" }, phone: { type: "string" },
-        city: { type: "string" }, state: { type: "string" },
-        linkedin_url: { type: "string" }, github_url: { type: "string" },
-        portfolio_url: { type: "string" }, gpa: { type: "string" },
-        education_level: { type: "string" }, languages: { type: "string" },
-        current_company: { type: "string" }, current_title: { type: "string" },
-      },
-      // Every one of these is required, and absent means "". They used to be
-      // optional with required: [], which asks the schema compiler to allow
-      // every subset of fourteen keys -- 16,384 of them -- and the API
-      // rejected the whole request with "Schema is too complex", so reading a
-      // resume failed outright. Requiring them all is one shape instead, and
-      // RESUME_RULES already says to leave absent things empty; _pruneEmpty
-      // drops the blanks before any of this is offered as an import.
-      required: [
-        "first_name", "last_name", "email", "phone", "city", "state",
-        "linkedin_url", "github_url", "portfolio_url", "gpa",
-        "education_level", "languages", "current_company", "current_title",
-      ],
-      additionalProperties: false,
-    },
-  },
-  required: ["education", "experience", "fields"],
-  additionalProperties: false,
-};
 
 var RESUME_RULES = `Read this resume and return what it says, as structured
 data for a job-application profile.
@@ -786,6 +739,23 @@ async function mapLabelsWithClaude({ apiKey, profile, items }) {
   }
 }
 
+var RESUME_SHAPE = `
+
+Reply with one JSON object and nothing else, no code fence, shaped like:
+{"education":[{"school":"","degree":"","field_of_study":"","graduation_year":""}],
+"experience":[{"company":"","title":"","location":"","start_date":"YYYY-MM","end_date":"YYYY-MM or Present","description":""}],
+"fields":{"first_name":"","last_name":"","email":"","phone":"","city":"","state":"","linkedin_url":"","github_url":"","portfolio_url":"","gpa":"","education_level":"","languages":"","current_company":"","current_title":""}}
+Leave out any key in "fields" the resume doesn't state. Use [] for a section it doesn't have.`;
+
+// Models sometimes wrap JSON in a fence or a sentence; take the outermost
+// object rather than failing on the wrapper.
+function _jsonObjectFrom(text) {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("no JSON object in the reply");
+  return JSON.parse(text.slice(start, end + 1));
+}
+
 async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
 
@@ -800,43 +770,25 @@ async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   } else {
     return { error: "Could not read any text out of that file." };
   }
-  content.push({ type: "text", text: RESUME_RULES });
+  content.push({ type: "text", text: RESUME_RULES + RESUME_SHAPE });
 
-  const base = {
-    model: RESUME_MODEL,
-    max_tokens: 8000,
-    messages: [{ role: "user", content }],
-  };
-
-  let result = await _postMessages(
+  const result = await _postMessages(
     apiKey,
     {
-      ...base,
-      output_config: { effort: "medium", format: { type: "json_schema", schema: RESUME_SCHEMA } },
+      // Reading a document into fields is extraction, not reasoning, and the
+      // applicant is watching a spinner -- the fast model at low effort.
+      model: RESUME_MODEL,
+      max_tokens: 4000,
+      // No json_schema format: the API rejected this nested schema as "too
+      // complex", so the shape is asked for in words, read leniently, and
+      // the blanks pruned below.
+      output_config: { effort: "low" },
+      messages: [{ role: "user", content }],
     },
-    false
+    false,
+    90000
   );
 
-  // A schema the API won't compile is a 400 before the resume is ever read,
-  // and the applicant sees the import fail with an API error about a schema
-  // they have never heard of. Asking for the same JSON in words is worse --
-  // nothing guarantees the shape -- but it is worth more than nothing, and
-  // everything below already copes with a reply that doesn't parse.
-  if (!result.ok && result.status === 400) {
-    result = await _postMessages(
-      apiKey,
-      {
-        ...base,
-        messages: [
-          {
-            role: "user",
-            content: [...content, { type: "text", text: RESUME_JSON_FALLBACK }],
-          },
-        ],
-      },
-      false
-    );
-  }
   if (!result.ok) return { error: _apiErrorMessage(result) };
   // A 200 whose body isn't JSON: a proxy's error page, a captive portal, a
   // truncated stream. Everything below reads fields off it.
@@ -847,12 +799,81 @@ async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   const block = (result.body.content || []).find((b) => b.type === "text");
   if (!block) return { error: "Nothing came back." };
   try {
-    const parsed = JSON.parse(_jsonFrom(block.text));
-    if (!parsed || typeof parsed !== "object") {
+    const raw = _jsonObjectFrom(block.text);
+    if (!raw || typeof raw !== "object") {
       return { error: "The result came back in a shape this can't read." };
     }
-    return { parsed: _pruneEmpty(parsed) };
+    return {
+      parsed: _pruneEmpty({
+        education: Array.isArray(raw.education) ? raw.education : [],
+        experience: Array.isArray(raw.experience) ? raw.experience : [],
+        fields: raw.fields && typeof raw.fields === "object" ? raw.fields : {},
+      }),
+    };
   } catch (exc) {
     return { error: `Could not read the result: ${exc}` };
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// A cover letter for one job, on demand from the panel's button.
+//
+// Plain text back, no schema: it is one letter, and structured output would
+// only add a way for the request to be rejected. Written in the applicant's
+// own voice from what is really in their profile and resume -- a letter that
+// claims experience they don't have is worse than none.
+// ---------------------------------------------------------------------------
+
+var COVER_LETTER_RULES = `Write a cover letter for this applicant for the job
+given, in the applicant's own first person.
+
+Voice: casual and down to earth, like a real student writing to a real person.
+Plain words and short sentences. No buzzwords or stiff phrases ("I am excited
+to leverage my skills", "passionate", "dynamic", "synergy" and the like).
+
+Content: only what the profile and resume actually say. Never invent a job,
+project, skill, tool, number or result. If the posting asks for something
+they haven't done, don't claim it; lean on the real things that are closest.
+Name the role and company. Pick the one or two parts of their background that
+fit this job best and say concretely what they did.
+
+Shape: three short paragraphs, well under one page: why this role, what they
+bring, a brief close. No placeholders like [Company], no "Dear Hiring Manager"
+line unless a name is given, no signature block beyond their first name.
+
+If the job block is thin or missing, stay general about the company rather than
+guessing what it does. Reply with the letter text only.`;
+
+async function coverLetterWithClaude({ apiKey, profile, resume, job }) {
+  if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
+  const jobBlock = job && (job.title || job.description)
+    ? `The job:\n${JSON.stringify(job, null, 1)}`
+    : "No job details could be read from this page.";
+  const result = await _postMessages(
+    apiKey,
+    {
+      model: RESUME_MODEL,
+      max_tokens: 1500,
+      output_config: { effort: "low" },
+      system: [
+        {
+          type: "text",
+          text: `${COVER_LETTER_RULES}\n\nThe applicant's profile:\n${JSON.stringify(
+            _promptProfile(profile, true), null, 1
+          )}${_resumeBlock(resume)}`,
+        },
+      ],
+      messages: [{ role: "user", content: jobBlock }],
+    },
+    false,
+    60000
+  );
+  if (!result.ok) return { error: _apiErrorMessage(result) };
+  if (!result.body || typeof result.body !== "object") {
+    return { error: `Unreadable reply from the API: ${result.raw.slice(0, 200)}` };
+  }
+  const block = (result.body.content || []).find((b) => b.type === "text");
+  const letter = block && String(block.text || "").trim();
+  return letter ? { letter } : { error: "No letter came back." };
 }

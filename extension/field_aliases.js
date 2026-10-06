@@ -9,6 +9,10 @@ var FIELD_ALIASES = {
   middle_name: ["middle name", "middle initial"],
   preferred_name: ["preferred name", "nickname", "preferred first name", "goes by"],
   email: ["email", "e mail", "email address"],
+  // Listed so "Phone Extension" is recognised as something else instead of
+  // matching "phone" and being filled with the whole phone number. There is
+  // no profile field for it, so it is reported as having no data.
+  phone_extension: ["phone extension", "extension", "ext", "phone ext"],
   phone: ["phone", "phone number", "mobile", "mobile number", "telephone", "cell phone", "cell number"],
   address_line1: ["address", "street address", "address line 1", "home address"],
   address_line2: [

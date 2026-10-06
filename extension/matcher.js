@@ -272,6 +272,12 @@ function setLearnedAliases(map) {
   LEARNED_ALIASES = map || {};
 }
 
+function isLearnedAliasLabel(label) {
+  const norm = normalize(label);
+  return !!norm && (Object.prototype.hasOwnProperty.call(LEARNED_ALIASES, norm) ||
+    _sameQuestionAlias(LEARNED_ALIASES, norm) !== null);
+}
+
 // Short factual answers to questions the profile has no field for at all --
 // "Phone type: Mobile", "Did you graduate? Yes", "Which shift? Either".
 // These recur across applications far more than odd labels for known fields
@@ -438,6 +444,23 @@ function learnedAnswerFor(label) {
   return null;
 }
 
+// A learned label mapping, for the same question worded differently on the
+// next form. Same rule as remembered answers above -- the meaning-bearing
+// words, not a similarity score, which is what crossed CURRENT and FORMER --
+// and the same refusal to guess when two labels share those words but
+// disagree about the field.
+function _sameQuestionAlias(map, norm) {
+  const key = _contentKey(norm);
+  if (!key) return null;
+  let found = null;
+  for (const [label, field] of Object.entries(map)) {
+    if (_contentKey(label) !== key) continue;
+    if (found !== null && found !== field) return null;
+    found = field;
+  }
+  return found;
+}
+
 function matchField(label, minRatio = 0.72) {
   const norm = normalize(label);
   if (!norm) return null;
@@ -449,6 +472,8 @@ function matchField(label, minRatio = 0.72) {
   if (Object.prototype.hasOwnProperty.call(LEARNED_ALIASES, norm)) {
     return LEARNED_ALIASES[norm];
   }
+  const nearAlias = _sameQuestionAlias(LEARNED_ALIASES, norm);
+  if (nearAlias !== null) return nearAlias;
 
   let bestField = null;
   let bestKey = [-1, -1];
@@ -515,6 +540,10 @@ function matchFieldByName(name, elemId = "") {
   return matchField(words, 1.1);
 }
 
+function _containsWholeWord(haystack, needle) {
+  return (" " + haystack + " ").includes(" " + needle + " ");
+}
+
 function bestOption(targetValue, options, minRatio = 0.5) {
   const normTarget = normalize(String(targetValue));
   if (!normTarget) return null;
@@ -526,6 +555,13 @@ function bestOption(targetValue, options, minRatio = 0.5) {
     if (text === normTarget) return opt.value;
     let ratio = fuzzyRatio(text, normTarget);
     if (normTarget.includes(text) || text.includes(normTarget)) ratio += 0.25;
+    // "Asian" is the right pick from "Asian (Not Hispanic or Latino) (United
+    // States of America)" however short it is next to it, which the length-
+    // based ratio above scores as a poor match. Whole words only: "male" must
+    // not find "female".
+    if (_containsWholeWord(text, normTarget) || _containsWholeWord(normTarget, text)) {
+      ratio = Math.max(ratio, 0.6);
+    }
     if (ratio > bestScore) {
       bestScore = ratio;
       bestValue = opt.value;

@@ -1,8 +1,15 @@
 # Handoff
 
-State of this project as of 2026-09-17, written so a new conversation can
+State of this project as of 2026-10-06, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/happy-volta-yjo3xc`. 228 tests passing, the whole suite green.
+`claude/cool-bell-dwop39`. 278 tests passing, the whole suite green.
+
+**Start from that branch, not from the default branch.** Between Sep 17 and
+Oct 1 three sessions each started from the Sep 17 handoff commit and built
+on their own branch (`happy-volta`, `new-session`, `affectionate-bohr`), so
+whichever one was loaded into Chrome lacked the other two's fixes, and
+several things got built twice. `cool-bell-dwop39` merges all three; see
+"Merged from three branches" below for what was kept where they overlapped.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -64,11 +71,18 @@ extension/
                     _wantsFallbacks() keys the refusal-fallback beta off the
                     model -- Sonnet doesn't refuse, so sending it there was
                     a 400 and a silent retry on every request.
-  panel.js          The on-page side panel, in a shadow root. Draggable by its
-                    header; position kept in chrome.storage under `panel_pos`,
-                    never the page's own localStorage. Also the wide toggle
-                    (`panel_big`), the launcher that closing leaves behind, and
-                    the AI assist switch, which read-modify-writes `settings`.
+  panel.js          The on-page side panel, in a shadow root. Header: Learn this
+                    form, wide, collapse, close. Bottom: **Autofill** + the
+                    **AI assist** switch in one row, **Tailor cover letter**
+                    under it, then the chat (what the user asked for on Oct 1).
+                    Draggable by its header; position kept in chrome.storage
+                    under `panel_pos`, never the page's own localStorage. Also
+                    the wide toggle (`panel_big`) and the launcher that closing
+                    leaves behind. The AI switch read-modify-writes `settings`,
+                    and doFill re-reads settings on every press so it applies
+                    without a reload. `panel.learn()` lists what was kept live.
+  profile_check.js  Options page only: warnings about what a saved value will
+                    do on a form.
   options.js/html   The Options page. 11 tabs. Loads matcher.js too, for
                     bestSelfIdChoice. Also holds the full backup/restore
                     (BACKUP_KEYS / BACKUP_SECRET_KEYS) for moving browsers.
@@ -150,16 +164,19 @@ shape statically, so it is the thing to update if this is restructured.
 |---|---|---|
 | `learned_answers` | label -> `{v, n, t}` | Questions the profile has no field for |
 | `learned_aliases` | label -> profile field | Claude's declared `profile_field` |
+| `learned_fields` | markup signature -> `{answer, label, host, at}` | Learn this form; what the page calls the control (name, id, data-automation-id, tokenised) |
 | `profile_suggestions` | profile field -> value | Gaps found on the page; **suggested, never written** |
 
 Sensitive and consent answers go **only** to `profile_suggestions`, never to
-`learned_answers`. That routing is the safety property — see rule 5.
+`learned_answers` or `learned_fields`. That routing is the safety property —
+see rule 5.
 
-**Learn this form** (the panel button, `learnFromPage` in `filler.js`) reads
+**Learn this form** (the panel button, `learnPageNow` in `filler.js`) reads
 a form the applicant filled in by hand and stores every answer in it,
-setting nothing on the page. It builds a report in which nothing was filled
-and hands it to `learnFromPrefilled`, so it inherits that same routing
-rather than carrying a second copy of the gate. Wired in `run.js` via
+setting nothing on the page: by question wording, and by markup signature
+(`fieldSignatures`), which survives a reworded posting and is the only handle
+an unlabelled field has. `learnFromPage` is the older version and is still
+used by tests; the button uses `learnPageNow`. Wired in `run.js` via
 `panel.onLearn`.
 
 With `use_llm` on, the button then calls `mapLabelsWithClaude` (llm.js) and
@@ -177,7 +194,8 @@ it, how recently. Bare strings from before the shape change are still read
 and resets to 1 on a correction; `capLearned` evicts by how little a thing has
 been wanted rather than by what arrived first, the way `capMisses` already did.
 
-`learnedAnswerFor` tries the exact wording, then a **content key**: the
+`learnedAnswerFor` tries the exact wording, then a **content key** (and
+`matchField` does the same for learned aliases, `_sameQuestionAlias`): the
 question's meaning-bearing words, stemmed and sorted, with stopwords dropped.
 This is deliberately not a similarity score, and measuring is why — on a real
 RTX form, the CURRENT and FORMER federal-employee questions score **0.952**
@@ -197,7 +215,7 @@ Capped in `background.js` (`capLearned`, `capMisses` in `llm.js`).
 |---|---|---|
 | `use_llm` | off, on once a key is saved | The AI pass at all. Needs `llm_api_key`. |
 | `route_saved_answers` | **on** | Let Claude route saved answers to sensitive/consent questions (no effect unless `use_llm`) |
-| `tailor_cover_letter` | off | Draft a letter per job instead of the saved one |
+| `tailor_cover_letter` | off | Draft a letter per job during the fill instead of the saved one. The panel's **Tailor cover letter** button works regardless. |
 | `auto_fill_known_sites` | **on** | Inject and fill on page load across 16 ATS domains |
 | `manual_fill` | off | Open the panel but fill nothing until **Autofill** is pressed |
 | `watch_and_learn` | **on** | Notice what the user types into blanks |
@@ -210,6 +228,32 @@ saving there writes every key explicitly. `applyDefaultsOnce()` in
 under `migrations` so a setting turned off afterwards stays off. Add a new
 key there rather than only changing a default, or the change reaches nobody
 who already has this installed.
+
+### Merged from three branches (Oct 6)
+
+Where sessions built the same thing twice, one was kept:
+
+- **Panel**: one Autofill button, one AI switch (see the map). The
+  Sep 22 draggable-panel/AI-checkbox and the Oct 1 `onAiToggle`/`ja-refill`
+  re-inject are gone.
+- **Learn this form**: one button, `learnPageNow` (markup store) plus the
+  Claude field-mapping step.
+- **Remembered-question matching**: content key, not the Oct 1 0.9
+  similarity score, for both answers and aliases (CURRENT vs FORMER).
+- **Backups**: both kept, different jobs. "Export everything" (paste-able,
+  top-level stores) and "Move to another browser" (file, nested under
+  `data`, optional secrets). Each restore reads the other's shape, and the
+  file restore now runs `sanitizeLearnedAliases`.
+- **Run resilience** (Sep 22): `_send`, `_step`, per-field error isolation,
+  the "Autofill stopped early" banner, all ported onto the button-driven
+  `doFill`.
+
+One bug came from the combination, not either branch: Oct 1 refuses a
+yes/no question that merely mentions a field, and the machine-name fallback
+then re-matched it (campus questionnaire names all contain "GPA Not
+Required"), putting a GPA into the permanent-address question. The refusal
+now also blocks that fallback; "If you answered Yes, please provide X" is no
+longer treated as a yes/no question.
 
 ---
 
@@ -244,12 +288,12 @@ are DOM-behaviour bugs a mock can't reproduce.
   still looks like that.
 - **The Claude API path is only partly verified.** No key in the dev
   environment, so request shape, headers, retry and error handling are
-  tested against a stubbed `fetch`. One thing has now been seen live: the
-  resume schema was refused with "Schema is too complex" because its 14
-  scalar fields were optional under `required: []`, which asks the schema
-  compiler to allow all 2^14 subsets of them. Structured-output schemas
-  here require every property and use "" for absent, with `_pruneEmpty`
-  dropping the blanks before anything is offered as an import.
+  tested against a stubbed `fetch`. One thing has been seen live: the
+  resume schema was refused with "Schema is too complex". Two sessions
+  fixed that differently; the merge keeps the Oct 1 one (no json_schema for
+  resumes at all: the shape is asked for in words, `_jsonObjectFrom` reads
+  it leniently, `_pruneEmpty` drops blanks), since it was fixed after the
+  error was hit again. The other structured-output calls still use schemas.
 - **Corrections are still not learned automatically.** `watchForCorrections`
   skips every field the fill touched (`filler.js`, the `filled.has(...)`
   guards), so a wrong fill the applicant fixes by hand teaches nothing on
@@ -321,8 +365,9 @@ about what the site probably does.
 
 ## Conventions
 
-- Work on `claude/job-application-automation-tp32l1`. Commit and push when a
-  change is complete and tests pass.
+- Work on `claude/cool-bell-dwop39`, or branch from it. Never from the
+  default branch or an older session branch: that is how the work forked.
+  Commit and push when a change is complete and tests pass.
 - Commit messages explain **why**, including what was wrong before. Several in
   the log are worth reading as documentation — `3721399` (the sensitive-alias
   bug), `d82538f` (seven bugs from hardening), `423eecb` (the options page

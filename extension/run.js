@@ -122,16 +122,19 @@ async function _run() {
     return;
   }
 
-  const {
+  // `let`: an Autofill press re-reads the settings, so the panel's AI switch
+  // takes effect without a reload.
+  let {
     profile,
     settings,
     credentials: savedCreds,
     learned_aliases: learnedAliases,
     learned_answers: learnedAnswers,
     learned_fields: learnedFields,
+    resume_text: resumeText,
   } = await chrome.storage.local.get([
     "profile", "settings", "credentials", "learned_aliases", "learned_answers",
-    "learned_fields",
+    "learned_fields", "resume_text",
   ]);
 
   // Only the top frame draws a panel. This script runs in every frame, and a
@@ -204,6 +207,12 @@ async function _run() {
   let report = null;
 
   async function doFill() {
+    try {
+      const fresh = await chrome.storage.local.get(["settings"]);
+      if (fresh && fresh.settings) settings = fresh.settings;
+    } catch (exc) {
+      /* the settings read at the start still stand */
+    }
     const useLlm = !!(settings && settings.use_llm);
     report = await fillForm(profile, creds, {
       tailorCoverLetter: useLlm && !!(settings && settings.tailor_cover_letter),
@@ -231,6 +240,7 @@ async function _run() {
             type: "ja-llm-resolve",
             request: {
               profile,
+              resume: resumeText || "",
               fields: pending,
               pageUrl: location.href,
               job,
@@ -252,12 +262,17 @@ async function _run() {
             learnedCount = Object.keys(learned).length;
             if (learnedCount) {
               _send({ type: "ja-learned", learned });
+              for (const [label, field] of Object.entries(learned)) {
+                panel?.learn(label, `your ${field.replace(/_/g, " ")}`);
+              }
             }
             // Short answers to questions the profile has no field for -- the
             // ones that would otherwise cost an API call on every form.
             const remembered = rememberableAnswers(report, reply.answers, reply.sources);
             if (Object.keys(remembered).length) {
               _send({ type: "ja-learned-answers", answers: remembered });
+              learnedCount += Object.keys(remembered).length;
+              for (const [label, answer] of Object.entries(remembered)) panel?.learn(label, answer);
             }
             panel?.log(`Claude filled ${claudeFilled}.`, claudeFilled ? "ok" : "muted");
             const declined = Object.keys(reply.skipped || {}).length;
@@ -350,6 +365,7 @@ async function _run() {
           type: "ja-chat",
           request: {
             profile,
+            resume: resumeText || "",
             job,
             message: text,
             history,
@@ -375,6 +391,15 @@ async function _run() {
           });
         } catch (exc) {
           return `${reply.reply}\n\n(Couldn't apply that to the page: ${_errorText(exc)})`;
+        }
+        // An answer worked out in the chat is as much the applicant's as one
+        // typed in, once it is on the page; keep the short ones.
+        if (changed) {
+          const kept = rememberableAnswers(report, reply.answers, {});
+          if (Object.keys(kept).length) {
+            _send({ type: "ja-learned-answers", answers: kept });
+            for (const [label, answer] of Object.entries(kept)) panel.learn(label, answer);
+          }
         }
         history.push({ role: "user", content: text });
         history.push({ role: "assistant", content: reply.reply });
@@ -477,6 +502,43 @@ async function _run() {
     return parts.join(" ");
   });
 
+  // Tailor cover letter: a letter for the job on this page, from the profile
+  // and resume. Goes into the form's cover letter box when there is one; with
+  // only a file upload it is shown in the chat and copied. Available before
+  // Autofill is pressed too, so the page is read when the button is.
+  panel?.onCoverLetter(async () => {
+    const job = extractJobContext();
+    const reply = await _send({
+      type: "ja-cover-letter",
+      request: { profile, resume: resumeText || "", job },
+    });
+    if (!reply) return panel.say("No reply came back -- the background worker may have been asleep. Try again.", "it");
+    if (reply.error) return panel.say(reply.error, "it");
+    const fields = report ? report.fields || [] : extractFields();
+    const target = fields.find(
+      (f) => f.tag === "textarea" && matchField(f.label || f.group_label || "") === "cover_letter_text"
+    );
+    const el = target && _el(target.ja_id);
+    const note = job.title ? "" : " (I couldn't read the job off this page, so it's general.)";
+    if (el) {
+      _setNativeValue(el, reply.letter);
+      _mark(target.ja_id, MARK_FILLED);
+      panel.say(`Put a cover letter for this job in the form. Read it before you submit.${note}`, "it");
+    } else {
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(reply.letter);
+        copied = true;
+      } catch (exc) {
+        /* the page may not allow clipboard access; the text is below */
+      }
+      panel.say(
+        `There's no cover letter box on this page${copied ? ", so I copied it to your clipboard" : ""}:${note}\n\n${reply.letter}`,
+        "it"
+      );
+    }
+  });
+
   // Whatever arrived already filled -- typed before clicking, put there by
   // another autofill extension, or remembered by the site -- is an answer
   // too, and was being stepped over in silence.
@@ -486,6 +548,7 @@ async function _run() {
     if (learnedNow) {
       _send({ type: "ja-learned-answers", answers: prefilled.answers });
       panel?.log(`Remembered ${learnedNow} answer(s) already on this page.`, "info");
+      for (const [label, answer] of Object.entries(prefilled.answers)) panel?.learn(label, answer);
     }
     const gaps = Object.keys(prefilled.suggestions).length;
     if (gaps) {
@@ -507,7 +570,10 @@ async function _run() {
   if (report && (!settings || settings.watch_and_learn !== false)) await _step(panel, "Watching for what you type next", async () => {
     watchForCorrections(
       report,
-      (learned) => _send({ type: "ja-learned-answers", answers: learned }),
+      (learned) => {
+        _send({ type: "ja-learned-answers", answers: learned });
+        for (const [label, answer] of Object.entries(learned)) panel?.learn(label, answer);
+      },
       (suggested) =>
         _send({ type: "ja-profile-suggestions", suggestions: suggested })
     );

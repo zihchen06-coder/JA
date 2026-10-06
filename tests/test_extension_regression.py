@@ -2617,40 +2617,8 @@ PARSED = json.dumps({
 })
 
 
-def test_the_resume_schema_asks_for_one_shape_not_sixteen_thousand(browser):
-    """Every scalar optional under required: [] asks the schema compiler to
-    allow every subset of fourteen keys, and the API answered the whole
-    request with "Schema is too complex" -- so reading a resume failed before
-    the document was ever looked at. Requiring them all is one shape.
-    """
-    out = _resume_call(browser, [_ok(PARSED)])
-    schema = out["sent"][0]["output_config"]["format"]["schema"]
-    props = schema["properties"]["fields"]["properties"]
-
-    assert sorted(schema["properties"]["fields"]["required"]) == sorted(props.keys())
-    assert out["result"].get("error") is None, out["result"]
 
 
-def test_a_refused_schema_still_gets_the_resume_read(browser):
-    """A schema the API won't compile is a 400 before the resume is read, and
-    the applicant sees an error about a schema they have never heard of.
-    Asking for the same JSON in words guarantees nothing about the shape, but
-    it is worth more than nothing.
-    """
-    out = _resume_call(browser, [
-        {"status": 400, "body": {"error": {"message": "Schema is too complex."}}},
-        _ok("```json\n" + PARSED + "\n```"),
-    ])
-
-    assert len(out["sent"]) == 2, out["sent"]
-    # The retry drops the schema and asks in the prompt instead.
-    assert "output_config" not in out["sent"][1]
-    assert any(
-        "JSON only" in b.get("text", "")
-        for b in out["sent"][1]["messages"][0]["content"]
-    ), out["sent"][1]
-    # A fenced reply is still read.
-    assert out["result"]["parsed"]["fields"]["first_name"] == "Jamie", out["result"]
 
 
 def test_what_the_resume_does_not_say_is_not_offered_as_an_answer(browser):
@@ -3050,21 +3018,21 @@ def test_a_panel_opened_after_being_widened_opens_wide(browser):
 
 def test_ai_assist_can_be_turned_off_from_the_panel(browser):
     """Three clicks away on the options page is too far from where it is
-    being used. The box below says what off means rather than looking broken.
+    being used. It says what off means rather than looking broken.
     """
     page = _panel_page(browser, {"settings": {"use_llm": True, "manual_fill": True}})
     try:
         out = page.evaluate(
             """async () => {
                 const root = document.getElementById('ja-autofill-panel').shadowRoot;
-                const box = root.querySelector('.ai-on');
+                const box = root.querySelector('.aibox');
                 const ask = root.querySelector('textarea');
                 const on = {checked: box.checked, askDisabled: ask.disabled};
                 box.checked = false;
                 box.dispatchEvent(new Event('change'));
                 await new Promise((r) => setTimeout(r, 50));
                 return {on, off: {askDisabled: ask.disabled,
-                                  note: root.querySelector('.ai-note').textContent},
+                                  note: root.querySelector('.msgs').textContent},
                         stored: window.__store.settings};
             }"""
         )
@@ -3077,3 +3045,286 @@ def test_ai_assist_can_be_turned_off_from_the_panel(browser):
     assert out["stored"]["use_llm"] is False
     # Every other setting survives the write.
     assert out["stored"]["manual_fill"] is True, out["stored"]
+
+
+# --- From the Oct 1 session: resume reading, the gaps export, the panel ----
+
+
+def test_resume_parse_sends_no_strict_schema_and_reads_a_fenced_reply(browser):
+    """The API rejected the nested resume schema as "too complex", so the
+    request carries no json_schema format and the reply is read leniently.
+    """
+    fenced = "Here you go:\n```json\n" + json.dumps({
+        "education": [{"school": "Penn State", "degree": "BS", "field_of_study": "ME",
+                       "graduation_year": "2028"}],
+        "experience": "not a list",
+        "fields": {"first_name": "Jamie"},
+    }) + "\n```"
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        out = page.evaluate(
+            """async (fenced) => {
+                let sent = null;
+                window.fetch = async (url, init) => {
+                    sent = JSON.parse(init.body);
+                    return {ok: true, status: 200, text: async () => JSON.stringify(
+                        {content: [{type: "text", text: fenced}]})};
+                };
+                const result = await parseResumeWithClaude({apiKey: "k", text: "Jamie, Penn State"});
+                return {sent, result};
+            }""",
+            fenced,
+        )
+    finally:
+        page.close()
+    assert "format" not in out["sent"]["output_config"]
+    parsed = out["result"]["parsed"]
+    assert parsed["education"][0]["school"] == "Penn State"
+    assert parsed["experience"] == []
+    assert parsed["fields"] == {"first_name": "Jamie"}
+
+
+def test_resume_text_reaches_the_chat_prompt(browser):
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        system = page.evaluate(
+            """async (profile) => {
+                let sent = null;
+                window.fetch = async (url, init) => {
+                    sent = JSON.parse(init.body);
+                    return {ok: true, status: 200, text: async () => JSON.stringify(
+                        {content: [{type: "text", text: '{"reply":"hi","answers":[]}'}]})};
+                };
+                await chatWithClaude({apiKey: "k", profile, resume: "Machined parts at Acme Tooling",
+                                      report: {results: []}, fields: [], message: "hi"});
+                return sent.system[0].text;
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+    assert "Machined parts at Acme Tooling" in system
+
+
+def test_learned_answers_carry_over_to_a_slightly_reworded_question(load):
+    page = load(html="<body></body>")
+    out = page.evaluate(
+        """() => {
+            setLearnedAnswers({"are you legally authorized to work in the united states": "Yes"});
+            return {
+                same: learnedAnswerFor("Are you legally authorized to work in the United States?"),
+                reworded: learnedAnswerFor("Are you legally authorized to work in United States?"),
+                unrelated: learnedAnswerFor("Have you ever been employed by this company?"),
+                short: learnedAnswerFor("Gender identity"),
+            };
+        }"""
+    )
+    assert out["same"] == "Yes"
+    assert out["reworded"] == "Yes"
+    assert out["unrelated"] is None
+    assert out["short"] is None
+
+
+def test_panel_has_autofill_button_and_ai_toggle_and_lists_what_was_learned(load):
+    page = load(html="<body></body>", scripts=["panel.js"])
+    out = page.evaluate(
+        """async () => {
+            const panel = createPanel();
+            let filled = 0;
+            panel.onFill(async () => { filled += 1; });
+            panel.learn("phone type", "Mobile");
+            const root = document.getElementById("ja-autofill-panel").shadowRoot;
+            root.querySelector(".fill").click();
+            await new Promise((r) => setTimeout(r, 20));
+            return {
+                filled,
+                fillButtons: root.querySelectorAll(".fill").length,
+                aiSwitches: root.querySelectorAll('input[type="checkbox"]').length,
+                coverButtons: root.querySelectorAll(".cover").length,
+                hasLearnedButton: !!root.querySelector(".learned"),
+                learned: root.querySelector(".learned-row").textContent,
+            };
+        }"""
+    )
+    assert out["filled"] == 1
+    # Exactly one of each: two sessions each added their own.
+    assert out["fillButtons"] == 1
+    assert out["aiSwitches"] == 1
+    assert out["coverButtons"] == 1
+    assert out["hasLearnedButton"] is False
+    assert "phone type" in out["learned"] and "Mobile" in out["learned"]
+
+
+def test_remembered_answer_fills_a_workday_dropdown_that_has_no_options_until_opened(browser):
+    """Workday's list only exists once opened, and the remembered-answer path
+    read the empty pre-open list: "Remembered 'No', but no option matched it"
+    ten times a day on every Workday question.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'workday_questions.html')}")
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                const fieldset = document.querySelector('button[aria-haspopup="listbox"]')
+                    .closest('fieldset');
+                fieldset.querySelector('b').textContent = 'Zorp status of your widget?';
+                setLearnedAnswers({'zorp status of your widget': 'Yes'});
+                const report = await fillForm(profile, null);
+                const row = report.results.find((r) => r.label.includes('Zorp'));
+                const button = fieldset.querySelector('button[aria-haspopup="listbox"]');
+                return {row, shown: button.textContent.trim(),
+                        open: document.querySelectorAll('[role="listbox"]').length};
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+    assert out["row"] is not None, "the question was never reported on"
+    assert out["row"]["action"] == "filled", out["row"]
+    assert out["shown"] == "Yes"
+    assert out["open"] == 0
+
+
+def test_short_answer_finds_its_longer_option(load):
+    page = load(html="<body></body>")
+    out = page.evaluate(
+        """() => {
+            const race = [
+                {value: "0", text: "Select One"},
+                {value: "1", text: "Asian (Not Hispanic or Latino) (United States of America)"},
+                {value: "2", text: "Black or African American (Not Hispanic or Latino)"},
+            ];
+            return {asian: bestOption("Asian", race)};
+        }"""
+    )
+    assert out["asian"] == "1"
+
+
+def test_phone_extension_is_not_filled_with_the_phone_number(load):
+    page = load(html="<body><form><label for='e'>Phone Extension</label>"
+                     "<input id='e' type='text'></form></body>")
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null);
+            return {value: document.getElementById('e').value,
+                    actions: report.results.map((r) => r.action)};
+        }""",
+        PROFILE,
+    )
+    assert out["value"] == ""
+    assert "filled" not in out["actions"]
+
+
+def test_a_yes_no_question_mentioning_degree_still_reaches_the_remembered_answers(load):
+    page = load(html="<body><form><label for='d'>Has this degree been completed?</label>"
+                     "<select id='d'><option value=''>Select</option>"
+                     "<option value='y'>Yes</option><option value='n'>No</option><option value='x'>Not Specified</option></select>"
+                     "</form></body>")
+    out = page.evaluate(
+        """async (profile) => {
+            setLearnedAnswers({"has this degree been completed": "Yes"});
+            const report = await fillForm({...profile, degree: "B.S."}, null);
+            setLearnedAnswers({});
+            return {shown: document.getElementById('d').selectedOptions[0].text,
+                    actions: report.results.map((r) => r.action)};
+        }""",
+        PROFILE,
+    )
+    # Before: matched the word "degree", found no option for 'B.S.', and was
+    # skipped without the remembered answer ever being tried.
+    assert out["shown"] == "Yes", out
+    # ...while a plain "Degree" box still gets the degree.
+    page2 = load(html="<body><form><label for='d'>Degree</label>"
+                      "<input id='d' type='text'></form></body>")
+    value = page2.evaluate(
+        """async (profile) => {
+            await fillForm({...profile, degree: "B.S."}, null);
+            return document.getElementById('d').value;
+        }""",
+        PROFILE,
+    )
+    assert value == "B.S."
+
+
+def test_cover_letter_request_is_plain_text_and_carries_job_resume_and_voice_rules(browser):
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        out = page.evaluate(
+            """async (profile) => {
+                let sent = null;
+                window.fetch = async (url, init) => {
+                    sent = JSON.parse(init.body);
+                    return {ok: true, status: 200, text: async () => JSON.stringify(
+                        {content: [{type: "text", text: "  Hi, I'm Jamie.  "}]})};
+                };
+                const result = await coverLetterWithClaude({
+                    apiKey: "k", profile, resume: "Machined parts at Acme Tooling",
+                    job: {title: "Propulsion Intern", company: "Rocketco"}});
+                const missing = await coverLetterWithClaude({apiKey: "", profile, job: {}});
+                return {sent, result, missing};
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+    assert out["result"] == {"letter": "Hi, I'm Jamie."}
+    assert "format" not in out["sent"]["output_config"]
+    system = out["sent"]["system"][0]["text"]
+    assert "Machined parts at Acme Tooling" in system
+    assert "never invent" in system.lower()
+    assert "resume_file" not in system
+    assert "Propulsion Intern" in out["sent"]["messages"][0]["content"]
+    assert "API key" in out["missing"]["error"]
+
+
+def test_panel_cover_letter_button_is_busy_until_the_handler_finishes(load):
+    page = load(html="<body></body>", scripts=["panel.js"])
+    out = page.evaluate(
+        """async () => {
+            const panel = createPanel();
+            let release;
+            panel.onCoverLetter(() => new Promise((r) => { release = r; }));
+            const btn = document.getElementById("ja-autofill-panel").shadowRoot.querySelector(".cover");
+            btn.click();
+            const during = {disabled: btn.disabled, text: btn.textContent};
+            release();
+            await new Promise((r) => setTimeout(r, 20));
+            return {during, after: {disabled: btn.disabled, text: btn.textContent}};
+        }"""
+    )
+    assert out["during"] == {"disabled": True, "text": "Writing…"}
+    assert out["after"] == {"disabled": False, "text": "Tailor cover letter"}
+
+
+def test_a_question_refused_by_its_shape_is_not_matched_again_by_its_markup(browser):
+    """Two fixes from different sessions met here. One refuses a yes/no
+    question that merely mentions a field ("Are you enrolled in a degree
+    seeking program?"); the other falls back to the field's machine name. On a
+    campus questionnaire every machine name carries the questionnaire's title,
+    "... GPA Not Required ...", so each refused question was matched to gpa
+    straight back -- and a GPA went into the permanent address question.
+    """
+    out = _evaluate_on(
+        browser, "campus_questionnaire.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            return report.results.map((r) => [r.label, r.canonical, r.action]);
+        }""",
+        {**PROFILE, "gpa": "3.7"},
+    )
+    by_label = {label: (canonical, action) for label, canonical, action in out}
+    assert len(out) >= 5, out
+
+    gpa_rows = [label for label, (canonical, _) in by_label.items() if canonical == "gpa"]
+    assert gpa_rows == ["What is your cumulative GPA?"], gpa_rows
+    # A request with a condition in front of it is still the request.
+    address = next(v for k, v in by_label.items() if "permanent add" in k)
+    assert address == ("address_line1", "filled"), address

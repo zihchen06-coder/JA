@@ -505,6 +505,17 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
     }
 
     canonical = matchField(label);
+    // "Has this degree been completed?" contains the word "degree" and is not
+    // asking for one. A yes/no question or a paragraph of instructions that
+    // merely mentions a field is a question for the learned answers or the AI
+    // pass, not a request for that field's value. A mapping that was learned
+    // for this exact wording is the exception -- that was a deliberate choice.
+    let refusedAsQuestion = false;
+    if (canonical && !BOOLEAN_FIELDS.has(canonical) && !isLearnedAliasLabel(label) &&
+        _isQuestionNotFieldName(label)) {
+      canonical = null;
+      refusedAsQuestion = true;
+    }
     if (canonical === "cover_letter_text" && report.opts.tailorCoverLetter) {
       // One saved cover letter pasted into every application reads worse
       // than none. Left for the second pass, which knows what job this is.
@@ -519,7 +530,7 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
     // "secondaryJsqData.Campus - GPA Not Required - Clearance - 2025.b",
     // which matched *gpa* off the questionnaire's title and put a grade point
     // average in a box asking for a number of hours.
-    if (canonical === null && !isEscapeHatchLabel(label) && !isQuantityLabel(label)) {
+    if (canonical === null && !refusedAsQuestion && !isEscapeHatchLabel(label) && !isQuantityLabel(label)) {
       canonical = matchFieldByName(f.name || "", f.id || "");
     }
     if (canonical === null) {
@@ -555,7 +566,7 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
       // answer a question that has to be answered by hand.
       const byMarkup = learnedFieldAnswer(f);
       if (byMarkup !== null) {
-        _fillRemembered(report, f, label, byMarkup, required);
+        await _fillRemembered(report, f, label, byMarkup, required);
         return;
       }
       if (required) _mark(f.ja_id, MARK_BLANK);
@@ -620,6 +631,19 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
 // whichever widget it came from -- a real <select>'s <option>s, an iCIMS
 // widget's <li>s, or the popup a Workday listbox button just rendered --
 // so the decision is made the same way for all three.
+// Not "if": "If you answered Yes above, please provide your permanent
+// address" is a request for the address, with a condition in front of it.
+var _QUESTION_START_RE =
+  /^(has|have|had|are|is|do|does|did|will|would|can|could|were|was|should)\b/;
+
+function _isQuestionNotFieldName(label) {
+  const norm = normalize(label);
+  if (_QUESTION_START_RE.test(norm)) return true;
+  // Real field names are a few words; a long label holding a question mark is
+  // a sentence about a field.
+  return norm.split(" ").length > 15 && /\?/.test(label);
+}
+
 function _optionText(options, optionValue) {
   const match = options.find((o) => o.value === optionValue);
   return match ? match.text || "" : "";
@@ -791,6 +815,14 @@ async function _fillRemembered(report, f, label, value, required) {
       const real = options.filter((o) => o.value !== "" && o.value !== null);
       const at = bestMonthOption(value, real.map((o) => o.text || ""), label);
       if (at !== null) optionValue = real[at].value;
+    }
+    // "No" against "No, I have not" and the like.
+    if (optionValue === null || optionValue === undefined) {
+      const want = semanticBool(value);
+      const byMeaning = want === null
+        ? null
+        : options.filter((o) => semanticBool(o.text || "") === want);
+      if (byMeaning && byMeaning.length === 1) optionValue = byMeaning[0].value;
     }
     if (optionValue === null || optionValue === undefined) {
       // Nothing may be left hanging open over the rest of the form.
@@ -1472,6 +1504,7 @@ function learnFromAnswers(report, answers, profile, sources) {
   const learned = {};
 
   for (const [jaId, value] of Object.entries(answers || {})) {
+    if (report.appliedIds && !report.appliedIds.has(jaId)) continue;
     const f = byId.get(jaId);
     const label = normalize(f && f.label);
     if (!label || !value) continue;
@@ -1565,6 +1598,9 @@ async function applyLlmAnswers(report, answers, skipped, profile, opts) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
   const candidates = new Map(_llmCandidates(report, opts).map((c) => [c.descriptor.ja_id, c]));
   let filled = 0;
+  // Which answers really landed. Learning from the rest taught the extension
+  // answers the guards had just refused.
+  report.appliedIds = report.appliedIds || new Set();
 
   for (const [jaId, value] of Object.entries(answers || {})) {
     // Only fields this side offered up in the first place. An answer for
@@ -1608,6 +1644,7 @@ async function applyLlmAnswers(report, answers, skipped, profile, opts) {
 
     if (f.tag === "select") _mark(jaId, MARK_FILLED);
     filled += 1;
+    report.appliedIds.add(jaId);
     const result = report.results.find((r) => r.ja_id === jaId);
     if (result) {
       result.action = "filled";
@@ -1853,6 +1890,7 @@ function rememberableAnswers(report, answers, sources) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
   const out = {};
   for (const [jaId, value] of Object.entries(answers || {})) {
+    if (report.appliedIds && !report.appliedIds.has(jaId)) continue;
     if ((sources || {})[jaId]) continue;
     const f = byId.get(jaId);
     if (!f || f.tag === "textarea") continue;

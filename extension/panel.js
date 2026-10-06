@@ -42,12 +42,6 @@ var _PANEL_CSS = `
     display: none; align-items: center; justify-content: center;
   }
   .launcher:hover { border-color: #38bdf8; }
-  .ai-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 0 0 8px; color: #94a3b8; font-size: 11px;
-  }
-  .ai-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-  .ai-row input { width: 14px; height: 14px; accent-color: #38bdf8; cursor: pointer; }
   .wrap.dragging { user-select: none; }
   header { cursor: move; }
   .body { max-height: 46vh; }
@@ -61,12 +55,11 @@ var _PANEL_CSS = `
     font-size: 15px; padding: 2px 6px; border-radius: 6px;
   }
   header button:hover { background: rgba(148,163,184,.15); color: #e2e8f0; }
-  header button.fill, header button.learn {
+  header button.learn {
     font-size: 11px; padding: 3px 8px; border-radius: 6px;
     border: 1px solid rgba(148,163,184,.35); color: #cbd5e1;
   }
-  header button.fill { margin-left: auto; }
-  header button.fill:disabled, header button.learn:disabled { opacity: .6; cursor: default; }
+  header button.learn:disabled { opacity: .6; cursor: default; }
   .body { flex: 1 1 auto; overflow-y: auto; padding: 10px 12px; }
   .wrap.min .body, .wrap.min .chat { display: none; }
   .line { display: flex; gap: 7px; align-items: baseline; margin-bottom: 4px; color: #cbd5e1; }
@@ -115,6 +108,22 @@ var _PANEL_CSS = `
     padding: 0 12px; font-weight: 600; cursor: pointer; font-size: 12.5px;
   }
   .send:disabled { opacity: .5; cursor: default; }
+  .tools { display: flex; gap: 6px; margin-bottom: 8px; }
+  .tool {
+    flex: 1; background: rgba(148,163,184,.12); color: #e2e8f0;
+    border: 1px solid rgba(148,163,184,.25); border-radius: 8px;
+    padding: 6px 8px; cursor: pointer; font-size: 12px;
+  }
+  .tool.primary { background: #22c55e; border-color: #22c55e; color: #052e16; font-weight: 600; }
+  .tool:disabled { opacity: .5; cursor: default; }
+  .ai {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: rgba(148,163,184,.12); border: 1px solid rgba(148,163,184,.25);
+    border-radius: 8px; padding: 6px 8px; cursor: pointer; font-size: 12px; user-select: none;
+  }
+  .ai input { margin: 0; cursor: pointer; accent-color: #38bdf8; }
+  .learned-row { color: #cbd5e1; font-size: 12px; margin-bottom: 3px; word-break: break-word; }
+  .learned-row .arrow { color: #64748b; }
 `;
 
 function _panelFlash(el) {
@@ -142,19 +151,21 @@ function createPanel() {
   wrap.innerHTML = `
     <header>
       <strong>Autofill</strong>
-      <button class="big" title="Make this panel wider">&#10530;</button>
-      <button class="fill" title="Fill this form in from your profile">Autofill</button>
       <button class="learn" title="Remember every answer on this page, so the next form like it fills itself">Learn this form</button>
+      <button class="big" title="Make this panel wider">&#10530;</button>
       <button class="min" title="Collapse">&minus;</button>
       <button class="close" title="Close">&times;</button>
     </header>
     <div class="body"></div>
     <div class="chat">
-      <div class="ai-row">
-        <label><input type="checkbox" class="ai-on"> AI assist</label>
-        <span class="ai-note"></span>
-      </div>
       <div class="msgs"></div>
+      <div class="tools">
+        <button class="tool primary fill" title="Fill this form in from your profile">Autofill</button>
+        <label class="ai" title="Let Claude answer the questions your profile can't"><input type="checkbox" class="aibox"> AI assist</label>
+      </div>
+      <div class="tools">
+        <button class="tool cover" title="Write a cover letter for this job and put it in the form">Tailor cover letter</button>
+      </div>
       <div class="row">
         <textarea placeholder="Ask about this form&hellip;" rows="1"></textarea>
         <button class="send">Ask</button>
@@ -174,6 +185,10 @@ function createPanel() {
   const msgs = wrap.querySelector(".msgs");
   const input = wrap.querySelector("textarea");
   const send = wrap.querySelector(".send");
+  const fillBtn = wrap.querySelector(".fill");
+  const aiBox = wrap.querySelector(".aibox");
+  const coverBtn = wrap.querySelector(".cover");
+  let learnedList = null;
 
   const store = (() => {
     try {
@@ -185,7 +200,6 @@ function createPanel() {
     }
   })();
   const learn = wrap.querySelector(".learn");
-  const fill = wrap.querySelector(".fill");
 
   // Out of the way, not gone: the panel hides and leaves something to press.
   wrap.querySelector(".close").onclick = () => {
@@ -215,17 +229,15 @@ function createPanel() {
     }
   };
 
-  // AI assist, where it is being used rather than three clicks away on the
-  // options page. It takes effect on the next fill and on the chat; the box
-  // below says so instead of looking broken.
-  const aiOn = wrap.querySelector(".ai-on");
-  const aiNote = wrap.querySelector(".ai-note");
+  // AI assist, next to the button it changes rather than three clicks away
+  // on the options page. Saved as the setting, so it holds on the next form
+  // too, and read fresh by every Autofill press. The chat box needs it, so
+  // it says so instead of looking broken.
   const paintAi = (on) => {
-    aiOn.checked = !!on;
+    aiBox.checked = !!on;
     input.disabled = !on;
     send.disabled = !on;
     input.placeholder = on ? "Ask about this form\u2026" : "Turn AI assist on to ask about this form";
-    aiNote.textContent = on ? "" : "off -- fills from your profile only";
   };
   paintAi(false);
 
@@ -240,15 +252,20 @@ function createPanel() {
     }
   }
 
-  aiOn.onchange = () => {
-    const on = aiOn.checked;
+  aiBox.onchange = () => {
+    const on = aiBox.checked;
     paintAi(on);
     if (!store) return;
     try {
       // Read and write the whole object: every other setting lives in it.
-      store.get(["settings"], (got) => {
+      store.get(["settings", "llm_api_key"], (got) => {
         const settings = { ...((got && got.settings) || {}), use_llm: on };
         store.set({ settings });
+        if (on && !(got && got.llm_api_key)) {
+          api.say("AI assist is on, but there's no API key saved yet -- add one under Options \u2192 AI assist.", "it");
+        } else {
+          api.say(on ? "AI assist on. Press Autofill to use it on this page." : "AI assist off.", "it");
+        }
       });
     } catch (exc) {
       /* not saved; it holds for this page */
@@ -385,6 +402,44 @@ function createPanel() {
       scroll(body);
     },
 
+    // Something kept for next time, shown the moment it is kept -- "it says
+    // it learns" is only believable if you can read what.
+    learn(label, value) {
+      if (!learnedList) {
+        const h = document.createElement("h4");
+        h.textContent = "Learned on this page";
+        learnedList = document.createElement("div");
+        body.append(h, learnedList);
+      }
+      const row = document.createElement("div");
+      row.className = "learned-row";
+      const l = document.createElement("span");
+      l.textContent = label;
+      const arrow = document.createElement("span");
+      arrow.className = "arrow";
+      arrow.textContent = "  \u2192  ";
+      const v = document.createElement("span");
+      v.className = "ok";
+      v.textContent = value;
+      row.append(l, arrow, v);
+      learnedList.appendChild(row);
+      scroll(body);
+    },
+
+    // handler() -> Promise; the button is busy until it settles.
+    onCoverLetter(handler) {
+      coverBtn.onclick = async () => {
+        coverBtn.disabled = true;
+        coverBtn.textContent = "Writing\u2026";
+        try {
+          await handler();
+        } finally {
+          coverBtn.disabled = false;
+          coverBtn.textContent = "Tailor cover letter";
+        }
+      };
+    },
+
     say(text, who) {
       const div = document.createElement("div");
       div.className = `msg ${who}`;
@@ -397,17 +452,17 @@ function createPanel() {
     // handler() -> Promise<void>. Disabled while it runs, so a second press
     // cannot start a fill over the top of the one still going.
     onFill(handler) {
-      fill.onclick = async () => {
-        fill.disabled = true;
-        const was = fill.textContent;
-        fill.textContent = "Filling\u2026";
+      fillBtn.onclick = async () => {
+        fillBtn.disabled = true;
+        const was = fillBtn.textContent;
+        fillBtn.textContent = "Filling\u2026";
         try {
           await handler();
         } catch (exc) {
           api.log(String(exc), "err");
         }
-        fill.textContent = was;
-        fill.disabled = false;
+        fillBtn.textContent = was;
+        fillBtn.disabled = false;
       };
     },
 
