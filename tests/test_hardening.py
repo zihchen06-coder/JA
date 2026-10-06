@@ -1618,7 +1618,7 @@ def test_one_field_blowing_up_does_not_take_the_form_with_it(load):
     page = load(html="""
       <form>
         <label for="a">First Name</label><input id="a" name="first_name">
-        <label for="bad">Why do you want to work here?</label>
+        <label for="bad">What are your career goals?</label>
         <textarea id="bad" name="why"></textarea>
         <label for="c">Email</label><input id="c" name="email">
       </form>""")
@@ -1635,8 +1635,8 @@ def test_one_field_blowing_up_does_not_take_the_form_with_it(load):
     report = _fill(page, PROFILE)
     by_label = {r["label"]: r for r in report["results"]}
 
-    assert by_label["Why do you want to work here?"]["action"] == "error"
-    assert "node is detached" in by_label["Why do you want to work here?"]["detail"]
+    assert by_label["What are your career goals?"]["action"] == "error"
+    assert "node is detached" in by_label["What are your career goals?"]["detail"]
     # The fields on either side of it were still filled -- the one after it
     # is the half that used to be lost.
     assert by_label["First Name"]["action"] == "filled"
@@ -1683,7 +1683,7 @@ def test_a_field_that_blew_up_is_reported_as_a_gap(load):
     """
     page = load(html="""
       <form>
-        <label for="bad">Why do you want to work here?</label>
+        <label for="bad">What are your career goals?</label>
         <textarea id="bad" name="why"></textarea>
       </form>""")
     page.evaluate(
@@ -1691,5 +1691,5 @@ def test_a_field_that_blew_up_is_reported_as_a_gap(load):
     )
     report = _fill(page, PROFILE)
     missed = page.evaluate("(report) => missedFields(report)", report)
-    assert [m["label"] for m in missed] == ["Why do you want to work here?"]
+    assert [m["label"] for m in missed] == ["What are your career goals?"]
     assert missed[0]["action"] == "error"

@@ -97,7 +97,8 @@ function emptyProfile() {
     veteran_status: "", disability_status: "", sexual_orientation: "", transgender_status: "",
     cover_letter_text: "",
     education: [], experience: [], custom_answers: {},
-    resume_file: null, cover_letter_file: null,
+    resume_file: null, cover_letter_file: null, transcript_file: null,
+    never_claim: "",
   };
 }
 
@@ -110,7 +111,7 @@ function emptyProfile() {
 // directions, because restoring only ever writes the keys a file actually
 // carries -- see restoreStores.
 function exportableProfile() {
-  const { resume_file, cover_letter_file, ...rest } = gatherProfile();
+  const { resume_file, cover_letter_file, transcript_file, ...rest } = gatherProfile();
   return rest;
 }
 
@@ -255,6 +256,7 @@ function renderDocSlot(key, elId, inputId) {
 function renderDocs() {
   renderDocSlot("resume_file", "resume-current", "resume-input");
   renderDocSlot("cover_letter_file", "cover-current", "cover-input");
+  renderDocSlot("transcript_file", "transcript-current", "transcript-input");
 }
 
 function buildBoolGrid() {
@@ -634,6 +636,7 @@ function gatherProfile() {
 
   p.resume_file = state.profile.resume_file || null;
   p.cover_letter_file = state.profile.cover_letter_file || null;
+  p.transcript_file = state.profile.transcript_file || null;
 
   return p;
 }
@@ -857,19 +860,27 @@ function initTabs() {
   };
   wireFileInput("resume-input", "resume_file", "resume-current");
   wireFileInput("cover-input", "cover_letter_file", "cover-current");
+  wireFileInput("transcript-input", "transcript_file", "transcript-current");
 
   document.getElementById("import-json-btn").onclick = async () => {
     const status = document.getElementById("import-status");
     const raw = document.getElementById("import-json").value.trim();
     if (!raw) return;
     let data;
+    let fromDataBank = null;
     try {
       data = JSON.parse(raw);
     } catch (e) {
-      status.className = "note";
-      status.style.color = "var(--red)";
-      status.textContent = "That's not valid JSON.";
-      return;
+      if (typeof looksLikeDataBank === "function" && looksLikeDataBank(raw)) {
+        data = parseDataBank(raw);
+        fromDataBank = data._databank;
+        delete data._databank;
+      } else {
+        status.className = "note";
+        status.style.color = "var(--red)";
+        status.textContent = "That's not valid JSON, or a Data Bank doc.";
+        return;
+      }
     }
     if (!data || typeof data !== "object" || Array.isArray(data)) {
       status.className = "note";
@@ -1003,6 +1014,9 @@ function initTabs() {
 
     status.style.color = "var(--green)";
     status.textContent =
+      (fromDataBank
+        ? `Read your Data Bank (${fromDataBank.read.join("; ")}). Skipped: ${fromDataBank.skipped.join("; ") || "nothing"}. `
+        : "") +
       (restored.length ? `Put back ${restored.join(", ")}. ` : "") +
       `Added ${counts.added}, updated ${counts.updated}, left ${counts.skipped} alone` +
       (counts.skipped && !overwrite

@@ -214,6 +214,7 @@ var EEO_KEYWORDS = Object.values(SENSITIVE_GROUPS).flatMap(([, keywords]) => key
 
 var RESUME_KEYWORDS = ["resume", "resume cv", "cv"];
 var COVER_LETTER_KEYWORDS = ["cover letter", "covering letter", "letter of interest"];
+var TRANSCRIPT_KEYWORDS = ["transcript", "transcripts", "academic record"];
 
 var BOOLEAN_FIELDS = new Set([
   "work_authorized", "needs_sponsorship", "willing_to_relocate",

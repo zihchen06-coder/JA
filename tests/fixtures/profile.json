@@ -72,7 +72,8 @@
   ],
   "custom_answers": {
     "why do you want to work": "Because this role matches my skills and interests.",
-    "why do you want to work here": "Because this role matches my skills and interests."
+    "why do you want to work here": "Because this role matches my skills and interests.",
+    "career goals": "Designing structures that end up flying."
   },
   "resume_file": null,
   "cover_letter_file": null

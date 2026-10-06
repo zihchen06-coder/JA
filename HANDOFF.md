@@ -2,7 +2,7 @@
 
 State of this project as of 2026-10-06, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/cool-bell-dwop39`. 278 tests passing, the whole suite green.
+`claude/cool-bell-dwop39`. 300 tests passing, the whole suite green.
 
 **Start from that branch, not from the default branch.** Between Sep 17 and
 Oct 1 three sessions each started from the Sep 17 handoff commit and built
@@ -42,7 +42,25 @@ code with a test, not by prompting:
    aliases are consulted before every other check, so one pointing at
    `hispanic_latino` would bypass the sensitive gate entirely. This was a real
    bug (commit `3721399`) — read that commit before touching learning.
-6. **No real personal data in the repo.** Test fixtures use a fake identity
+6. **The applicant's own writing rules** (from their preferences, the
+   `apply`/`find` browser skills, and their Data Bank doc), all in
+   `writableText` / `isPerJobQuestion` in `filler.js` and tested in
+   `tests/test_applicant_rules.py`:
+   - Nothing naming an item on the profile's `never_claim` list is written:
+     a list loses the item, prose is refused and flagged. The saved answers
+     and Data Bank sections 6-8 came from an old export that still claims
+     things the applicant can't back up (CNC, waterjet, tolerance stack-up,
+     Creo Simulate), which is why this exists.
+   - "Simplify" is never written or selected, anywhere.
+   - No em dashes, en dashes or " -- " in anything written.
+   - "Why this company", "why are you interested", personal summaries and
+     cover letters are never filled from a saved or remembered answer, and
+     never learned. Claude writes them with the job block, or the applicant does.
+   - "How did you hear": the company's own site option first; a text box
+     gets "<Company> careers page"; no site option means left, not guessed.
+   - Preferred name is blank unless required, then the legal first name.
+   - A page saying the job was already applied to is not filled.
+7. **No real personal data in the repo.** Test fixtures use a fake identity
    (`tests/fixtures/profile.json`, "Jamie Rivera"). Real forms captured as
    fixtures have had emails and OAuth state scrubbed.
 
@@ -83,6 +101,10 @@ extension/
                     without a reload. `panel.learn()` lists what was kept live.
   profile_check.js  Options page only: warnings about what a saved value will
                     do on a form.
+  databank.js       Options page only: reads the applicant's "Job Application
+                    Data Bank" Google Doc (pasted, or a Markdown/text download)
+                    into the import box. Sections 3, 4, 5, 9 only: the doc
+                    itself marks experience, skills and saved answers outdated.
   options.js/html   The Options page. 11 tabs. Loads matcher.js too, for
                     bestSelfIdChoice. Also holds the full backup/restore
                     (BACKUP_KEYS / BACKUP_SECRET_KEYS) for moving browsers.

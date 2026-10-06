@@ -57,14 +57,17 @@ EXPECTED = {
     "icims.html": {"filled": 3, "review": 0},
     "icims_profile.html": {"filled": 24, "review": 1},
     "jazzhr_eeo.html": {"filled": 4, "review": 0},
-    "jazzlike.html": {"filled": 7, "review": 0},
+    # The cover letter box is written for each job, never pasted from a saved one.
+    "jazzlike.html": {"filled": 6, "review": 1},
     "ldg_form.html": {"filled": 13, "review": 0},
-    "ldg_real.html": {"filled": 33, "review": 2},
+    # Its cover letter box is written per job, never pasted from a saved one.
+    "ldg_real.html": {"filled": 32, "review": 3},
     "multipage.html": {"filled": 3, "review": 0},
     "routing.html": {"filled": 1, "review": 0},
     "screening.html": {"filled": 11, "review": 2},
     "select2_state.html": {"filled": 1, "review": 0},
-    "test_form.html": {"filled": 12, "review": 1},
+    # "Why do you want to work here?" is written per job, never pasted.
+    "test_form.html": {"filled": 11, "review": 2},
     "unknowns.html": {"filled": 1, "review": 0},
     "workday_questions.html": {"filled": 6, "review": 0},
 }
@@ -601,13 +604,13 @@ def test_a_question_with_no_answer_written_yet_is_left_for_the_applicant(browser
     try:
         page.set_content(
             """<form>
-                 <label for="q">Why do you want to work here?</label>
+                 <label for="q">What are your career goals?</label>
                  <textarea id="q" name="q"></textarea>
                </form>"""
         )
         for js in SCRIPT_FILES:
             page.add_script_tag(path=os.path.join(EXT_DIR, js))
-        profile = {**PROFILE, "custom_answers": {"why do you want to work": ""}}
+        profile = {**PROFILE, "custom_answers": {"career goals": ""}}
         report = page.evaluate("(profile) => fillForm(profile, null)", profile)
         offered = page.evaluate("(report) => llmFieldsFor(report)", report)
         missed = page.evaluate("(report) => missedFields(report)", report)
@@ -615,12 +618,12 @@ def test_a_question_with_no_answer_written_yet_is_left_for_the_applicant(browser
     finally:
         page.close()
 
-    result = _result_for(report, "why do you want to work here")
+    result = _result_for(report, "what are your career goals")
     assert result["action"] == "skipped_no_match"
     assert typed == ""
     # Non-emptiness first: "not filled" is trivially true of an empty offer.
-    assert offered and any("why do you want to work" in f["label"].lower() for f in offered)
-    assert any("why do you want to work" in m["label"].lower() for m in missed)
+    assert offered and any("career goals" in f["label"].lower() for f in offered)
+    assert any("career goals" in m["label"].lower() for m in missed)
 
 
 def test_a_blank_answer_does_not_shadow_a_written_one(browser):
@@ -631,14 +634,14 @@ def test_a_blank_answer_does_not_shadow_a_written_one(browser):
     try:
         page.set_content(
             """<form>
-                 <label for="q">Tell us about yourself, and why do you want to work here?</label>
+                 <label for="q">Tell us about yourself, and what are your career goals?</label>
                  <textarea id="q" name="q"></textarea>
                </form>"""
         )
         for js in SCRIPT_FILES:
             page.add_script_tag(path=os.path.join(EXT_DIR, js))
         profile = {**PROFILE, "custom_answers": {
-            "why do you want to work": "",
+            "career goals": "",
             "tell us about yourself": "Written out properly.",
         }}
         report = page.evaluate("(profile) => fillForm(profile, null)", profile)
@@ -653,7 +656,7 @@ def test_unanswered_questions_are_not_sent_to_the_api(browser):
     though they had nothing to say to that question.
     """
     profile = {**PROFILE, "custom_answers": {
-        "why do you want to work": "",
+        "career goals": "",
         "tell us about yourself": "Written out properly.",
     }}
     sent = _llm_call_with_fields(
@@ -662,7 +665,7 @@ def test_unanswered_questions_are_not_sent_to_the_api(browser):
         profile=profile,
     )
     assert "Written out properly." in sent
-    assert "why do you want to work" not in sent
+    assert "career goals" not in sent
 
 
 def _fill_with(browser, fname, overrides):
@@ -868,21 +871,27 @@ def test_the_job_being_applied_for_is_sent_with_the_fields(browser):
     assert "Mechanical Engineering Intern" not in sent["system"]
 
 
-def test_a_saved_cover_letter_is_used_unless_tailoring_is_on(browser):
+def test_a_saved_cover_letter_is_never_pasted_into_another_application(browser):
+    """A letter is written for one job. Pasted into the next it names the
+    wrong company, or none. With AI assist it goes to Claude with the job in
+    front of it; without, it is left for the applicant.
+    """
     script = """async ({profile, opts}) => {
         const report = await fillForm(profile, null, opts);
         const r = report.results.find((x) => x.canonical === 'cover_letter_text');
-        return {action: r.action, detail: r.detail,
+        const box = document.querySelector(`[data-ja-id="${r.ja_id}"]`);
+        return {action: r.action, value: box ? box.value : null,
                 offered: llmFieldsFor(report).some((f) => f.ja_id === r.ja_id)};
     }"""
     off = _evaluate_on(browser, "ldg_real.html", script, {"profile": PROFILE, "opts": {}})
-    assert off["action"] == "filled"
-    assert off["detail"] == PROFILE["cover_letter_text"]
+    assert PROFILE["cover_letter_text"], "the fixture profile has no saved letter to refuse"
+    assert off["action"] == "needs_review"
+    assert off["value"] == ""
 
-    on = _evaluate_on(browser, "ldg_real.html", script,
-                      {"profile": PROFILE, "opts": {"tailorCoverLetter": True}})
-    assert on["action"] == "skipped_no_data"
-    assert on["offered"] is True  # handed to Claude to write for this job
+    for opts in ({"tailorCoverLetter": True}, {"writeForJob": True}):
+        on = _evaluate_on(browser, "ldg_real.html", script, {"profile": PROFILE, "opts": opts})
+        assert on["action"] == "skipped_no_data", opts
+        assert on["offered"] is True, opts  # handed to Claude to write for this job
 
 
 def test_learned_mappings_cover_a_label_the_aliases_do_not(browser):

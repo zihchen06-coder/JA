@@ -306,9 +306,121 @@ function _isAnswered(value) {
   return value !== null && value !== undefined && value !== "";
 }
 
+// ---------------------------------------------------------------------------
+// What may be written in the applicant's name.
+//
+// Their rules, enforced here rather than hoped for from a prompt, because
+// most of what reaches a text box never went near Claude: saved answers,
+// remembered answers and work-history descriptions are pasted as they are.
+// Those were imported from an old export that predates the applicant
+// deciding what they will and won't claim, so they still say things like
+// "CNC machining" -- a claim they've said they can't back up.
+//
+// - Nothing that names a skill on the profile's never_claim list. A list
+//   (skills, tools) loses the items that do; prose is refused outright and
+//   flagged, because cutting a phrase out of a sentence leaves a sentence
+//   nobody wrote.
+// - Never "Simplify": not in "How did you hear", not anywhere.
+// - No em or en dashes, and no " -- ". Their voice doesn't use them.
+// ---------------------------------------------------------------------------
+
+function neverClaimTerms(profile) {
+  return String((profile && profile.never_claim) || "")
+    .split(/[,;\n]/)
+    .map((t) => normalize(t))
+    .filter(Boolean);
+}
+
+function claimsIn(text, terms) {
+  const norm = ` ${normalize(text)} `;
+  return (terms || []).filter((t) => norm.includes(` ${t} `));
+}
+
+function mentionsSimplify(text) {
+  return /\bsimplify\b/i.test(String(text || ""));
+}
+
+function cleanDashes(text) {
+  return String(text)
+    // A range keeps a plain hyphen: 2024-2025, pages 3-4.
+    .replace(/(\d)\s*[–—]\s*(\d)/g, "$1-$2")
+    .replace(/\s*[–—]\s*/g, ", ")
+    .replace(/\s+--+\s+/g, ", ")
+    .replace(/,\s*([,.;:!?])/g, "$1");
+}
+
+// A run of short items separated by commas or semicolons, rather than
+// sentences: "PTC Creo, AutoCAD, GD&T".
+function _isListLike(text) {
+  const parts = String(text).split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  return parts.length >= 3 && parts.every((p) => p.length <= 40 && !/[.!?]$/.test(p));
+}
+
+// -> { text } safe to write, or { refused } saying why not.
+function writableText(text, profile) {
+  const raw = String(text == null ? "" : text);
+  if (mentionsSimplify(raw)) {
+    return { refused: "Mentions Simplify, which never goes on an application -- answer this one yourself." };
+  }
+  const terms = neverClaimTerms(profile);
+  const hits = claimsIn(raw, terms);
+  if (!hits.length) return { text: cleanDashes(raw) };
+  if (_isListLike(raw)) {
+    const sep = raw.includes(";") ? "; " : ", ";
+    const kept = raw.split(/[,;]/).map((s) => s.trim()).filter((s) => s && !claimsIn(s, terms).length);
+    if (kept.length) return { text: cleanDashes(kept.join(sep)) };
+  }
+  return {
+    refused: `Mentions ${hits.join(", ")}, which you've said not to claim -- write this one yourself.`,
+  };
+}
+
+// Writes text into a box through writableText. Returns true when it landed.
+function _writeGuarded(report, f, label, canonical, text, required, profile) {
+  const checked = writableText(text, profile);
+  if (checked.refused) {
+    _mark(f.ja_id, MARK_REVIEW);
+    addResult(report, label, canonical, "needs_review", checked.refused, required);
+    return false;
+  }
+  const el = _el(f.ja_id);
+  if (!el) {
+    addResult(report, label, canonical, "error", "Field disappeared from the page.", required);
+    return false;
+  }
+  _setNativeValue(el, checked.text);
+  _mark(f.ja_id, MARK_FILLED);
+  addResult(report, label, canonical, "filled", checked.text, required);
+  return true;
+}
+
+// Questions whose answer is about this company. A saved or remembered answer
+// was written for a different one, and "why do you want to work at Boom"
+// pasted onto Varda's form is worse than a blank. Left for the AI pass with
+// the job in front of it, or for the applicant.
+var _PER_JOB_RE = new RegExp(
+  [
+    "why (do|would) you want to (work|join|intern)",
+    "why (are|were) you (interested|applying)",
+    "why (this|our|the) (company|role|position|team|internship|program)",
+    "why (us|here)\\b",
+    "what (interests|excites|attracts|draws) you",
+    "interest(ed)? in (this|our|the) (company|role|position|team|internship|program|opportunity)",
+    "know about (our|this|the) (company|role|position|team|mission)",
+    "know about us",
+    "personal (summary|statement)",
+    "cover letter",
+  ].join("|")
+);
+
+function isPerJobQuestion(label) {
+  return _PER_JOB_RE.test(normalize(label));
+}
+
 function _matchCustomAnswer(label, profile) {
   const normLabel = normalize(label);
   if (!normLabel) return null;
+  if (isPerJobQuestion(label)) return null;
   for (const [keyword, answer] of Object.entries(profile.custom_answers || {})) {
     // A keyword the applicant hasn't answered yet is a prompt to themselves,
     // not an answer -- the Options page seeds the common questions as blank
@@ -332,6 +444,8 @@ function _matchCustomAnswer(label, profile) {
 async function fillForm(profile, creds, opts) {
   const report = makeReport(detectPlatform(location.href));
   report.opts = opts || {};
+  // What writableText needs, for the paths that aren't handed the profile.
+  report.writeRules = { never_claim: (profile && profile.never_claim) || "" };
   const fieldsData = extractFields();
 
   const simpleFields = fieldsData.filter((f) => f.type !== "radio");
@@ -516,11 +630,20 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
       canonical = null;
       refusedAsQuestion = true;
     }
-    if (canonical === "cover_letter_text" && report.opts.tailorCoverLetter) {
-      // One saved cover letter pasted into every application reads worse
-      // than none. Left for the second pass, which knows what job this is.
-      addResult(report, label, canonical, "skipped_no_data",
-        "Left for Claude to write for this job.", required);
+    // One saved cover letter, or one "why do you want to work here", pasted
+    // into every application reads worse than none: it names the wrong
+    // company, or no company. Left for the second pass, which knows what job
+    // this is, or for the applicant when that is off. Dropdowns are exempt --
+    // "How did you hear" options are not prose.
+    if ((canonical === "cover_letter_text" || isPerJobQuestion(label)) && f.tag !== "select") {
+      if (report.opts.writeForJob || report.opts.tailorCoverLetter) {
+        addResult(report, label, canonical, "skipped_no_data",
+          "Left for Claude to write for this job.", required);
+      } else {
+        _mark(f.ja_id, MARK_REVIEW);
+        addResult(report, label, canonical, "needs_review",
+          "Written fresh for each company -- answer this one for this job.", required);
+      }
       return;
     }
     // The machine-name fallback must not undo a label that was refused on
@@ -536,14 +659,7 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
     if (canonical === null) {
       const customAnswer = _matchCustomAnswer(label, profile);
       if (customAnswer !== null && ftype !== "select") {
-        const el = _el(f.ja_id);
-        if (el) {
-          _setNativeValue(el, customAnswer);
-          _mark(f.ja_id, MARK_FILLED);
-          addResult(report, label, "custom_answers", "filled", customAnswer, required);
-        } else {
-          addResult(report, label, "custom_answers", "error", "Field disappeared from the page.", required);
-        }
+        _writeGuarded(report, f, label, "custom_answers", customAnswer, required, profile);
         return;
       }
       // The same question answered on an earlier application. The profile has
@@ -574,9 +690,24 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
       return;
     }
     value = _profileValue(profile, canonical);
+    if (canonical === "how_heard" && (!_isAnswered(value) || mentionsSimplify(value))) {
+      const company = report.opts.company || "";
+      value = f.tag === "select" ? "company website"
+        : company ? `${company} careers page` : "Company careers page";
+    }
   }
 
   value = _scalar(value);
+  // Left blank on purpose: the applicant goes by their legal name. A form
+  // that won't take blank gets that name.
+  if (canonical === "preferred_name" && !_isAnswered(value)) {
+    if (required && _isAnswered(profile.first_name)) {
+      value = profile.first_name;
+    } else {
+      addResult(report, label, canonical, "filled", "Left blank -- you go by your legal name.", required);
+      return;
+    }
+  }
   if (value === null || value === undefined || value === "") {
     // A field the applicant hasn't got is answered, not missing: blank is the
     // right value and there is nothing to flag or count. Still reported, so
@@ -617,6 +748,8 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
         fillValue = normalizeDate(String(value), "%m/%d/%Y");
       } else {
         fillValue = String(value);
+        _writeGuarded(report, f, label, canonical, fillValue, required, profile);
+        return;
       }
       _setNativeValue(el, fillValue);
       _mark(f.ja_id, MARK_FILLED);
@@ -654,7 +787,31 @@ function _isExactChoice(decision, options, value) {
   return normalize(_optionText(options, decision.value)) === normalize(String(value));
 }
 
+// "How did you hear about us": the company's own site, which is where the
+// applicant actually applies from. Never Simplify, and not a job board.
+var _COMPANY_SITE_RE =
+  /\bweb\s?site\b|\bcareers?\s*(page|site|portal|web)|\bcompany\s*(site|page)|\bcorporate\s*site/i;
+
+function _howHeardOption(options) {
+  const real = options.filter((o) => o.value !== "" && o.value !== null && !mentionsSimplify(o.text));
+  const at = real.find((o) => _COMPANY_SITE_RE.test(o.text || ""));
+  return at || null;
+}
+
 function _chooseOption(profile, canonical, value, options) {
+  // Never picked, whatever it was asked to match.
+  options = options.filter((o) => !mentionsSimplify(o.text));
+
+  if (canonical === "how_heard") {
+    const site = _howHeardOption(options);
+    if (site) return { value: site.value, detail: site.text || "" };
+    // No company-site choice. A saved answer that is one of the choices is
+    // still theirs to have given; otherwise it is left, not guessed.
+    const saved = profile && profile.how_heard;
+    const at = saved && !mentionsSimplify(saved) ? bestOption(String(saved), options, 0.8) : null;
+    if (at !== null && at !== undefined) return { value: at, detail: _optionText(options, at) };
+    return { skip: "No company-website choice here -- pick what's true, or leave it if it's optional." };
+  }
   if (BOOLEAN_FIELDS.has(canonical) && typeof value === "boolean") {
     const match = options.find((o) => semanticBool(o.text || "") === value);
     if (!match) return { skip: `No option matched '${value}'.` };
@@ -868,9 +1025,7 @@ async function _fillRemembered(report, f, label, value, required) {
     return;
   }
 
-  _setNativeValue(el, value);
-  _mark(f.ja_id, MARK_FILLED);
-  addResult(report, label, "learned", "filled", value, required);
+  _writeGuarded(report, f, label, "learned", value, required, report.writeRules);
 }
 
 const EXPERIENCE_ATTR = {
@@ -915,6 +1070,11 @@ function _fillExperienceField(profile, report, f, expField, required) {
     fillValue = fillValue.split(",")[0].trim();
   } else if (["start_date", "end_date"].includes(expField)) {
     fillValue = formatMonthYear(fillValue, "%m/%Y");
+  }
+  if (expField === "description") {
+    if (_refuseReadonly(report, f, canonical, label, required)) return;
+    _writeGuarded(report, f, label, canonical, fillValue, required, profile);
+    return;
   }
   _fillText(report, f, canonical, fillValue, required);
 }
@@ -1149,6 +1309,10 @@ function _handleFileField(profile, report, f) {
     canonical = "cover_letter_file";
     fileInfo = profile.cover_letter_file;
     kind = "cover letter";
+  } else if (isTranscriptLabel(label)) {
+    canonical = "transcript_file";
+    fileInfo = profile.transcript_file;
+    kind = "transcript";
   } else {
     addResult(report, label || "file upload", null, "skipped_no_match", "", required);
     return;
@@ -1453,6 +1617,7 @@ async function _applyLlmSelect(f, el, value) {
 }
 
 function _applyLlmRadio(byId, candidate, value) {
+  if (mentionsSimplify(value)) return false;
   const wanted = normalize(value);
   // Only ever one of this group's own options -- the model returns text, and
   // text that isn't one of the choices selects nothing.
@@ -1630,11 +1795,16 @@ async function applyLlmAnswers(report, answers, skipped, profile, opts) {
             applied = true;
           }
         } else if (f.tag === "select") {
-          applied = await _applyLlmSelect(f, el, value);
+          applied = !mentionsSimplify(value) && await _applyLlmSelect(f, el, value);
         } else {
-          _setNativeValue(el, value);
-          _mark(jaId, MARK_FILLED);
-          applied = true;
+          const checked = writableText(value, profile);
+          if (checked.refused) {
+            applied = false;
+          } else {
+            _setNativeValue(el, checked.text);
+            _mark(jaId, MARK_FILLED);
+            applied = true;
+          }
         }
       }
     } catch (exc) {
@@ -1685,6 +1855,8 @@ function _learnableQuestion(f, groupLabel) {
   const label = groupLabel || f.label || "";
   if (!label) return null;
   if (isEscapeHatchLabel(label)) return null;
+  // About one company; see isPerJobQuestion.
+  if (isPerJobQuestion(label)) return null;
   // Answered from the profile every time, never from a remembered value.
   const wide = [label, f.label, f.context].filter(Boolean).join(" ");
   if (sensitiveGroup(wide) || _isConsentLike(wide)) return null;
@@ -2247,6 +2419,9 @@ function learnPageNow(profile) {
 function _keepAnswer(f, value, profile, host, answers, markup, suggestions, skipped) {
   const text = String(value).trim();
   if (!text) return;
+  // Written for this company, so no use at the next one -- not under its
+  // wording, and not under its markup either.
+  if (isPerJobQuestion(f.label || f.group_label || "")) return;
   if (text.length > LEARN_PAGE_MAX_LENGTH) {
     skipped.push(`${f.label || f.name || f.ja_id} (too long to store)`);
     return;

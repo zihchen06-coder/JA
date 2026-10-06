@@ -119,6 +119,28 @@ Rules, most important first:
    Leave it empty for anything you wrote yourself, anything drawn from
    custom_answers, and for cover letters.
 
+9. Voice, for anything you write. Casual, direct and warm, like a real
+   student writing to a real person: plain words, short sentences,
+   contractions are fine. No buzzwords and no stiff phrases ("I am writing
+   to apply", "excited to leverage my skills", "passionate", "thrilled",
+   "dynamic", "synergy"), and don't open with "I am". Never use an em dash,
+   an en dash, or " -- "; use a comma or a new sentence. Be honest about
+   being a student, and never make a project that is still in progress
+   sound finished. Show interest in their work rather than reciting the
+   resume.
+
+10. If the profile has a never_claim list, nothing you write may claim or
+   mention any skill or experience on it, even in passing. Those answers
+   are refused by the extension anyway; leaving them out is what gets the
+   field filled. "Simplify" never appears in any answer, and for "How did
+   you hear about us" the answer is the company's own website or careers
+   page.
+
+11. Questions about this particular company ("why do you want to work
+   here", "why are you interested in this role", a personal summary) are
+   written fresh for the job block every time. Never reuse a saved answer
+   that names or describes a different company.
+
 Return exactly one entry for every field you were given, keyed by its
 ja_id.`;
 
@@ -193,6 +215,7 @@ function _promptProfile(profile, withAnswers) {
   const copy = { ...profile };
   delete copy.resume_file;
   delete copy.cover_letter_file;
+  delete copy.transcript_file;
   for (const field of _SENSITIVE_PROFILE_FIELDS) delete copy[field];
   if (!withAnswers) delete copy.custom_answers;
   // An unanswered keyword says nothing about the applicant, and sending one
@@ -829,11 +852,17 @@ var COVER_LETTER_RULES = `Write a cover letter for this applicant for the job
 given, in the applicant's own first person.
 
 Voice: casual and down to earth, like a real student writing to a real person.
-Plain words and short sentences. No buzzwords or stiff phrases ("I am excited
-to leverage my skills", "passionate", "dynamic", "synergy" and the like).
+Plain words and short sentences, contractions are fine. No buzzwords or stiff
+phrases ("I am writing to apply", "I am excited to leverage my skills",
+"passionate", "thrilled", "dynamic", "synergy" and the like), and don't open
+with "I am". Never use an em dash, an en dash, or " -- ". Few or no
+exclamation points. Show interest in their work rather than reciting the
+resume, and be honest about being a student: a project still in progress is
+described as in progress.
 
 Content: only what the profile and resume actually say. Never invent a job,
-project, skill, tool, number or result. If the posting asks for something
+project, skill, tool, number or result. Never mention anything on the
+profile's never_claim list. If the posting asks for something
 they haven't done, don't claim it; lean on the real things that are closest.
 Name the role and company. Pick the one or two parts of their background that
 fit this job best and say concretely what they did.

@@ -209,6 +209,14 @@ function isResumeLabel(label) {
   return RESUME_KEYWORDS.some((kw) => norm.includes(kw)) && !isCoverLetterLabel(label);
 }
 
+// "Upload your resume and transcript" is the resume's slot: one file goes
+// in one input, and the resume is the one every application needs.
+function isTranscriptLabel(label) {
+  const norm = normalize(label);
+  return TRANSCRIPT_KEYWORDS.some((kw) => norm.includes(kw)) &&
+    !isCoverLetterLabel(label) && !isResumeLabel(label);
+}
+
 function isCoverLetterLabel(label) {
   const norm = normalize(label);
   return COVER_LETTER_KEYWORDS.some((kw) => norm.includes(kw));

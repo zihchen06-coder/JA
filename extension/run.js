@@ -83,6 +83,47 @@ async function _reportWithoutOwnForm() {
   panel.log("Nothing was submitted.", "muted");
 }
 
+// What an applicant-tracking system shows on a job already applied to. Read
+// as text from the page and any same-origin frame -- iCIMS puts it in one.
+var _ALREADY_APPLIED_RE = new RegExp(
+  [
+    "you(?:'|\u2019)?ve already applied",
+    "you have already applied",
+    "already applied (?:to|for) this",
+    "you are currently submitted to this job",
+    "applied on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.? \\d{1,2}",
+  ].join("|"),
+  "i"
+);
+
+function alreadyAppliedNotice(doc = document) {
+  const texts = [];
+  const read = (d) => {
+    try {
+      texts.push(((d.body && d.body.innerText) || "").slice(0, 200000));
+    } catch (exc) {
+      /* cross-origin: not ours to read */
+    }
+  };
+  read(doc);
+  for (const frame of Array.from(doc.querySelectorAll("iframe"))) {
+    try {
+      if (frame.contentDocument) read(frame.contentDocument);
+    } catch (exc) {
+      /* cross-origin */
+    }
+  }
+  for (const text of texts) {
+    const m = text.match(_ALREADY_APPLIED_RE);
+    if (m) return m[0].replace(/\s+/g, " ").trim();
+  }
+  return null;
+}
+
+function _escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
 // The service worker is not always there to receive these: MV3 stops it
 // when idle, a reload from chrome://extensions leaves this page talking to
 // an extension that no longer exists, and either way sendMessage rejects.
@@ -214,9 +255,16 @@ async function _run() {
       /* the settings read at the start still stand */
     }
     const useLlm = !!(settings && settings.use_llm);
+    const job = extractJobContext();
     report = await fillForm(profile, creds, {
       tailorCoverLetter: useLlm && !!(settings && settings.tailor_cover_letter),
       answerSensitive: useLlm && (!settings || settings.route_saved_answers !== false),
+      // "Why this company" and the like go to Claude with the job in front
+      // of it, or to the applicant -- never a saved answer.
+      writeForJob: useLlm,
+      // For "How did you hear": "<Company> careers page". A hostname is not
+      // a company name, so it is left out rather than written.
+      company: /\./.test(job.company || "") ? "" : job.company || "",
     });
 
     // Second pass: hand whatever the rule-based matcher couldn't place to
@@ -225,7 +273,6 @@ async function _run() {
     let claudeFilled = 0;
     let claudeError = null;
     let learnedCount = 0;
-    const job = extractJobContext();
     panel?.log(
       `Filled ${report.results.filter((r) => r.action === "filled").length} from your profile.`,
       "ok"
@@ -415,7 +462,17 @@ async function _run() {
   // filling, Learn this form when the other one already did it and its
   // answers are worth keeping. With no panel there is no button to press,
   // so the fill still runs rather than the click doing nothing at all.
-  if (panel && settings && settings.manual_fill) {
+  // Applying twice to the same job is worse than not applying: it reads as
+  // not paying attention. The page usually says so; when it does, nothing is
+  // filled until the applicant says this really is a different application.
+  const appliedNotice = window.top === window ? alreadyAppliedNotice() : null;
+  if (appliedNotice) {
+    const text =
+      `Looks like you already applied here ("${appliedNotice}"). Nothing filled -- ` +
+      "press Autofill if this is a different application.";
+    if (panel) panel.log(text, "warn");
+    else _showBanner(`<strong>Already applied?</strong><br>${_escapeHtml(text)}`, "warn");
+  } else if (panel && settings && settings.manual_fill) {
     panel.log(
       "Ready, and nothing touched yet. Press Autofill to fill this in, or " +
         "Learn this form to keep what is already here.",
@@ -520,6 +577,12 @@ async function _run() {
     );
     const el = target && _el(target.ja_id);
     const note = job.title ? "" : " (I couldn't read the job off this page, so it's general.)";
+    // The same rules as anything else written in their name.
+    const checked = writableText(reply.letter, profile);
+    if (checked.refused) {
+      return panel.say(`${checked.refused}\n\nHere's the draft so you can fix it:\n\n${cleanDashes(reply.letter)}`, "it");
+    }
+    reply.letter = checked.text;
     if (el) {
       _setNativeValue(el, reply.letter);
       _mark(target.ja_id, MARK_FILLED);

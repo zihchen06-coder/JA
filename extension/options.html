@@ -220,9 +220,15 @@
           <input type="file" id="cover-input" accept=".pdf,.doc,.docx,.rtf,.txt">
           <div class="row" id="cover-current" style="margin-top:4px;"></div>
         </div>
+        <div class="field">
+          <label>Transcript (unofficial is fine)</label>
+          <input type="file" id="transcript-input" accept=".pdf,.doc,.docx">
+          <div class="row" id="transcript-current" style="margin-top:4px;"></div>
+        </div>
       </div>
 
-      <h3>Import a backup, or education, work history &amp; answers</h3>
+      <h3>Import your Data Bank, a backup, or education, work history &amp; answers</h3>
+      <p class="note"><strong>Data Bank:</strong> open your Job Application Data Bank doc, select all, copy, and paste it below (a Markdown or text download works too). Contact info, education, the screening answers and self-ID come across; experience, skills and saved answers don't, since your resume is the source for those.</p>
       <p class="note">Takes a whole backup file (from &ldquo;Export everything&rdquo; at the bottom of this page) or a snippet shaped like <code>{"education": [...], "experience": [...], "custom_answers": {...}}</code> — ask Claude to generate one from your resume or your own written answers. Profile values land in the boxes on the other tabs for you to check and <strong>Save</strong>; the learned labels, remembered answers, gaps and application history in a backup are put back straight away. Anything already here is matched up rather than duplicated (schools by school+degree, jobs by company+title, answers by keyword) and left as-is unless you tick Replace existing. Nothing a file doesn&rsquo;t mention is touched — your resume, saved logins and API key survive any import.</p>
       <textarea id="import-json" rows="4" placeholder='{"education": [...], "experience": [...], "custom_answers": {"why do you want to work": "..."}}'></textarea>
       <div class="row" style="margin-top:8px;">
@@ -245,7 +251,12 @@
     </div>
 
     <div class="ptab" id="pt-answers">
-      <p class="note">Free-text answers for recurring open-ended questions. Matched when the keyword appears anywhere in a question's label.</p>
+      <div class="field" style="margin-bottom:16px;">
+        <label>Never claim</label>
+        <textarea data-f="never_claim" rows="2" placeholder="Skills and experience you don't have, comma-separated"></textarea>
+        <p class="note">Nothing that names one of these is ever written into a form: a saved answer, a remembered one, a work-history description, or anything Claude writes. A skills list just loses those items; a sentence that mentions one is left for you to write. Also sent to Claude so it doesn't write them in the first place. Separately, "Simplify" never goes into any answer, and em dashes are replaced.</p>
+      </div>
+      <p class="note">Free-text answers for recurring open-ended questions. Matched when the keyword appears anywhere in a question's label. "Why this company", "why are you interested", personal summaries and cover letters are never filled from here: they are written for each job.</p>
       <div id="answers-list"></div>
       <div class="row" style="gap:10px;">
         <button class="ghost" id="add-answer" type="button">+ Add answer</button>
@@ -477,6 +488,8 @@
      profile's own self-ID choices. -->
 <script src="matcher.js"></script>
 <script src="profile_check.js"></script>
+<!-- Reading a Job Application Data Bank doc pasted into the import box. -->
+<script src="databank.js"></script>
 <script src="options.js"></script>
 </body>
 </html>
