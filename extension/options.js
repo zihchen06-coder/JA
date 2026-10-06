@@ -101,6 +101,121 @@ function emptyProfile() {
   };
 }
 
+// What goes in a backup file.
+//
+// Documents are megabytes of base64 and credentials are saved site
+// passwords: neither belongs in a file meant to be read, pasted into a
+// chat, or mailed to yourself, and the API key is a secret that was never
+// part of the profile in the first place. Leaving them out is safe in both
+// directions, because restoring only ever writes the keys a file actually
+// carries -- see restoreStores.
+function exportableProfile() {
+  const { resume_file, cover_letter_file, ...rest } = gatherProfile();
+  return rest;
+}
+
+// Everything the tool knows that isn't a document, a password or a key: the
+// profile as it is on this page, the settings, and the four stores that
+// accumulate as applications get filled.
+var BACKUP_VERSION = 1;
+
+function fullBackup() {
+  return {
+    ja_backup: BACKUP_VERSION,
+    exported_at: new Date().toISOString(),
+    profile: exportableProfile(),
+    settings: state.settings || {},
+    learned_aliases: state.learned || {},
+    learned_answers: state.learnedAnswers || {},
+    learned_fields: state.learnedFields || {},
+    profile_suggestions: state.suggestions || {},
+    misses: state.misses || {},
+    applications: state.applications || [],
+  };
+}
+
+// Extension storage is finite and a hand-edited file has no size to speak
+// of, so the stores that grow with use are trimmed the same way the service
+// worker trims them (llm.js, capLearned). The two runtimes share no file,
+// which is why this is written twice; the limits belong to the store.
+function _capMap(map, limit) {
+  const entries = Object.entries(_asObject(map));
+  return Object.fromEntries(entries.length > limit ? entries.slice(entries.length - limit) : entries);
+}
+
+// The stores behind the Learned, Gaps and Applications tabs, put back from
+// a backup file.
+//
+// Two rules hold whatever the file says. Only keys the file actually
+// carries are written, so a backup that predates a store -- or one with a
+// section deleted by hand -- adds rather than wipes, and the documents,
+// saved logins and API key it never contained are untouched. And the
+// learned aliases go through sanitizeLearnedAliases first: a mapping is
+// consulted before every other check when a label is matched, so one
+// pointing at a self-identification field would be a way past the gate
+// that exists to stop exactly that. A file is not a reason to relax it.
+async function restoreStores(data, profile) {
+  const writes = {};
+  const restored = [];
+
+  if (data.learned_aliases !== undefined) {
+    const clean = sanitizeLearnedAliases(_asObject(data.learned_aliases), profile);
+    const dropped = Object.keys(_asObject(data.learned_aliases)).length - Object.keys(clean).length;
+    writes.learned_aliases = _capMap(clean, 1000);
+    restored.push(
+      `${Object.keys(writes.learned_aliases).length} learned label(s)` +
+        (dropped ? `, ${dropped} refused as unsafe to learn` : "")
+    );
+  }
+  if (data.learned_answers !== undefined) {
+    writes.learned_answers = _capMap(data.learned_answers, 2000);
+    restored.push(`${Object.keys(writes.learned_answers).length} remembered answer(s)`);
+  }
+  if (data.learned_fields !== undefined) {
+    writes.learned_fields = _capMap(data.learned_fields, 2000);
+    restored.push(`${Object.keys(writes.learned_fields).length} answer(s) filed by markup`);
+  }
+  if (data.profile_suggestions !== undefined) {
+    writes.profile_suggestions = _capMap(data.profile_suggestions, 200);
+    restored.push(`${Object.keys(writes.profile_suggestions).length} suggestion(s)`);
+  }
+  if (data.misses !== undefined) {
+    writes.misses = _capMap(data.misses, 2000);
+    restored.push(`${Object.keys(writes.misses).length} gap(s)`);
+  }
+  if (data.applications !== undefined) {
+    writes.applications = _asList(data.applications).slice(-500);
+    restored.push(`${writes.applications.length} application(s)`);
+  }
+  if (data.settings !== undefined) {
+    writes.settings = _asObject(data.settings);
+    restored.push("your settings");
+  }
+
+  if (!Object.keys(writes).length) return [];
+  await chrome.storage.local.set(writes);
+  if (writes.learned_aliases) state.learned = writes.learned_aliases;
+  if (writes.learned_answers) state.learnedAnswers = writes.learned_answers;
+  if (writes.learned_fields) state.learnedFields = writes.learned_fields;
+  if (writes.profile_suggestions) state.suggestions = writes.profile_suggestions;
+  if (writes.misses) state.misses = writes.misses;
+  if (writes.applications) state.applications = writes.applications;
+  if (writes.settings) state.settings = writes.settings;
+  return restored;
+}
+
+function _download(name, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -335,6 +450,59 @@ function renderCredentials() {
   }
 }
 
+// Stored data outlives the code that wrote it, and an import can put
+// anything in `profile`. One section throwing used to leave every section
+// after it unrendered -- the bug in commit 423eecb, which is how the
+// options page ended up drawing nothing at all. Each section is drawn on
+// its own now, and one that fails says so where it would have been.
+function _section(what, fn) {
+  try {
+    fn();
+  } catch (exc) {
+    const status = document.getElementById("status");
+    if (status) {
+      status.className = "err";
+      status.textContent = `${what} couldn't be drawn (${exc && exc.message ? exc.message : exc}). ` +
+        "The rest of this page still works.";
+    }
+  }
+}
+
+function _asList(value) {
+  return Array.isArray(value) ? value.filter((v) => v && typeof v === "object") : [];
+}
+
+function _asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function renderSettings() {
+  const on = (id, value) => (document.getElementById(id).checked = !!value);
+  const s = state.settings || {};
+  on("s-auto-accounts", s.auto_create_accounts);
+  on("s-use-llm", s.use_llm);
+  on("s-tailor-cover", s.tailor_cover_letter);
+  // These are on unless they were turned off, so an absent key is on.
+  on("s-route-saved", s.route_saved_answers !== false);
+  on("s-watch-learn", s.watch_and_learn !== false);
+  on("s-show-panel", s.show_panel !== false);
+  on("s-auto-fill", s.auto_fill_known_sites !== false);
+  on("s-manual-fill", s.manual_fill);
+}
+
+// The tabs a restored backup refills. Not the profile boxes: those hold
+// what the import just put there, waiting to be reviewed and saved, and
+// redrawing them from storage would throw that away.
+function renderStoredTabs() {
+  _section("Learned labels", renderLearned);
+  _section("Learned answers", renderLearnedAnswers);
+  _section("Learned by markup", renderLearnedFields);
+  _section("Profile suggestions", renderSuggestions);
+  _section("Gaps", renderMisses);
+  _section("Applications", renderApplications);
+  _section("Settings", renderSettings);
+}
+
 function loadIntoForm() {
   const p = state.profile;
   document.querySelectorAll("input[data-f], textarea[data-f]").forEach((el) => {
@@ -352,37 +520,86 @@ function loadIntoForm() {
   // to be told the profile just landed.
   repaintSegmented();
 
-  const eduList = document.getElementById("edu-list");
-  eduList.innerHTML = "";
-  (p.education || []).forEach((e) => eduList.appendChild(eduRow(e)));
+  _section("Education", () => {
+    const eduList = document.getElementById("edu-list");
+    eduList.innerHTML = "";
+    _asList(p.education).forEach((e) => eduList.appendChild(eduRow(e)));
+  });
 
-  const expList = document.getElementById("exp-list");
-  expList.innerHTML = "";
-  (p.experience || []).forEach((e) => expList.appendChild(expRow(e)));
+  _section("Experience", () => {
+    const expList = document.getElementById("exp-list");
+    expList.innerHTML = "";
+    _asList(p.experience).forEach((e) => expList.appendChild(expRow(e)));
+  });
 
-  const answersList = document.getElementById("answers-list");
-  answersList.innerHTML = "";
-  Object.entries(p.custom_answers || {}).forEach(([k, v]) => answersList.appendChild(answerRow(k, v)));
+  _section("Answers", () => {
+    const answersList = document.getElementById("answers-list");
+    answersList.innerHTML = "";
+    Object.entries(_asObject(p.custom_answers)).forEach(([k, v]) =>
+      answersList.appendChild(answerRow(k, typeof v === "string" ? v : ""))
+    );
+  });
 
-  document.getElementById("s-auto-accounts").checked = !!(state.settings && state.settings.auto_create_accounts);
-  document.getElementById("s-use-llm").checked = !!(state.settings && state.settings.use_llm);
-  document.getElementById("s-tailor-cover").checked = !!(state.settings && state.settings.tailor_cover_letter);
-  document.getElementById("s-route-saved").checked =
-    !state.settings || state.settings.route_saved_answers !== false;
-  document.getElementById("s-watch-learn").checked = !state.settings || state.settings.watch_and_learn !== false;
-  document.getElementById("s-show-panel").checked = !state.settings || state.settings.show_panel !== false;
-  document.getElementById("s-auto-fill").checked =
-    !state.settings || state.settings.auto_fill_known_sites !== false;
-  document.getElementById("s-manual-fill").checked = !!(state.settings && state.settings.manual_fill);
-  renderLearned();
-  renderLearnedAnswers();
-  renderSuggestions();
-  renderMisses();
-  renderApplications();
+  _section("Settings", renderSettings);
+  _section("Learned labels", renderLearned);
+  _section("Learned answers", renderLearnedAnswers);
+  _section("Learned by markup", renderLearnedFields);
+  _section("Profile suggestions", renderSuggestions);
+  _section("Gaps", renderMisses);
+  _section("Applications", renderApplications);
   document.getElementById("llm-key").value = state.llmApiKey || "";
 
-  renderCredentials();
-  renderDocs();
+  _section("Saved logins", renderCredentials);
+  _section("Documents", renderDocs);
+  renderWarnings();
+}
+
+// What a form will do with what is on this page. Drawn from the boxes as
+// they are now rather than from what was last saved, so an offered fix and
+// a hand edit both show their effect immediately.
+function renderWarnings() {
+  const holder = document.getElementById("profile-warnings");
+  if (!holder) return;
+  holder.innerHTML = "";
+  let findings = [];
+  try {
+    findings = profileWarnings(gatherProfile()) || [];
+  } catch (exc) {
+    // A broken check must not take the Options page down with it -- every
+    // other tab on this page is how the applicant edits their data.
+    findings = [];
+  }
+  for (const finding of findings) {
+    const row = document.createElement("div");
+    row.className = `chk ${finding.level}`;
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.textContent = "\u25cf";
+    const msg = document.createElement("span");
+    msg.className = "msg";
+    msg.textContent = finding.message;
+    row.appendChild(dot);
+    row.appendChild(msg);
+    if (finding.fix) {
+      const input = document.querySelector(`[data-f="${finding.field}"]`);
+      if (input) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ghost";
+        btn.textContent = `Use "${finding.fix}"`;
+        btn.onclick = () => {
+          input.value = finding.fix;
+          // Not saved yet, deliberately: the applicant still presses Save,
+          // so a fix they didn't want is one page reload away from undone.
+          renderWarnings();
+          document.getElementById("status").textContent = "Changed -- press Save to keep it.";
+          document.getElementById("status").className = "";
+        };
+        row.appendChild(btn);
+      }
+    }
+    holder.appendChild(row);
+  }
 }
 
 function gatherProfile() {
@@ -450,6 +667,7 @@ async function save() {
   status.className = "ok";
   status.textContent = "Saved.";
   setTimeout(() => (status.textContent = ""), 2500);
+  renderWarnings();
 }
 
 function initTabs() {
@@ -471,11 +689,12 @@ function initTabs() {
 
   const stored = await chrome.storage.local.get([
     "profile", "settings", "credentials", "llm_api_key", "learned_aliases",
-    "learned_answers", "misses", "applications", "profile_suggestions",
+    "learned_answers", "learned_fields", "misses", "applications", "profile_suggestions",
   ]);
   state.llmApiKey = stored.llm_api_key || "";
   state.learned = stored.learned_aliases || {};
   state.learnedAnswers = stored.learned_answers || {};
+  state.learnedFields = stored.learned_fields || {};
   state.misses = stored.misses || {};
   state.suggestions = stored.profile_suggestions || {};
   state.applications = stored.applications || [];
@@ -507,19 +726,11 @@ function initTabs() {
   document.getElementById("save").onclick = save;
 
   document.getElementById("export-profile").onclick = () => {
-    // Documents are large base64 blobs not worth pasting into a chat, and
-    // credentials are security-sensitive -- neither belongs in an export
-    // meant to be shared as plain text.
-    const { resume_file, cover_letter_file, ...exportable } = gatherProfile();
-    const blob = new Blob([JSON.stringify(exportable, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "ja-profile-backup.json";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    _download("ja-profile-backup.json", exportableProfile());
+  };
+
+  document.getElementById("export-all").onclick = () => {
+    _download("ja-backup.json", fullBackup());
   };
 
   // Everything this browser holds, so the same setup can be picked up on
@@ -528,7 +739,7 @@ function initTabs() {
   // chat -- this is a device move and has to carry the resume with it.
   const BACKUP_KEYS = [
     "profile", "settings", "learned_aliases", "learned_answers",
-    "misses", "applications", "profile_suggestions", "migrations",
+    "learned_fields", "misses", "applications", "profile_suggestions", "migrations",
   ];
   // Kept out unless asked for. The file is ordinary text on a disk: anything
   // that can read the file can read a saved site password out of it.
@@ -586,17 +797,29 @@ function initTabs() {
     }
     // A profile export, a resume, or somebody's unrelated JSON would
     // otherwise be written straight into storage as if it belonged.
-    if (!payload || payload.ja_backup !== 1 || !payload.data || typeof payload.data !== "object") {
+    if (!payload || payload.ja_backup !== 1) {
       backupStatus("That isn't a backup file from this extension.", "err");
       return;
     }
+    // "Export everything" writes the stores at the top level rather than
+    // under `data`. Both are this extension's own backups.
+    const source = payload.data && typeof payload.data === "object" ? payload.data : payload;
 
     const known = [...BACKUP_KEYS, ...BACKUP_SECRET_KEYS];
     const restoring = {};
     for (const key of known) {
-      if (Object.prototype.hasOwnProperty.call(payload.data, key)) {
-        restoring[key] = payload.data[key];
+      if (Object.prototype.hasOwnProperty.call(source, key)) {
+        restoring[key] = source[key];
       }
+    }
+    // A learned mapping is consulted before the sensitive gate, so a file
+    // carrying one that points at a self-ID field would walk straight past
+    // it. The same filter every other way in goes through.
+    if (restoring.learned_aliases !== undefined) {
+      restoring.learned_aliases = sanitizeLearnedAliases(
+        _asObject(restoring.learned_aliases),
+        _asObject(restoring.profile || state.profile)
+      );
     }
     const names = Object.keys(restoring);
     if (!names.length) {
@@ -635,7 +858,7 @@ function initTabs() {
   wireFileInput("resume-input", "resume_file", "resume-current");
   wireFileInput("cover-input", "cover_letter_file", "cover-current");
 
-  document.getElementById("import-json-btn").onclick = () => {
+  document.getElementById("import-json-btn").onclick = async () => {
     const status = document.getElementById("import-status");
     const raw = document.getElementById("import-json").value.trim();
     if (!raw) return;
@@ -647,6 +870,17 @@ function initTabs() {
       status.style.color = "var(--red)";
       status.textContent = "That's not valid JSON.";
       return;
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      status.className = "note";
+      status.style.color = "var(--red)";
+      status.textContent = "That's JSON, but not a profile or a backup -- expected an object.";
+      return;
+    }
+    // The "Move to another browser" file nests everything under `data`;
+    // "Export everything" writes it at the top level. Same stores either way.
+    if (data.ja_backup && data.data && typeof data.data === "object" && !Array.isArray(data.data)) {
+      data = data.data;
     }
     const overwrite = document.getElementById("import-overwrite").checked;
     const eduList = document.getElementById("edu-list");
@@ -687,23 +921,43 @@ function initTabs() {
 
     const norm = (s) => (s ?? "").toString().trim().toLowerCase();
 
-    // Scalar profile fields, as a resume parse returns them. Same rule as
-    // everything else here: a box you have already filled in is left alone
-    // unless you asked for it to be replaced.
-    Object.entries(data.fields || {}).forEach(([key, value]) => {
+    // Scalar profile fields. Three shapes arrive here and all three are
+    // the same thing: a resume parse returns them under `fields`, a full
+    // backup puts them under `profile`, and this tool's own profile export
+    // writes them at the top level -- which used to be read by nothing at
+    // all, so exporting a profile and importing it straight back silently
+    // dropped every name, address and date on it.
+    const scalars = {
+      ..._asObject(data.profile),
+      ..._asObject(data.fields),
+      ...(data.ja_backup ? {} : _asObject(data)),
+    };
+    Object.entries(scalars).forEach(([key, value]) => {
+      if (value === null || value === undefined) return;
+      // The lists and the answers are handled below, by identity rather
+      // than by overwriting a box.
+      if (typeof value === "object") return;
+
       const input = document.querySelector(`[data-f="${CSS.escape(key)}"]`);
-      if (!input || !value) return;
-      if (input.value.trim() && !overwrite) {
+      const boolInput = input ? null : document.querySelector(`[data-bool="${CSS.escape(key)}"]`);
+      const el = input || boolInput;
+      if (!el) return;
+      // A yes/no answer arrives as a boolean, and `false` is an answer --
+      // reading it as "nothing here" is how "no" turned into "unset".
+      const text = boolInput ? (value === true ? "true" : value === false ? "false" : "") : String(value);
+      if (!text) return;
+
+      if (el.value.trim() && !overwrite) {
         counts.skipped++;
         return;
       }
-      if (input.value.trim()) counts.updated++;
+      if (el.value.trim()) counts.updated++;
       else counts.added++;
-      input.value = value;
+      el.value = text;
     });
 
-    importList(data.education || [], eduList, eduRow, (e) => `${norm(e.school)}|${norm(e.degree)}`);
-    importList(data.experience || [], expList, expRow, (e) => `${norm(e.company)}|${norm(e.title)}`);
+    importList(_asList(scalars.education), eduList, eduRow, (e) => `${norm(e.school)}|${norm(e.degree)}`);
+    importList(_asList(scalars.experience), expList, expRow, (e) => `${norm(e.company)}|${norm(e.title)}`);
 
     // Keyed by keyword -> that row's answer textarea, so a row already
     // added (e.g. by "+ Add top 50 common questions") but still blank gets
@@ -716,7 +970,7 @@ function initTabs() {
       const kwInput = row.querySelector('[data-k="keyword"]');
       if (kwInput) existingRows.set(norm(kwInput.value), row.querySelector('[data-k="answer"]'));
     });
-    Object.entries(data.custom_answers || {}).forEach(([keyword, answer]) => {
+    Object.entries(_asObject(scalars.custom_answers)).forEach(([keyword, answer]) => {
       const existingAnswerEl = existingRows.get(norm(keyword));
       if (!existingAnswerEl) {
         answersList.appendChild(answerRow(keyword, answer));
@@ -733,8 +987,23 @@ function initTabs() {
       counts.skipped++;
     });
 
+    // The stores are written straight to storage: unlike the profile, they
+    // have no boxes on this page to review before saving.
+    let restored = [];
+    try {
+      restored = await restoreStores(data, gatherProfile());
+    } catch (exc) {
+      status.style.color = "var(--red)";
+      status.textContent = `The profile part imported, but the saved history didn't: ${exc && exc.message ? exc.message : exc}`;
+      document.getElementById("import-json").value = "";
+      return;
+    }
+    if (restored.length) renderStoredTabs();
+    renderWarnings();
+
     status.style.color = "var(--green)";
     status.textContent =
+      (restored.length ? `Put back ${restored.join(", ")}. ` : "") +
       `Added ${counts.added}, updated ${counts.updated}, left ${counts.skipped} alone` +
       (counts.skipped && !overwrite
         ? " (already had content -- tick \"Replace existing\" to overwrite those too)."
@@ -766,6 +1035,35 @@ function renderLearned() {
       delete state.learned[label];
       await chrome.storage.local.set({ learned_aliases: state.learned });
       renderLearned();
+    };
+    list.appendChild(row);
+  }
+}
+
+// Answers filed under what the page calls the control rather than under the
+// question's wording. Shown with the label they were learned beside, since
+// "phone number -> Mobile" is readable and the raw handle often isn't.
+function renderLearnedFields() {
+  const list = document.getElementById("fields-learned-list");
+  const empty = document.getElementById("fields-learned-empty");
+  const entries = Object.entries(state.learnedFields || {}).sort();
+  list.innerHTML = "";
+  empty.style.display = entries.length ? "none" : "";
+
+  for (const [signature, entry] of entries) {
+    const held = entry && typeof entry === "object" ? entry : { answer: String(entry || "") };
+    const row = document.createElement("div");
+    row.className = "cred-row";
+    row.style.marginBottom = "8px";
+    row.innerHTML = `
+      <input readonly value="${esc(signature)}">
+      <input readonly value="${esc(held.answer || "")}">
+      <span class="note">${esc(held.label || held.host || "")}</span>
+      <button class="danger" type="button">Forget</button>`;
+    row.querySelector("button").onclick = async () => {
+      delete state.learnedFields[signature];
+      await chrome.storage.local.set({ learned_fields: state.learnedFields });
+      renderLearnedFields();
     };
     list.appendChild(row);
   }

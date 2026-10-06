@@ -160,6 +160,10 @@ def _match_custom_answer(label: str, profile: Profile) -> str | None:
     if not norm_label:
         return None
     for keyword, answer in profile.custom_answers.items():
+        # A keyword with no answer behind it is a prompt to the applicant,
+        # not an answer: matching one blanked the box and reported it filled.
+        if answer is None or answer == "":
+            continue
         if matcher.normalize(keyword) in norm_label:
             return answer
     return None

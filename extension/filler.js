@@ -310,6 +310,13 @@ function _matchCustomAnswer(label, profile) {
   const normLabel = normalize(label);
   if (!normLabel) return null;
   for (const [keyword, answer] of Object.entries(profile.custom_answers || {})) {
+    // A keyword the applicant hasn't answered yet is a prompt to themselves,
+    // not an answer -- the Options page seeds the common questions as blank
+    // rows on purpose. Treating one as a match typed an empty string into
+    // the box, reported it filled, and by settling the field hid the
+    // question from both the AI pass and the gaps log: the three things
+    // that exist to catch a question this profile can't answer.
+    if (!_isAnswered(answer)) continue;
     if (normLabel.includes(normalize(keyword))) return answer;
   }
   return null;
@@ -342,7 +349,16 @@ async function fillForm(profile, creds, opts) {
   }
   for (const group of byName.values()) {
     const before = report.results.length;
-    _handleRadioGroup(profile, report, group);
+    try {
+      _handleRadioGroup(profile, report, group);
+    } catch (exc) {
+      report.results.length = before;
+      const head = group[0];
+      addResult(report, head.group_label || head.label || head.name || head.ja_id, null, "error",
+        `Couldn't answer this one (${_errorText(exc)}) -- check it yourself.`,
+        group.some((o) => o.required));
+      _markSafely(head.ja_id, MARK_REVIEW);
+    }
     // A radio group's result belongs to the whole group; the first option's
     // id stands for it, the same handle llmFieldsFor offers it under.
     for (let i = before; i < report.results.length; i++) {
@@ -353,13 +369,47 @@ async function fillForm(profile, creds, opts) {
   return report;
 }
 
-// Stamps every result a field produced with that field's id, without
-// threading it through the thirty-odd addResult call sites below.
+// One field is not the form. A page whose script replaces a node mid-fill,
+// a custom widget that throws when it is opened, a select whose options are
+// gone by the time they are read -- any of those used to abort fillForm
+// itself, so every field after the bad one was never attempted and run.js,
+// which had nothing catching it either, showed no panel and no banner at
+// all. The fill would simply appear not to have happened.
+//
+// So each field is isolated: whatever it throws becomes that field's own
+// outcome, marked on the page and counted in the gaps log like any other
+// question left unanswered, and the next field is tried.
 async function _handleSimpleField(profile, report, f, creds) {
   const before = report.results.length;
-  await _handleSimpleFieldInner(profile, report, f, creds);
+  try {
+    await _handleSimpleFieldInner(profile, report, f, creds);
+  } catch (exc) {
+    // A field gets one outcome, so anything recorded before the throw is
+    // replaced: it described a fill that did not finish.
+    report.results.length = before;
+    addResult(report, f.label || f.name || f.ja_id, null, "error",
+      `Couldn't fill this one (${_errorText(exc)}) -- check it yourself.`, !!f.required);
+    _markSafely(f.ja_id, MARK_REVIEW);
+  }
   for (let i = before; i < report.results.length; i++) {
     report.results[i].ja_id = f.ja_id;
+  }
+}
+
+// Long stack traces and DOM objects both read as noise in the panel, and an
+// exception is not guaranteed to be an Error at all.
+function _errorText(exc) {
+  const text = exc && exc.message ? String(exc.message) : String(exc);
+  return text.length > 120 ? `${text.slice(0, 117)}...` : text;
+}
+
+// Drawing the outline is itself a DOM call on a page that just proved it
+// can misbehave, and failing to draw it must not lose the result.
+function _markSafely(jaId, color) {
+  try {
+    _mark(jaId, color);
+  } catch (exc) {
+    /* the result still stands; only the outline is missing */
   }
 }
 
@@ -493,6 +543,19 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
       const remembered = learnedAnswerFor(label);
       if (remembered !== null) {
         await _fillRemembered(report, f, label, remembered, required);
+        return;
+      }
+      // Same question, rewritten. The label is what a form changes between
+      // one posting and the next; what the page calls the control in its
+      // own markup is what stays, so an answer learned here is found again
+      // through that even when nothing about the wording matches.
+      //
+      // Deliberately after the gate above, never instead of it: a markup
+      // match says "this is the same box", which is no reason at all to
+      // answer a question that has to be answered by hand.
+      const byMarkup = learnedFieldAnswer(f);
+      if (byMarkup !== null) {
+        _fillRemembered(report, f, label, byMarkup, required);
         return;
       }
       if (required) _mark(f.ja_id, MARK_BLANK);
@@ -1142,7 +1205,7 @@ function _handleRadioGroup(profile, report, options) {
 
   const canonical = matchField(groupLabel);
   if (!BOOLEAN_FIELDS.has(canonical)) {
-    const remembered = learnedAnswerFor(groupLabel);
+    const remembered = learnedAnswerFor(groupLabel) ?? learnedFieldAnswer(options[0]);
     if (remembered !== null) {
       const idx = bestChoice(remembered, options.map((o) => o.label || ""));
       const el = idx === null ? null : _el(options[idx].ja_id);
@@ -1376,20 +1439,11 @@ function _applyLlmRadio(byId, candidate, value) {
 // worth remembering: next time it matches for free, instantly, with no API
 // call. Only mappings are learned, never the prose -- a cover letter or an
 // essay answer written for one job has no business being reused at another.
-// Fields a label must never be learned as.
-//
-// Prose, because it belongs to the job it was written for. And every
-// sensitive one, for a much sharper reason: a learned alias is consulted
-// before anything else in matchField, so a label learned as
-// "hispanic_latino" would pull that answer into any field carrying that
-// label -- and the self-ID gate would never fire, because it keys off the
-// question's own wording and "Did you graduate?" isn't sensitive. A mapping
-// is a shortcut past every check, so it may only ever point somewhere
-// ordinary.
-var _UNLEARNABLE_FIELDS = new Set([
-  "custom_answers", "cover_letter_text",
-  ...SELF_ID_FIELDS, ...CONSENT_FIELDS, "criminal_history",
-]);
+// Fields a label must never be learned as, and the sweep that drops any
+// mapping pointing at one. Both live in field_aliases.js now: the Options
+// page has to apply the same rule to an imported backup, and it does not
+// load this file. One definition, so the two can't drift.
+var _UNLEARNABLE_FIELDS = UNLEARNABLE_FIELDS;
 
 // A remembered mapping is only as good as the evidence for it. "No" appears
 // verbatim in several profile fields at once, so matching an answer's text
@@ -1411,19 +1465,6 @@ function _uniqueProfileFieldFor(profile, value) {
     found = key;
   }
   return found;
-}
-
-// Existing stores were written before the rules above, so they hold mappings
-// that would now be refused. Dropped on load rather than left to keep doing
-// damage quietly.
-function sanitizeLearnedAliases(map, profile) {
-  const clean = {};
-  for (const [label, field] of Object.entries(map || {})) {
-    if (_UNLEARNABLE_FIELDS.has(field)) continue;
-    if (profile && !Object.prototype.hasOwnProperty.call(profile, field)) continue;
-    clean[label] = field;
-  }
-  return clean;
 }
 
 function learnFromAnswers(report, answers, profile, sources) {
@@ -1625,11 +1666,6 @@ function _learnableQuestion(f, groupLabel) {
 function watchForCorrections(report, onLearn, onSuggest) {
   const fields = report.fields || [];
   const byId = new Map(fields.map((f) => [f.ja_id, f]));
-  const filled = new Set(
-    report.results.filter((r) => r.action === "filled" || r.action === "already_filled")
-      .map((r) => r.ja_id)
-  );
-
   const radioGroups = new Map();
   for (const f of fields) {
     if (f.type !== "radio") continue;
@@ -1706,8 +1742,14 @@ function watchForCorrections(report, onLearn, onSuggest) {
   };
 
   for (const f of fields) {
-    if (f.type === "radio" || filled.has(f.ja_id)) continue;
+    if (f.type === "radio") continue;
     if (["file", "password", "hidden"].includes(f.type)) continue;
+    // Fields this fill answered are watched too. Correcting a wrong answer
+    // is the clearest statement there is of what the right one was, and
+    // skipping them meant the one case where the tool was demonstrably
+    // wrong taught it nothing. What the profile owns is still left alone,
+    // by _learnableQuestion below -- that answer belongs in the profile,
+    // and is edited there.
     const el = _el(f.ja_id);
     if (!el) continue;
 
@@ -1747,7 +1789,6 @@ function watchForCorrections(report, onLearn, onSuggest) {
 
   for (const group of radioGroups.values()) {
     const head = group[0];
-    if (filled.has(head.ja_id)) continue;
     const question = group.find((o) => o.group_label)?.group_label || "";
     const asked = { ...head, label: group.map((o) => o.label || "").join(" ") };
 
@@ -2093,3 +2134,127 @@ function learnFromPrefilled(report, profile) {
 
   return { answers, suggestions };
 }
+
+// ---------------------------------------------------------------------------
+// Learn this page, on purpose.
+//
+// The watcher set up after a fill can only watch what was on the page when
+// the fill ran. That misses most of what there is to learn: the next step of
+// a Workday application, anything a single-page form renders after the fact,
+// every field whose node the page replaced, and every page reached without
+// clicking the icon at all. It also steps over any field the fill answered,
+// so correcting a wrong answer taught it nothing.
+//
+// This reads the page as it stands, right now, and keeps every answer on it.
+// An explicit action, so it can be less cautious than the watcher: a long
+// answer is kept, because a person asking for this page to be learned means
+// the answer in the box, however long it is.
+// ---------------------------------------------------------------------------
+
+// Long enough for a paragraph answer, short of storing an essay in a store
+// meant for answers that recur. A cover letter belongs in the profile.
+var LEARN_PAGE_MAX_LENGTH = 2000;
+
+function _currentAnswer(f) {
+  const el = _el(f.ja_id);
+  if (!el) return "";
+  if (f.type === "checkbox") return el.checked ? "Yes" : "";
+  if (f.type === "radio") return el.checked ? (f.label || el.value || "Yes") : "";
+  return _readableValue(el, f);
+}
+
+// Every answer on the page as it stands: what to remember by label, what to
+// remember by markup, and what belongs in the profile instead.
+//
+// `profile` is used only to leave alone what it already answers -- a value
+// this tool filled from the profile is its own output, and storing it here
+// would freeze today's profile into an answer store that never hears about
+// tomorrow's edit.
+function learnPageNow(profile) {
+  const fields = extractFields();
+  const answers = {};
+  const markup = {};
+  const suggestions = {};
+  const host = location.hostname;
+  const skipped = [];
+
+  // A radio group answers once, through whichever option is selected.
+  const seenGroups = new Set();
+
+  for (const f of fields) {
+    if (["file", "password", "hidden"].includes(f.type)) continue;
+    if (f.type === "radio") {
+      const key = f.name || f.ja_id;
+      if (seenGroups.has(key)) continue;
+      if (!_el(f.ja_id)) continue;
+      const group = fields.filter((o) => o.type === "radio" && (o.name || o.ja_id) === key);
+      const chosen = group.find((o) => (_el(o.ja_id) || {}).checked);
+      if (!chosen) continue;
+      seenGroups.add(key);
+      _keepAnswer(
+        { ...chosen, label: chosen.group_label || group[0].group_label || chosen.label },
+        chosen.label || "",
+        profile, host, answers, markup, suggestions, skipped
+      );
+      continue;
+    }
+    const value = _currentAnswer(f);
+    if (!value) continue;
+    _keepAnswer(f, value, profile, host, answers, markup, suggestions, skipped);
+  }
+
+  return { answers, markup, suggestions, skipped };
+}
+
+function _keepAnswer(f, value, profile, host, answers, markup, suggestions, skipped) {
+  const text = String(value).trim();
+  if (!text) return;
+  if (text.length > LEARN_PAGE_MAX_LENGTH) {
+    skipped.push(`${f.label || f.name || f.ja_id} (too long to store)`);
+    return;
+  }
+
+  // Same rule as everywhere else, and the reason this can be a button at
+  // all: a self-identification, criminal-history or consent answer is kept
+  // in the profile field for that question, where the gate that reads what
+  // is being asked still applies to it. Never under a label or a markup
+  // handle, either of which is consulted before that gate.
+  const sensitive = _sensitiveCanonicalFor(f, f.group_label || "");
+  if (sensitive) {
+    const held = profile ? profile[sensitive] : null;
+    if (held === null || held === undefined || held === "") suggestions[sensitive] = text;
+    return;
+  }
+
+  // A question the profile owns. Its answer is not remembered here in
+  // either form -- storing it would freeze today's profile into a store
+  // that never hears about tomorrow's edit, and the fill puts this value
+  // in from the profile anyway. Blank in the profile, it is a gap worth
+  // offering to fill.
+  const canonical = matchField(f.label || f.group_label || "");
+  if (canonical && !_UNLEARNABLE_FIELDS.has(canonical)) {
+    if (EDUCATION_FIELDS.has(canonical)) return;
+    const existing = profile ? profile[canonical] : null;
+    if (existing === null || existing === undefined || existing === "") {
+      suggestions[canonical] = text;
+    }
+    return;
+  }
+
+  const label = _learnableQuestion(f, f.group_label || "");
+  if (label) answers[normalize(label)] = text;
+
+  // The markup handles, whether or not the label was usable -- a field with
+  // no label at all, or one whose wording changes with every posting, is
+  // exactly what these are for.
+  const signatures = fieldSignatures(f);
+  for (const signature of signatures) {
+    markup[signature] = { answer: text, label: f.label || f.group_label || "", host, at: Date.now() };
+  }
+
+  // Nothing identifies this question next time: no usable label, and a name
+  // and id that are generated. Worth saying so rather than dropping it in
+  // silence, because from the outside it looks the same as being learned.
+  if (!label && !signatures.length) skipped.push(f.label || f.name || f.ja_id || "an unlabelled field");
+}
+

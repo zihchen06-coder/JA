@@ -27,8 +27,7 @@ import os
 
 import pytest
 
-playwright_sync_api = pytest.importorskip("playwright.sync_api")
-sync_playwright = playwright_sync_api.sync_playwright
+pytest.importorskip("playwright.sync_api")
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(_HERE)
@@ -71,24 +70,11 @@ EXPECTED = {
 }
 
 
-@pytest.fixture(scope="module")
-def browser():
-    # Mirrors the CLI's own --browser-path / JA_BROWSER_PATH convention
-    # (see ja/browser.py) -- unset, this launches Playwright's normal
-    # installed Chromium, exactly what `playwright install chromium` sets
-    # up; only set it if you need to point at a specific binary.
-    browser_path = os.environ.get("JA_BROWSER_PATH") or None
-    with sync_playwright() as p:
-        kwargs = {"headless": True}
-        if browser_path:
-            kwargs["executable_path"] = browser_path
-        try:
-            b = p.chromium.launch(**kwargs)
-        except Exception as exc:  # noqa: BLE001
-            pytest.skip(f"Chromium not available for Playwright ({exc}). Run: playwright install chromium")
-            return
-        yield b
-        b.close()
+# The browser comes from conftest.py's session-scoped fixture. This module
+# used to start a second Playwright of its own, which worked only because it
+# happened to run before every other browser test: two sync Playwrights live
+# at once is an error, so a new test file sorting ahead of this one broke
+# every test below with "Sync API inside the asyncio loop".
 
 
 def _fill(browser, fname: str) -> dict:
@@ -549,7 +535,7 @@ def test_llm_blank_values_become_skips_not_empty_fills(browser):
     assert out["result"]["skipped"] == {"ja-1": "sensitive"}
 
 
-def _llm_call_with_fields(browser, fields):
+def _llm_call_with_fields(browser, fields, profile=None):
     page = browser.new_page()
     try:
         page.goto("about:blank")
@@ -570,7 +556,7 @@ def _llm_call_with_fields(browser, fields):
                 });
                 return sent.system[0].text;
             }""",
-            {"profile": PROFILE, "fields": fields},
+            {"profile": profile or PROFILE, "fields": fields},
         )
     finally:
         page.close()
@@ -601,6 +587,82 @@ def test_written_answers_are_only_sent_when_a_page_asks_an_open_question(browser
         {"ja_id": "ja-1", "label": "Why do you want to work here?", "type": "text", "options": []},
     ])
     assert answer_text in with_question
+
+
+def test_a_question_with_no_answer_written_yet_is_left_for_the_applicant(browser):
+    """The Answers tab seeds the common questions as blank rows for the
+    applicant to fill in, so a blank one is the normal state of a question
+    they haven't got to yet -- not an answer of "". Matching one used to type
+    nothing into the box and report it filled, which also settled the field:
+    the AI pass was never offered it and the gaps log never counted it, so
+    the question they most needed to notice was the one made invisible.
+    """
+    page = browser.new_page()
+    try:
+        page.set_content(
+            """<form>
+                 <label for="q">Why do you want to work here?</label>
+                 <textarea id="q" name="q"></textarea>
+               </form>"""
+        )
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        profile = {**PROFILE, "custom_answers": {"why do you want to work": ""}}
+        report = page.evaluate("(profile) => fillForm(profile, null)", profile)
+        offered = page.evaluate("(report) => llmFieldsFor(report)", report)
+        missed = page.evaluate("(report) => missedFields(report)", report)
+        typed = page.evaluate("() => document.getElementById('q').value")
+    finally:
+        page.close()
+
+    result = _result_for(report, "why do you want to work here")
+    assert result["action"] == "skipped_no_match"
+    assert typed == ""
+    # Non-emptiness first: "not filled" is trivially true of an empty offer.
+    assert offered and any("why do you want to work" in f["label"].lower() for f in offered)
+    assert any("why do you want to work" in m["label"].lower() for m in missed)
+
+
+def test_a_blank_answer_does_not_shadow_a_written_one(browser):
+    """Two keywords can match the same label, and the blank one is often
+    first -- the Answers tab lists them in the order they were added.
+    """
+    page = browser.new_page()
+    try:
+        page.set_content(
+            """<form>
+                 <label for="q">Tell us about yourself, and why do you want to work here?</label>
+                 <textarea id="q" name="q"></textarea>
+               </form>"""
+        )
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        profile = {**PROFILE, "custom_answers": {
+            "why do you want to work": "",
+            "tell us about yourself": "Written out properly.",
+        }}
+        report = page.evaluate("(profile) => fillForm(profile, null)", profile)
+    finally:
+        page.close()
+
+    assert _result_for(report, "tell us about yourself")["detail"] == "Written out properly."
+
+
+def test_unanswered_questions_are_not_sent_to_the_api(browser):
+    """An empty answer tells Claude nothing about the applicant, and reads as
+    though they had nothing to say to that question.
+    """
+    profile = {**PROFILE, "custom_answers": {
+        "why do you want to work": "",
+        "tell us about yourself": "Written out properly.",
+    }}
+    sent = _llm_call_with_fields(
+        browser,
+        [{"ja_id": "ja-1", "label": "Tell us about yourself", "type": "textarea", "options": []}],
+        profile=profile,
+    )
+    assert "Written out properly." in sent
+    assert "why do you want to work" not in sent
 
 
 def _fill_with(browser, fname, overrides):
@@ -1337,14 +1399,57 @@ def test_what_a_form_could_not_answer_is_recorded(browser):
         assert m["key"] and m["action"] and "type" in m
 
 
-def test_the_docx_reader_gets_the_text_out(browser):
+# The text Word would have laid down for the fake identity, in the markup it
+# actually emits: a run carries its properties, a tab is its own element, and
+# an ampersand arrives as an entity. docxText strips all of that back out.
+_DOCX_BODY = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+    "<w:body>"
+    "<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Jamie Rivera</w:t></w:r></w:p>"
+    "<w:p><w:r><w:t>Test Engineer at Test Industries</w:t></w:r>"
+    "<w:r><w:tab/></w:r><w:r><w:t>2021 to Present</w:t></w:r></w:p>"
+    "<w:p><w:r><w:t>B.S. Engineering, State University &amp; Co</w:t></w:r></w:p>"
+    "</w:body></w:document>"
+)
+
+def _docx_bytes(compression):
+    """A .docx is a ZIP of XML parts, so the test can lay one down itself.
+
+    It used to read tests/fixtures/sample_resume.docx, which the `*.docx`
+    line in .gitignore -- there to keep the applicant's real resume out of
+    the repo -- had quietly kept out of every commit, so the test could only
+    ever pass on the machine it was written on. Building the file here keeps
+    that rule intact and costs only what a frozen sample was worth: this is
+    Word's structure and markup rather than a file Word itself wrote.
+    """
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression) as z:
+        # Written in Word's order, so word/document.xml is not the first
+        # entry -- walking past the ones before it is half of what docxText
+        # does, and a single-entry file would never exercise it.
+        z.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        z.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
+        z.writestr("word/document.xml", _DOCX_BODY)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("compression", ["deflated", "stored"])
+def test_the_docx_reader_gets_the_text_out(browser, compression):
     """The applicant's resume is a .docx, and a Word file is a ZIP whose
     word/document.xml holds the text -- readable here without a library
-    because Chrome can inflate a raw deflate stream itself.
+    because Chrome can inflate a raw deflate stream itself. Stored entries
+    have no deflate stream to inflate, and a zip writer is free to use them
+    for a part this small, so both paths are worth holding down.
     """
-    with open(os.path.join(FIXTURES_DIR, "sample_resume.docx"), "rb") as f:
-        import base64
-        b64 = base64.b64encode(f.read()).decode()
+    import base64
+    import zipfile
+
+    method = zipfile.ZIP_DEFLATED if compression == "deflated" else zipfile.ZIP_STORED
+    b64 = base64.b64encode(_docx_bytes(method)).decode()
 
     page = browser.new_page()
     try:
@@ -1367,6 +1472,10 @@ def test_the_docx_reader_gets_the_text_out(browser):
     assert "Test Engineer at Test Industries" in text
     # XML entities come back as the characters they stand for.
     assert "State University & Co" in text
+    # A paragraph ends a line and a tab survives as one, so a resume's
+    # layout still reads as a resume once the markup is gone.
+    assert "Test Engineer at Test Industries\t2021 to Present" in text
+    assert text.splitlines()[0] == "Jamie Rivera"
 
 
 def test_it_learns_from_another_extension_filling_the_same_form(browser):
