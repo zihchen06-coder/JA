@@ -185,7 +185,13 @@ var SENSITIVE_GROUPS = {
     [
       "gender", "sex", "race", "ethnicity", "veteran", "disability",
       "disabilities", "sexual orientation", "transgender", "self identif",
-      "pronoun", "hispanic", "latino", "military service", "protected",
+      "pronoun", "hispanic", "latino", "military service",
+      // "protected" on its own is not an EEO signal. 8 U.S.C. 1324b calls a
+      // work-authorised applicant a "protected individual", so every
+      // "Are you a U.S. Person?" question read as a self-ID question and
+      // was flagged forever. The EEO term is the two words together, and
+      // "veteran" above already catches it on its own.
+      "protected veteran",
       "date of birth", "national origin",
     ],
   ],
@@ -213,6 +219,13 @@ var BOOLEAN_FIELDS = new Set([
   "willing_overtime_varied_schedule", "has_reliable_transportation",
   "bound_by_noncompete", "criminal_history", "sms_consent", "consent_general",
 ]);
+
+// Fields this applicant hasn't got. An empty profile field is normally a gap
+// worth filling, which is why the Gaps tab counts one -- but these are not
+// gaps, they are the answer, and counting them put 18 occurrences of two
+// fields that will never be filled at the top of a 250-occurrence list.
+// Nothing is typed into them and nothing is reported about them.
+var NOT_APPLICABLE_FIELDS = new Set(["middle_name", "address_line2"]);
 
 var EDUCATION_FIELDS = new Set(["school", "degree", "field_of_study", "graduation_year"]);
 

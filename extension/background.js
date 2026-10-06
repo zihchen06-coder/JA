@@ -35,13 +35,70 @@ function isKnownAts(url) {
   }
 }
 
-async function runFill(tabId) {
+// Changing a default only reaches an install that has never opened Options:
+// saving there writes every setting explicitly, so an existing install holds
+// `false` for these and would go on behaving the old way after an update.
+// This carries such an install over, once. It records that it ran, so a
+// setting deliberately turned off afterwards is never turned back on.
+const DEFAULTS_MIGRATION = "defaults_on_v1";
+
+async function applyDefaultsOnce() {
+  const stored = await chrome.storage.local.get(["settings", "llm_api_key", "migrations"]);
+  const migrations = stored.migrations || {};
+  if (migrations[DEFAULTS_MIGRATION]) return;
+
+  const settings = { ...(stored.settings || {}) };
+  settings.auto_fill_known_sites = true;
+  settings.route_saved_answers = true;
+  // The AI pass spends money on a paid API, so it follows the key rather than
+  // a default: on once one is saved, left alone when there isn't one, where
+  // turning it on would only put "No API key saved." on every page.
+  if (stored.llm_api_key) settings.use_llm = true;
+
+  migrations[DEFAULTS_MIGRATION] = Date.now();
+  await chrome.storage.local.set({ settings, migrations });
+}
+
+// Fires on first install and on every update, which is when a pulled change
+// to these defaults needs to reach a browser that already has the extension.
+chrome.runtime.onInstalled.addListener(() => {
+  applyDefaultsOnce().catch((exc) =>
+    console.error("Job Application Autofill: could not apply defaults.", exc)
+  );
+});
+
+async function runFill(tabId, viaClick) {
   resetTally(tabId);
   chrome.action.setBadgeText({ tabId, text: "" });
+
+  // Pressing the icon and getting nothing at all is the worst answer this
+  // can give, and it was the usual one on any page whose form sits in an
+  // embedded frame: run.js bails in a frame with no fields, the top frame
+  // of such a page often has none, and the panel only ever draws there.
+  // A click says so, so the top frame knows to speak up either way.
+  if (viaClick) {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        globalThis.__JA_VIA_CLICK = true;
+      },
+    });
+  }
+
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
     files: SCRIPT_FILES,
   });
+
+  // What every frame between them managed, back to the one that can show it.
+  if (viaClick) {
+    setTimeout(() => {
+      const t = tally.get(tabId) || { filled: 0, review: 0, blank: 0 };
+      chrome.tabs
+        .sendMessage(tabId, { type: "ja-tally", ...t }, { frameId: 0 })
+        .catch(() => {});
+    }, 1500);
+  }
 }
 
 // A multi-page application is the normal case on Workday and iCIMS -- five
@@ -53,7 +110,7 @@ const lastFilled = new Map();
 chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
   if (info.status !== "complete" || !tab.url || !isKnownAts(tab.url)) return;
   const { settings } = await chrome.storage.local.get(["settings"]);
-  if (!settings || !settings.auto_fill_known_sites) return;
+  if (settings && settings.auto_fill_known_sites === false) return;
   // Workday rewrites the URL as you move through the flow without a reload,
   // and a reload of the same page shouldn't fill twice over.
   if (lastFilled.get(tabId) === tab.url) return;
@@ -73,7 +130,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     // application in an iframe. Injecting only the top frame does nothing at
     // all on those pages -- the form is in a child frame.
     lastFilled.set(tab.id, tab.url);
-    await runFill(tab.id);
+    await runFill(tab.id, true);
   } catch (exc) {
     console.error("Job Application Autofill: could not run on this page.", exc);
   }
@@ -113,6 +170,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const { llm_api_key: apiKey } = await chrome.storage.local.get(["llm_api_key"]);
         sendResponse(await resolveWithClaude({ ...message.request, apiKey }));
+      } catch (exc) {
+        sendResponse({ error: String(exc) });
+      }
+    })();
+    return true;
+  }
+
+  if (message?.type === "ja-learn-map") {
+    (async () => {
+      try {
+        const { llm_api_key: apiKey } = await chrome.storage.local.get(["llm_api_key"]);
+        sendResponse(await mapLabelsWithClaude({ ...message.request, apiKey }));
       } catch (exc) {
         sendResponse({ error: String(exc) });
       }
@@ -195,7 +264,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       const { learned_answers: existing } = await chrome.storage.local.get(["learned_answers"]);
       await chrome.storage.local.set({
-        learned_answers: capLearned({ ...(existing || {}), ...message.answers }),
+        learned_answers: capLearned(mergeLearnedAnswers(existing, message.answers)),
       });
     })();
     return;

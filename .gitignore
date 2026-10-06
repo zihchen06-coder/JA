@@ -10,5 +10,8 @@ urls.txt
 documents/
 *.pdf
 *.docx
+# ...except the Word file the docx reader's test needs. It holds the fake
+# Jamie Rivera identity, same as the other fixtures.
+!tests/fixtures/*.docx
 settings.json
 credentials.json

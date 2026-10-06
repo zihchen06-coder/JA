@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>iCIMS questionnaire</title>
+<!--
+  A Boeing conflict-of-interest questionnaire from a real iCIMS application,
+  markup as it came off the page (questions 3-5 and the hidden dependent
+  blocks of 2 dropped for length; what is here is verbatim).
+
+  This is how iCIMS builds every custom form, and none of it could be read:
+
+  1. The word naming a radio option is a bare text node *after* the input,
+     with no <label> anywhere -- so every option came back with no label at
+     all and nothing could tell the Yes radio from the No one. The form was
+     unanswerable for want of two words.
+  2. The question is the text of the table cell, and question 1 spends three
+     bullet lists qualifying it. Over 300 characters, containerQuestion gave
+     up, and groupLabelFor fell to the nearest preceding text -- the last
+     bullet. Every option of question 1 read as asking "An employee of a
+     Boeing subsidiary;".
+  3. Question 6 is a textarea after a bare text node. nearestPrecedingText
+     only walks previousElementSibling, so it had no label either.
+
+  None of these can be answered from a profile -- they are about this
+  company -- so what matters is that they can be read, learned from once,
+  and filled from then on.
+-->
+<table style="border: 1px solid #000000;" border="0" width="100%" cellspacing="0" cellpadding="5"><tbody><tr><td style="font-size: 13px;" colspan="6">1. Do your current job duties involve Boeing under any of the following conditions?<ul><li>Test (e.g., test pilot), acceptance, inspections, safety rulings, or approval of Boeing products or services;</li><li>Audits, investigations, or litigation; or</li></ul><strong>NOTE:</strong> You may answer "No" if you are currently:<ul><li>An employee of a Boeing subsidiary;</li></ul><span class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_RadioGroup iCIMS_Forms_QQ1 iCIMS_Forms_RequiredField"><input type="radio" id="icims_f_Q1_yes" name="icims_f_Q1" value="yes" aria-required="true" i_required="true"></span>&nbsp;&nbsp;Yes&nbsp;&nbsp;&nbsp;<span class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_RadioGroup iCIMS_Forms_QQ1 iCIMS_Forms_RequiredField"><input type="radio" id="icims_f_Q1_no" name="icims_f_Q1" value="no" aria-required="true" i_required="true"></span>&nbsp;&nbsp;No<div id="grpContainer_Q1_dep" class="mceContainer" style="display: none;"><table><tbody><tr><td><strong>If you checked "Yes", please provide a full explanation. </strong><br><textarea id="icims_f_Q1_Explain" name="icims_f_Q1_Explain" cols="40" rows="10" i_required="true"></textarea></td></tr></tbody></table></div></td></tr><tr><td style="font-size: 13px;" colspan="6">2. Have you ever been employed by the U.S. Government (federal, state, county, or local, including publicly funded institutions) in either a civilian or military capacity? <br><span class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_RadioGroup iCIMS_Forms_QQ2 iCIMS_Forms_RequiredField"><input type="radio" id="icims_f_Q2_yes" name="icims_f_Q2" value="yes" i_required="true"></span>&nbsp;&nbsp;Yes&nbsp;&nbsp;&nbsp;<span class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_RadioGroup iCIMS_Forms_QQ2 iCIMS_Forms_RequiredField"><input type="radio" id="icims_f_Q2_no" name="icims_f_Q2" value="no" i_required="true"></span>&nbsp;&nbsp;No</td></tr><tr><td style="font-size: 13px;" colspan="6">6. Describe how you found out about this job. For example, did you receive a referral or are you responding to an advertisement or a call from a recruiter? <br><textarea id="icims_f_Q6" name="icims_f_Q6" cols="40" rows="10" i_required="true"></textarea></td></tr><tr><td style="font-size: 13px; text-align: center;" colspan="6"><span class="iCIMS_Forms_Global customFieldContainer iCIMS_Forms_Checkbox iCIMS_Forms_QSignature iCIMS_Forms_RequiredField"><input type="checkbox" id="icims_f_Signature" name="icims_f_Signature" value="1" aria-label="Signature" i_required="true"></span>&nbsp;<strong>Signature</strong><br>(checking the checkbox above is equivalent to a handwritten signature)</td></tr></tbody></table>

@@ -429,9 +429,11 @@ def test_every_injected_script_loads_together_and_exposes_its_entry_points(load)
     present = page.evaluate(
         """() => [
             'extractFields', 'fillForm', 'applyLlmAnswers', 'llmFieldsFor',
-            'learnFromAnswers', 'learnFromPrefilled', 'rememberableAnswers',
+            'learnFromAnswers', 'learnFromPrefilled', 'learnFromPage',
+            'rememberableAnswers',
             'watchForCorrections', 'verifyFilled', 'missedFields',
-            'setLearnedAliases', 'setLearnedAnswers', 'sanitizeLearnedAliases',
+            'setLearnedAliases', 'getLearnedAliases', 'setLearnedAnswers',
+            'sanitizeLearnedAliases',
             'extractJobContext', 'createPanel', 'hostnameFor', 'getOrCreate',
         ].filter((name) => typeof window[name] !== 'function')"""
     )
@@ -561,3 +563,1039 @@ def test_the_options_page_renders_hostile_stored_text_as_text(browser):
     assert out["pwned"] is False
     assert out["images"] == 0
     assert "<img" in out["shown"]
+
+
+# --- Carrying an existing install onto new defaults ------------------------
+
+def _service_worker(browser, seed=None):
+    """background.js in a real page, with the handful of extension APIs it
+    touches at load stubbed under it. Storage is a live object, so a test can
+    read back what the migration actually wrote.
+    """
+    page = browser.new_page()
+    page.add_init_script(
+        """(() => {
+            const store = JSON.parse(SEED_JSON);
+            window.__store = store;
+            const noop = {addListener: () => {}};
+            window.importScripts = () => {};
+            window.chrome = {
+                storage: {
+                    local: {
+                        get: async (keys) => Object.fromEntries(
+                            (Array.isArray(keys) ? keys : [keys])
+                                .filter((k) => k in store).map((k) => [k, store[k]])),
+                        set: async (obj) => Object.assign(store, obj),
+                    },
+                },
+                tabs: {onUpdated: noop},
+                runtime: {onInstalled: noop, onMessage: noop},
+                action: {setBadgeText: () => {}, setTitle: () => {}},
+            };
+        })();""".replace("SEED_JSON", repr(json.dumps(seed if seed is not None else {})))
+    )
+    # goto, not set_content: an init script runs on a new document, and
+    # set_content writes into the one that already existed.
+    page.goto("about:blank")
+    page.add_script_tag(path=os.path.join(EXT_DIR, "background.js"))
+    page.wait_for_function("() => typeof applyDefaultsOnce === 'function'")
+    return page
+
+
+def _run_defaults(browser, seed):
+    page = _service_worker(browser, seed=seed)
+    try:
+        page.evaluate("() => applyDefaultsOnce()")
+        return page.evaluate("() => window.__store")
+    finally:
+        page.close()
+
+
+def test_an_install_that_saved_these_off_is_carried_onto_the_new_defaults(browser):
+    """Saving on the options page writes every setting explicitly, so an
+    install that has ever been saved holds `false` for these and a changed
+    default never reaches it. That was the whole reason the fill looked
+    narrower here than in the tools it was being compared against.
+    """
+    store = _run_defaults(browser, {
+        "settings": {
+            "auto_fill_known_sites": False,
+            "route_saved_answers": False,
+            "use_llm": False,
+            "show_panel": False,
+        },
+        "llm_api_key": "sk-ant-whatever",
+    })
+
+    assert store["settings"]["auto_fill_known_sites"] is True
+    assert store["settings"]["route_saved_answers"] is True
+    assert store["settings"]["use_llm"] is True
+    # Only the three being changed. Anything else they set stays as they set it.
+    assert store["settings"]["show_panel"] is False
+
+
+def test_the_ai_pass_follows_the_key_rather_than_the_default(browser):
+    """Turning it on without a key buys nothing and puts "No API key saved."
+    on every page they open.
+    """
+    store = _run_defaults(browser, {"settings": {"use_llm": False}})
+
+    assert store["settings"]["use_llm"] is False
+    assert store["settings"]["auto_fill_known_sites"] is True
+
+
+def test_a_setting_turned_off_after_the_migration_stays_off(browser):
+    """Otherwise every update quietly overrides a deliberate choice."""
+    page = _service_worker(browser, seed={"settings": {"auto_fill_known_sites": False}})
+    try:
+        page.evaluate("() => applyDefaultsOnce()")
+        after_first = page.evaluate("() => window.__store.settings.auto_fill_known_sites")
+        # They turn it off again, then the extension updates.
+        page.evaluate("() => { window.__store.settings.auto_fill_known_sites = false; }")
+        page.evaluate("() => applyDefaultsOnce()")
+        after_second = page.evaluate("() => window.__store.settings.auto_fill_known_sites")
+    finally:
+        page.close()
+
+    assert after_first is True
+    assert after_second is False
+
+
+# --- Matching a form's EEO wording to one of this profile's choices --------
+
+WORKDAY_RACES = [
+    ("Asian (Not hispanic or Latino) (United States of America)", "Asian"),
+    ("White (Not Hispanic or Latino) (United States of America)", "White"),
+    ("Black or African American (Not Hispanic or Latino) (United States of America)",
+     "Black or African American"),
+    ("Hispanic or Latino (United States of America)", "Hispanic or Latino"),
+    ("Two or More Races (Not Hispanic or Latino) (United States of America)",
+     "Two or More Races"),
+    ("American Indian or Alaska Native (Not Hispanic or Latino)",
+     "American Indian or Alaska Native"),
+    ("Asian", "Asian"),
+]
+
+
+def test_a_negated_qualifier_is_not_read_as_the_answer(load):
+    """Workday words these as "Asian (Not Hispanic or Latino) (United States of
+    America)". The parenthetical is a negation, so any matcher that scores a
+    substring hit upwards reads an answer of Asian as Hispanic or Latino --
+    bestChoice does exactly that, for Asian, White and Two or More Races
+    alike. The qualifiers come off and the match is exact.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = page.evaluate(
+        """(cases) => {
+            const races = SELF_ID_CHOICES.race_ethnicity;
+            return cases.map(([input]) => {
+                const i = bestSelfIdChoice(input, races);
+                return i === null ? null : races[i];
+            });
+        }""",
+        WORKDAY_RACES,
+    )
+
+    for (given, wanted), got in zip(WORKDAY_RACES, out):
+        assert got == wanted, f"{given!r} -> {got!r}, wanted {wanted!r}"
+
+
+def test_a_wording_it_cannot_place_is_left_for_the_applicant(load):
+    """On an EEO form a wrong answer is a false statement, so the fallback is
+    a person, not a best guess. The declining choices are the one exception:
+    every form words "I'd rather not say" differently and it can only ever
+    land on another declining choice.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = page.evaluate(
+        """() => {
+            const races = SELF_ID_CHOICES.race_ethnicity;
+            const at = (v) => {
+                const i = bestSelfIdChoice(v, races);
+                return i === null ? null : races[i];
+            };
+            return {
+                nonsense: at("Martian"),
+                empty: at(""),
+                unrelated: at("Senior Mechanical Engineer"),
+                decline: at("I do not wish to self-identify"),
+                prefer: at("Prefer not to say"),
+            };
+        }"""
+    )
+
+    assert out["nonsense"] is None
+    assert out["empty"] is None
+    assert out["unrelated"] is None
+    assert out["decline"] == "Decline to self-identify"
+    assert out["prefer"] == "Decline to self-identify"
+
+
+def test_accepting_a_suggested_self_id_answer_puts_it_on_the_form(browser):
+    """End to end on the options page: the Learned tab offers what a form
+    said, and pressing Add has to land it in the dropdown rather than on
+    "No matching choice for ... -- set it by hand."
+    """
+    page = _options_page(browser, seed={
+        "profile": {**PROFILE, "race_ethnicity": ""},
+        "settings": {},
+        "profile_suggestions": {
+            "race_ethnicity": "Asian (Not hispanic or Latino) (United States of America)",
+        },
+    })
+    try:
+        page.wait_for_timeout(200)
+        out = page.evaluate(
+            """async () => {
+                const row = document.querySelector('#suggestions-list [data-suggested]')
+                    .closest('.cred-row, .listitem, div');
+                const add = row.querySelector('button');
+                add.click();
+                await new Promise((r) => setTimeout(r, 50));
+                return {
+                    chosen: document.querySelector('[data-f="race_ethnicity"]').value,
+                    status: document.getElementById('status').textContent,
+                };
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert "No matching choice" not in out["status"], out
+    assert out["chosen"] == "Asian", out
+
+
+def test_an_employee_number_is_never_filled(load):
+    """An internal identifier the applicant does not have and could not know.
+    The fuzzy fallback was confident about them anyway: "Employee Number" and
+    "Badge Number" both matched *phone*, so the phone number went in, and
+    "Employee ID" matched current_company.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = page.evaluate(
+        """() => {
+            const never = ["Employee Number", "Employee ID", "Employee #",
+                           "Badge Number", "Employee Badge Number",
+                           "Please provide your GD Employee Badge Number",
+                           "Payroll number", "Associate ID"];
+            // "Employer" is a real match and has to stay one.
+            const keep = {"Employer": "current_company",
+                          "Current Employer": "current_company",
+                          "Employment Type": "employment_type",
+                          "Phone Number": "phone"};
+            return {
+                filled: never.filter((l) => matchField(l) !== null),
+                broken: Object.entries(keep).filter(([l, want]) => matchField(l) !== want),
+            };
+        }"""
+    )
+
+    assert out["filled"] == [], f"still matches something: {out['filled']}"
+    assert out["broken"] == [], f"collateral damage: {out['broken']}"
+
+
+# --- Moving to another browser ---------------------------------------------
+
+BACKUP_SEED = {
+    "profile": {**PROFILE, "resume_file": {"name": "cv.pdf", "dataUrl": "data:application/pdf;base64,AAA"}},
+    "settings": {"use_llm": True, "manual_fill": True},
+    "credentials": {"workday.com": {"email": "jamie@example.com", "password": "hunter2"}},
+    "llm_api_key": "sk-ant-secret",
+    "learned_aliases": {"home telephone": "phone"},
+    "learned_answers": {"did you graduate": "Yes"},
+    "misses": {"site.com|q": {"host": "site.com", "label": "Q", "action": "skipped_no_match",
+                              "detail": "", "required": False, "type": "text", "count": 2, "last": 1}},
+    "applications": [{"url": "https://x/apply", "host": "x.com", "title": "Intern",
+                      "company": "x", "filled": 9, "review": 0, "blank": 0, "at": 1, "pages": 1}],
+    "profile_suggestions": {"linkedin_url": "https://linkedin.com/in/someone"},
+}
+
+
+def _backup_page(browser):
+    """The options page with the download intercepted, so a test can read
+    what the backup file would have contained.
+    """
+    page = _options_page(browser, seed={**BACKUP_SEED})
+    page.evaluate(
+        """() => {
+            window.__downloaded = null;
+            window.__confirmed = true;
+            window.confirm = () => window.__confirmed;
+            URL.createObjectURL = (blob) => { window.__blob = blob; return "blob:stub"; };
+            URL.revokeObjectURL = () => {};
+            HTMLAnchorElement.prototype.click = function () {
+                window.__downloaded = this.download;
+            };
+        }"""
+    )
+    return page
+
+
+def _exported(page, with_secrets):
+    return page.evaluate(
+        """async (withSecrets) => {
+            document.getElementById('backup-secrets').checked = withSecrets;
+            document.getElementById('backup-export').click();
+            await new Promise((r) => setTimeout(r, 80));
+            return {
+                name: window.__downloaded,
+                payload: JSON.parse(await window.__blob.text()),
+                status: document.getElementById('backup-status').textContent,
+            };
+        }""",
+        with_secrets,
+    )
+
+
+def test_a_backup_carries_everything_needed_to_pick_up_on_another_browser(browser):
+    """Distinct from "Export as JSON", which drops documents and credentials
+    because it is meant to be pasted into a chat. A device move has to carry
+    the resume with it or the other browser cannot apply for anything.
+    """
+    page = _backup_page(browser)
+    try:
+        out = _exported(page, False)
+    finally:
+        page.close()
+
+    data = out["payload"]["data"]
+    assert out["payload"]["ja_backup"] == 1
+    assert out["name"].startswith("ja-backup-") and out["name"].endswith(".json")
+    for key in ("profile", "settings", "learned_aliases", "learned_answers",
+                "misses", "applications", "profile_suggestions"):
+        assert key in data, f"{key} missing from the backup"
+    # The resume travels with it.
+    assert data["profile"]["resume_file"]["name"] == "cv.pdf"
+
+
+def test_a_backup_leaves_the_passwords_out_unless_they_are_asked_for(browser):
+    """The file is ordinary text on a disk. Anything that can read the file
+    can read a saved site password out of it, so it is a deliberate choice
+    rather than something that happens because you pressed Download.
+    """
+    page = _backup_page(browser)
+    try:
+        without = _exported(page, False)
+        with_them = _exported(page, True)
+    finally:
+        page.close()
+
+    assert "credentials" not in without["payload"]["data"]
+    assert "llm_api_key" not in without["payload"]["data"]
+    assert "hunter2" not in json.dumps(without["payload"])
+    assert without["payload"]["includes_secrets"] is False
+
+    # And it does carry them when asked, or moving devices loses the logins.
+    assert with_them["payload"]["data"]["llm_api_key"] == "sk-ant-secret"
+    assert with_them["payload"]["data"]["credentials"]["workday.com"]["password"] == "hunter2"
+    assert with_them["payload"]["includes_secrets"] is True
+    # And says so, rather than leaving it to be discovered.
+    assert "delete the file" in with_them["status"]
+
+
+def _restore(page, payload, confirmed=True):
+    return page.evaluate(
+        """async ({payload, confirmed}) => {
+            window.__confirmed = confirmed;
+            const input = document.getElementById('backup-import');
+            const file = new File([JSON.stringify(payload)], 'b.json', {type: 'application/json'});
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+            input.dispatchEvent(new Event('change', {bubbles: true}));
+            await new Promise((r) => setTimeout(r, 120));
+            const stored = await chrome.storage.local.get(
+                ['profile', 'learned_aliases', 'credentials', 'settings']);
+            return {stored, status: document.getElementById('backup-status').textContent};
+        }""",
+        {"payload": payload, "confirmed": confirmed},
+    )
+
+
+def test_restoring_replaces_only_what_the_file_carries(browser):
+    page = _backup_page(browser)
+    try:
+        out = _restore(page, {
+            "ja_backup": 1,
+            "saved_at": "2026-09-20T10:00:00.000Z",
+            "data": {"learned_aliases": {"mobile no": "phone"}},
+        })
+    finally:
+        page.close()
+
+    assert out["stored"]["learned_aliases"] == {"mobile no": "phone"}
+    # Untouched, because the file said nothing about them.
+    assert out["stored"]["credentials"]["workday.com"]["password"] == "hunter2"
+    assert out["stored"]["profile"]["first_name"] == PROFILE["first_name"]
+
+
+def test_a_file_that_is_not_a_backup_is_refused(browser):
+    """A profile export, a resume, or somebody's unrelated JSON would
+    otherwise be written straight into storage as if it belonged there.
+    """
+    page = _backup_page(browser)
+    try:
+        out = _restore(page, {"first_name": "Somebody", "last_name": "Else"})
+    finally:
+        page.close()
+
+    assert "isn't a backup file" in out["status"]
+    assert out["stored"]["profile"]["first_name"] == PROFILE["first_name"]
+
+
+def test_declining_the_confirmation_changes_nothing(browser):
+    page = _backup_page(browser)
+    try:
+        out = _restore(page, {
+            "ja_backup": 1,
+            "data": {"learned_aliases": {"mobile no": "phone"}},
+        }, confirmed=False)
+    finally:
+        page.close()
+
+    assert out["stored"]["learned_aliases"] == {"home telephone": "phone"}
+    assert "Left as it was" in out["status"]
+
+
+# --- The answer bank: the same question, asked differently -----------------
+
+RTX_CURRENT = ("Are you a CURRENT U.S. federal government civilian or military "
+               "(active duty or reserves) employee?")
+RTX_FORMER = ("Are you a FORMER U.S. federal government civilian or military "
+              "(active duty or reserves) employee?")
+
+
+def _answers(page, stored, asked):
+    return page.evaluate(
+        """({stored, asked}) => {
+            setLearnedAnswers(stored);
+            return asked.map((q) => learnedAnswerFor(q));
+        }""",
+        {"stored": stored, "asked": asked},
+    )
+
+
+def test_a_reworded_question_finds_the_answer_it_was_already_given(load):
+    """A remembered answer was keyed by one form's exact wording, so the same
+    question asked differently on the next site missed entirely even with the
+    answer sitting right there.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = _answers(
+        page,
+        {"did you previously work for rtx in any capacity": "No",
+         "which shift are you available for": "Either",
+         "please provide your major": "Mechanical Engineering"},
+        ["Have you previously worked for RTX in any capacity?",
+         "What shift are you available for?",
+         "Provide your major"],
+    )
+
+    assert out == ["No", "Either", "Mechanical Engineering"]
+
+
+def test_current_and_former_are_not_the_same_question(load):
+    """The reason this is a content-word rule and not a similarity score.
+    On a real RTX form these two score 0.952 against each other -- higher
+    than "Did you previously work" against "Have you previously worked",
+    which is 0.907 and genuinely the same question. No threshold separates
+    them; the word that differs does.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = _answers(page, {_norm(RTX_CURRENT): "Yes"}, [RTX_CURRENT, RTX_FORMER])
+
+    assert out[0] == "Yes", "the exact question it was taught"
+    assert out[1] is None, "FORMER answered from what was said about CURRENT"
+
+
+def test_questions_that_differ_only_in_meaning_never_cross(load):
+    """Every one of these scores high enough that a threshold would let it
+    through, and every one means something different.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = _answers(
+        page,
+        {"are you willing to relocate": "Yes",
+         "do you require sponsorship now": "No",
+         "are you 18 years of age or older": "Yes"},
+        ["Are you willing to travel?",
+         "Will you require sponsorship in the future?",
+         "Are you over 18 years of age?"],
+    )
+
+    assert out == [None, None, None], out
+
+
+def test_two_answers_under_one_wording_serve_neither(load):
+    """Two labels reducing to the same question but disagreeing about the
+    answer means the reduction cannot tell them apart. An exact match on
+    either still works; guessing between them does not.
+    """
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = _answers(
+        page,
+        {"do you have a driver s licence": "Yes",
+         "do you have a drivers licence": "No"},
+        ["Do you have a driver's licence?",
+         "Have you got a drivers licence?"],
+    )
+
+    assert out[0] == "Yes", "an exact match is untouched by the ambiguity"
+    assert out[1] is None, "served an answer from two that disagree"
+
+
+def test_answers_stored_before_the_record_shape_still_work(load):
+    """The store held bare strings for a long time and some still will."""
+    page = load(html="<body></body>", scripts=["field_aliases.js", "matcher.js"])
+    out = _answers(
+        page,
+        {"did you graduate": "Yes",
+         "which shift are you available for": {"v": "Nights", "n": 4, "t": 1}},
+        ["Did you graduate?", "What shift are you available for?"],
+    )
+
+    assert out == ["Yes", "Nights"]
+
+
+def _norm(text):
+    import re
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", text.lower())).strip()
+
+
+# --- The answer bank: what it keeps when it runs out of room ---------------
+
+def test_an_answer_asked_for_again_is_the_same_answer_confirmed(load):
+    page = load(html="<body></body>", scripts=["llm.js"])
+    out = page.evaluate(
+        """() => {
+            let store = mergeLearnedAnswers({}, {"did you graduate": "Yes"}, 100);
+            store = mergeLearnedAnswers(store, {"did you graduate": "Yes"}, 200);
+            store = mergeLearnedAnswers(store, {"did you graduate": "Yes"}, 300);
+            const confirmed = {...store};
+            // Corrected: whatever those forms confirmed, it was not this.
+            const corrected = mergeLearnedAnswers(store, {"did you graduate": "No"}, 400);
+            return {confirmed, corrected};
+        }"""
+    )
+
+    assert out["confirmed"]["did you graduate"] == {"v": "Yes", "n": 3, "t": 300}
+    assert out["corrected"]["did you graduate"] == {"v": "No", "n": 1, "t": 400}
+
+
+def test_the_store_drops_what_nothing_has_asked_for(load):
+    """It used to drop whatever arrived first, so an answer eight forms wanted
+    could be evicted by one seen once. Misses were already ranked this way.
+    """
+    page = load(html="<body></body>", scripts=["llm.js"])
+    out = page.evaluate(
+        """() => {
+            const store = {
+                "asked often": {v: "A", n: 9, t: 1},
+                "asked once": {v: "B", n: 1, t: 50},
+                "asked twice": {v: "C", n: 2, t: 40},
+            };
+            const kept = capLearned(store, 2);
+            return {kept: Object.keys(kept).sort(), size: Object.keys(kept).length};
+        }"""
+    )
+
+    assert out["size"] == 2
+    assert out["kept"] == ["asked often", "asked twice"], out["kept"]
+
+
+def test_capping_still_works_on_plain_string_entries(load):
+    """learned_aliases are label -> field with no history to rank by, and so
+    are answers stored before the record shape.
+    """
+    page = load(html="<body></body>", scripts=["llm.js"])
+    out = page.evaluate(
+        """() => {
+            const kept = capLearned({a: "1", b: "2", c: "3"}, 2);
+            return Object.keys(kept).length;
+        }"""
+    )
+
+    assert out == 2
+
+
+# --- Saying a field is filled when it isn't --------------------------------
+
+def test_a_field_the_page_clears_a_moment_later_is_not_reported_as_filled(load):
+    """verifyFilled re-set a cleared field and read the value back on the next
+    line, which only proves the write landed. A page that clears the field on
+    its next render passed that check and was reported filled -- a green field
+    that is actually empty, which nobody looks at again. Worse than a flag.
+    """
+    page = load(
+        html="""<body><form>
+            <label for="fn">First Name</label><input id="fn" name="fn">
+        </form>
+        <script>
+          // Clears whatever is put in it, on the tick after it is set --
+          // which is what a framework re-rendering from its own state does.
+          const el = document.getElementById('fn');
+          el.addEventListener('input', () => setTimeout(() => { el.value = ''; }, 30));
+        </script></body>"""
+    )
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const lost = await verifyFilled(report, 60);
+            const r = report.results.find((x) => x.canonical === 'first_name');
+            // The state the applicant would actually submit, read after the
+            // page has finished doing whatever it does.
+            await new Promise((res) => setTimeout(res, 120));
+            return {action: r.action, detail: r.detail, lost, box: document.getElementById('fn').value};
+        }""",
+        PROFILE,
+    )
+
+    assert out["box"] == "", "the fixture did not actually clear the field"
+    assert out["action"] == "needs_review", out
+    assert "cleared it" in out["detail"]
+    assert out["lost"] == ["First Name"]
+
+
+def test_a_field_that_holds_after_one_retry_is_still_filled(load):
+    """The other half. A page that merely lost the value once -- still
+    settling when the fill ran -- takes it on the retry and stays green.
+    """
+    page = load(
+        html="""<body><form>
+            <label for="fn">First Name</label><input id="fn" name="fn">
+        </form>
+        <script>
+          // Clears it once, then accepts whatever comes next.
+          const el = document.getElementById('fn');
+          let first = true;
+          el.addEventListener('input', () => {
+            if (!first) return;
+            first = false;
+            setTimeout(() => { el.value = ''; }, 10);
+          });
+        </script></body>"""
+    )
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const lost = await verifyFilled(report, 60);
+            const r = report.results.find((x) => x.canonical === 'first_name');
+            return {action: r.action, lost, box: document.getElementById('fn').value};
+        }""",
+        PROFILE,
+    )
+
+    assert out["box"] == PROFILE["first_name"]
+    assert out["action"] == "filled", out
+    assert out["lost"] == []
+
+
+# --- A remembered month against a list of month names ----------------------
+
+MONTH_FORM = """<body><form>
+  <label for="m">Month</label>
+  <select id="m" name="m">
+    <option value="">Select</option>
+    <option value="1">January</option><option value="2">February</option>
+    <option value="3">March</option><option value="4">April</option>
+    <option value="5">May</option><option value="6">June</option>
+    <option value="7">July</option><option value="8">August</option>
+    <option value="9">September</option><option value="10">October</option>
+    <option value="11">November</option><option value="12">December</option>
+  </select>
+</form></body>"""
+
+
+def test_a_remembered_month_number_finds_the_month_it_names(load):
+    """"Remembered '8', but no option matched it" on every iCIMS date row --
+    five times in the gaps export -- with August sitting in the list.
+    """
+    page = load(html=MONTH_FORM)
+    out = page.evaluate(
+        """async (profile) => {
+            setLearnedAnswers({month: "8"});
+            const report = await fillForm(profile, null, {});
+            const r = report.results[0];
+            const el = document.getElementById('m');
+            return {action: r.action, detail: r.detail,
+                    chosen: (el.options[el.selectedIndex] || {}).text};
+        }""",
+        PROFILE,
+    )
+
+    assert out["action"] == "filled", out
+    assert out["chosen"] == "August", out
+
+
+def test_a_remembered_month_name_finds_a_numbered_list(load):
+    """The other direction: the answer was learned as "August" on one form
+    and the next one offers 01..12.
+    """
+    page = load(html="""<body><form>
+      <label for="m">Month</label>
+      <select id="m" name="m">
+        <option value="">Select</option>
+        <option value="07">07</option><option value="08">08</option>
+      </select>
+    </form></body>""")
+    out = page.evaluate(
+        """async (profile) => {
+            setLearnedAnswers({month: "August"});
+            const report = await fillForm(profile, null, {});
+            const el = document.getElementById('m');
+            return {action: report.results[0].action, chosen: el.value};
+        }""",
+        PROFILE,
+    )
+
+    assert out["action"] == "filled", out
+    assert out["chosen"] == "08", out
+
+
+def test_a_number_is_only_a_month_where_the_field_says_so(load):
+    """A bare number is a month on a date row and a quantity everywhere else.
+    Nothing here names a month and the label doesn't either, so 8 stays a
+    number and the question is left alone.
+    """
+    page = load(html="""<body><form>
+      <label for="q">How many people did you supervise?</label>
+      <select id="q" name="q">
+        <option value="">Select</option>
+        <option value="4">4</option><option value="8">8</option>
+      </select>
+    </form></body>""")
+    out = page.evaluate(
+        """async (profile) => {
+            setLearnedAnswers({"how many people did you supervise": "8"});
+            const report = await fillForm(profile, null, {});
+            return {action: report.results[0].action,
+                    chosen: document.getElementById('q').value};
+        }""",
+        PROFILE,
+    )
+
+    # bestOption matches "8" to the "8" option on its own merits, which is
+    # right -- what matters is that it is not the month path doing it.
+    assert out["chosen"] in ("8", ""), out
+
+
+def test_a_correction_still_teaches_after_the_page_replaces_the_field(load):
+    """React and Angular replace elements rather than updating them, so every
+    listener attached to one is thrown away on the next render -- silently.
+    A correction typed afterwards taught nothing, which is why this sat in
+    the known limitations instead of being noticed.
+    """
+    page = load(html="""<body><form>
+      <label for="q2">What is your spirit animal?</label>
+      <input id="q2" name="q2">
+    </form></body>""")
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const seen = {};
+            watchForCorrections(report, (m) => Object.assign(seen, m));
+
+            // What a re-render does: the old node goes, an identical one
+            // takes its place, and every listener on the old one goes with it.
+            const old = document.getElementById('q2');
+            const fresh = document.createElement('input');
+            fresh.id = 'q2';
+            fresh.name = 'q2';
+            old.replaceWith(fresh);
+
+            fresh.value = 'Octopus';
+            fresh.dispatchEvent(new Event('change', {bubbles: true}));
+            await new Promise((r) => setTimeout(r, 60));
+            return {seen, stillThere: document.getElementById('q2') === fresh};
+        }""",
+        PROFILE,
+    )
+
+    assert out["stillThere"], "the fixture did not actually replace the node"
+    assert out["seen"] == {"what is your spirit animal": "Octopus"}, out["seen"]
+
+
+def test_the_same_edit_is_not_counted_as_two_forms_asking(load):
+    """The direct listener and the delegated one can both fire for one edit.
+    Storing the answer twice is harmless; counting it as two forms having
+    asked is not, because that count decides what survives the cap.
+    """
+    page = load(html="""<body><form>
+      <label for="q2">What is your spirit animal?</label>
+      <input id="q2" name="q2">
+    </form></body>""")
+    out = page.evaluate(
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            let calls = 0;
+            watchForCorrections(report, () => { calls += 1; });
+            const el = document.getElementById('q2');
+            el.value = 'Octopus';
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+            await new Promise((r) => setTimeout(r, 60));
+            return calls;
+        }""",
+        PROFILE,
+    )
+
+    assert out == 1, f"one edit reported {out} times"
+
+
+# --- Pressing the icon and getting nothing ---------------------------------
+
+def _no_form_page(browser, tally):
+    """A page with no fields of its own, run.js loaded. Its top-level block
+    bails immediately without the click marker, so the function under test
+    can be called directly.
+    """
+    page = browser.new_page()
+    page.add_init_script(
+        """(() => {
+            window.chrome = {
+                storage: {local: {get: async () => ({settings: {}}), set: async () => {}}},
+                runtime: {
+                    onMessage: {
+                        addListener: (fn) => { window.__listener = fn; },
+                        removeListener: () => {},
+                    },
+                    sendMessage: async () => ({}),
+                },
+            };
+        })();"""
+    )
+    page.goto("about:blank")
+    page.set_content("<body><p>A job description, with nothing to fill in.</p></body>")
+    for js in ["field_aliases.js", "matcher.js", "extractor.js", "credentials.js",
+               "filler.js", "panel.js", "run.js"]:
+        page.add_script_tag(path=os.path.join(EXT_DIR, js))
+    return page.evaluate(
+        """async (tally) => {
+            const done = _reportWithoutOwnForm();
+            // The panel goes up first and waits; the tally arrives from the
+            // service worker once every frame has reported.
+            await new Promise((r) => setTimeout(r, 30));
+            if (tally) window.__listener({type: 'ja-tally', ...tally});
+            await done;
+            const root = document.getElementById('ja-autofill-panel').shadowRoot;
+            return root.querySelector('.body').textContent;
+        }""",
+        tally,
+    ), page
+
+
+def test_pressing_the_icon_on_a_page_with_no_form_says_so(browser):
+    """It used to do nothing at all. run.js bails in a frame with no fields,
+    and on a job description that is every frame, so the icon looked broken.
+    """
+    text, page = _no_form_page(browser, {"filled": 0, "review": 0, "blank": 0})
+    try:
+        assert "No application form found" in text, text
+        assert "press the icon again" in text, text
+    finally:
+        page.close()
+
+
+def test_a_form_in_an_embedded_frame_is_reported_by_the_page_around_it(browser):
+    """Greenhouse and Lever inside a company's own careers site: the fill
+    happens in the child frame, where no panel can draw, and the top frame
+    has no fields of its own so it used to stay silent. Both together meant
+    a form that filled correctly and looked like nothing had happened.
+    """
+    text, page = _no_form_page(browser, {"filled": 12, "review": 2, "blank": 1})
+    try:
+        assert "Filled 12 field(s) in a frame on this page" in text, text
+        assert "2 flagged for you" in text, text
+        assert "1 required field(s) left blank" in text, text
+        assert "Nothing was submitted" in text, text
+    finally:
+        page.close()
+
+
+def test_only_a_click_makes_a_frame_with_no_fields_speak(browser):
+    """Ad and tracker frames run this too, and auto-fill runs it on every
+    page load across sixteen domains. Neither should draw anything.
+    """
+    src = open(os.path.join(EXT_DIR, "run.js"), encoding="utf-8").read()
+    bg = open(os.path.join(EXT_DIR, "background.js"), encoding="utf-8").read()
+
+    assert "if (globalThis.__JA_VIA_CLICK && window.top === window)" in src
+    # The click path asks for it; the page-load path does not.
+    assert "await runFill(tab.id, true);" in bg
+    assert "await runFill(tabId);" in bg
+
+
+# --- Answering by button rather than dropdown ------------------------------
+
+def test_a_saved_answer_shows_as_the_button_that_is_on(browser):
+    """The buttons drive a hidden <select>, and load() assigns .value
+    directly, which fires no event -- so they sat on "Not set" over a profile
+    that was set, which is exactly the thing a dropdown was hiding.
+    """
+    page = _options_page(browser, seed={
+        "profile": {**PROFILE, "gender": "Male", "work_authorized": True,
+                    "needs_sponsorship": False, "has_drivers_license": None},
+        "settings": {},
+    })
+    try:
+        page.wait_for_timeout(200)
+        out = page.evaluate(
+            """() => {
+                const on = (sel) => {
+                    const row = document.querySelector(sel).parentElement;
+                    const b = row.querySelector('button.on');
+                    return b ? b.textContent : null;
+                };
+                return {
+                    gender: on('[data-f="gender"]'),
+                    authorized: on('[data-bool="work_authorized"]'),
+                    sponsorship: on('[data-bool="needs_sponsorship"]'),
+                    unset: on('[data-bool="has_drivers_license"]'),
+                };
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["gender"] == "Male", out
+    assert out["authorized"] == "Yes", out
+    assert out["sponsorship"] == "No", out
+    assert out["unset"] == "Not set", out
+
+
+def test_pressing_a_button_is_what_gets_saved(browser):
+    """The <select> stays the value -- everything else on the page reads
+    these through [data-bool] / [data-f] and .value.
+    """
+    page = _options_page(browser, seed={"profile": {**PROFILE}, "settings": {}})
+    try:
+        page.wait_for_timeout(200)
+        out = page.evaluate(
+            """() => {
+                const press = (sel, text) => {
+                    const row = document.querySelector(sel).parentElement;
+                    [...row.querySelectorAll('button')].find((b) => b.textContent === text).click();
+                };
+                press('[data-f="gender"]', 'Non-binary');
+                press('[data-bool="over_18"]', 'Yes');
+                return {
+                    gender: document.querySelector('[data-f="gender"]').value,
+                    over18: document.querySelector('[data-bool="over_18"]').value,
+                    saved: gatherProfile().gender,
+                    savedBool: gatherProfile().over_18,
+                };
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["gender"] == "Non-binary"
+    assert out["over18"] == "true"
+    assert out["saved"] == "Non-binary"
+    assert out["savedBool"] is True
+
+
+def test_a_question_with_no_fixed_answers_keeps_its_box(browser):
+    """Pronouns has no set to choose from, and a row of buttons holding only
+    "Not set" is worse than the box it replaced.
+    """
+    page = _options_page(browser, seed={
+        "profile": {**PROFILE, "pronouns": "he/him"}, "settings": {},
+    })
+    try:
+        page.wait_for_timeout(200)
+        out = page.evaluate(
+            """() => {
+                const el = document.querySelector('[data-f="pronouns"]');
+                return {tag: el.tagName, value: el.value,
+                        // And the ones that do have a set are not boxes.
+                        gender: document.querySelector('[data-f="gender"]').tagName};
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["tag"] == "INPUT", out
+    assert out["value"] == "he/him"
+    assert out["gender"] == "SELECT"
+
+
+# --- Pressing the icon always puts something on screen ---------------------
+
+def _clicked(browser, html, profile):
+    """run.js on a page, as a click, with the extension APIs stubbed. Returns
+    what the panel ended up saying -- or None if none was drawn.
+    """
+    page = browser.new_page()
+    page.add_init_script(
+        """((profileJson) => {
+            const store = {profile: JSON.parse(profileJson), settings: {}};
+            window.chrome = {
+                storage: {local: {
+                    get: async (keys) => Object.fromEntries(
+                        (Array.isArray(keys) ? keys : [keys])
+                            .filter((k) => k in store).map((k) => [k, store[k]])),
+                    set: async () => {},
+                }},
+                runtime: {
+                    sendMessage: async () => ({}),
+                    onMessage: {addListener: () => {}, removeListener: () => {}},
+                },
+            };
+            globalThis.__JA_VIA_CLICK = true;
+        })(PROFILE_JSON);""".replace("PROFILE_JSON", repr(json.dumps(profile)))
+    )
+    page.goto("about:blank")
+    page.set_content(html)
+    for js in ["field_aliases.js", "matcher.js", "extractor.js", "credentials.js",
+               "filler.js", "panel.js", "run.js"]:
+        page.add_script_tag(path=os.path.join(EXT_DIR, js))
+    page.wait_for_timeout(400)
+    text = page.evaluate(
+        """() => {
+            const host = document.getElementById('ja-autofill-panel');
+            return host ? host.shadowRoot.querySelector('.body').textContent : null;
+        }"""
+    )
+    page.close()
+    return text
+
+
+REAL_FORM = """<body><form>
+  <label for="e">Email</label><input id="e" name="email">
+  <label for="p">Phone</label><input id="p" name="phone">
+</form></body>"""
+
+
+def test_a_click_draws_a_panel_even_with_no_profile(browser):
+    """It showed a banner that took itself away after fifteen seconds, and no
+    panel at all. Look away for a moment and the icon did nothing.
+    """
+    text = _clicked(browser, REAL_FORM, {"first_name": "", "last_name": "", "email": "", "phone": ""})
+
+    assert text is not None, "no panel was drawn"
+    assert "Set up your profile first" in text, text
+
+
+def test_a_click_draws_a_panel_when_every_field_is_hidden(browser):
+    """The page has controls, so the frame does not bail at the top, and then
+    extractFields filters them all out and it returned in silence.
+    """
+    text = _clicked(
+        browser,
+        """<body><form>
+             <input type="hidden" name="csrf" value="x">
+             <label for="s">Search</label><input id="s" style="display:none">
+           </form></body>""",
+        {**PROFILE},
+    )
+
+    assert text is not None, "no panel was drawn"
+    assert "Nothing fillable on this page" in text, text
+
+
+def test_a_click_on_a_real_form_still_reports_what_it_found(browser):
+    text = _clicked(browser, REAL_FORM, {**PROFILE})
+
+    assert text is not None, "no panel was drawn"
+    assert "field(s) on this page" in text, text

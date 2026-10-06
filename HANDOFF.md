@@ -2,7 +2,7 @@
 
 State of this project as of 2026-09-17, written so a new conversation can
 pick it up without re-deriving any of it. Branch:
-`claude/job-application-automation-tp32l1`. 139 tests passing.
+`claude/happy-volta-yjo3xc`. 228 tests passing, the whole suite green.
 
 If you are Claude and someone has just pointed you here: read this file, then
 `README.md` for the user-facing description. Don't re-read the whole codebase
@@ -60,8 +60,22 @@ extension/
   field_aliases.js  The alias table + the sensitive/consent group definitions.
   filler.js         ~1700 lines. The fill itself, all the guards, all learning.
   llm.js            Claude API. Runs in the service worker only (API key).
-  panel.js          The on-page side panel, in a shadow root.
-  options.js/html   The Options page. 11 tabs.
+                    Everything is Sonnet now (LLM_MODEL, RESUME_MODEL).
+                    _wantsFallbacks() keys the refusal-fallback beta off the
+                    model -- Sonnet doesn't refuse, so sending it there was
+                    a 400 and a silent retry on every request.
+  panel.js          The on-page side panel, in a shadow root. Draggable by its
+                    header; position kept in chrome.storage under `panel_pos`,
+                    never the page's own localStorage. Also the wide toggle
+                    (`panel_big`), the launcher that closing leaves behind, and
+                    the AI assist switch, which read-modify-writes `settings`.
+  options.js/html   The Options page. 11 tabs. Loads matcher.js too, for
+                    bestSelfIdChoice. Also holds the full backup/restore
+                    (BACKUP_KEYS / BACKUP_SECRET_KEYS) for moving browsers.
+                    Eligibility and Self-ID answer through segmentedFor():
+                    buttons over a hidden <select> that stays the value, so
+                    every [data-bool]/[data-f] reader is untouched. Anything
+                    assigning .value must call repaintSegmented() after.
 tests/
   conftest.py                  Shared browser fixture + `load` helper.
   test_extension_regression.py Behaviour against saved real forms.
@@ -74,9 +88,28 @@ tests/
 
 ## How it works
 
+### Two buttons, not one automatic fill
+
+`run.js` wraps the whole fill in `doFill()`, wired to the panel's **Autofill**
+button and called on arrival unless `manual_fill` is set. The reason is
+coexistence: another autofill extension on the same page (Simplify) listens
+for the same change events this fires, both write to the same fields, and
+they overwrite each other — on Blue Origin every core field came back
+cleared. Manual mode makes it a choice per form: **Autofill** when this is
+the tool doing the filling, **Learn this form** when the other one already
+did it and its answers are worth keeping.
+
+`report` is null until a fill has run, so everything downstream of it
+(watch-and-learn, the chat) is guarded. run.js is not loaded by the browser
+fixtures — `test_the_fill_is_a_function_the_button_can_call...` checks that
+shape statically, so it is the thing to update if this is restructured.
+
 ### The fill, in order (`run.js`)
 
-1. Bail immediately if the frame has no form controls (runs in every frame).
+1. Bail if the frame has no form controls (runs in every frame). On a click
+   (`__JA_VIA_CLICK`, set by `runFill`) the top frame instead reports what
+   the other frames managed — pressing the icon and getting nothing at all
+   was the usual outcome on any page whose form is embedded.
 2. Load profile, settings, learned stores from `chrome.storage.local`.
 3. Draw the panel (top frame only).
 4. `fillForm()` — the deterministic pass. Alias matching, per-widget filling.
@@ -84,7 +117,9 @@ tests/
    sends it to Claude via the service worker, applies answers through
    `applyLlmAnswers()` which re-checks every guard.
 6. `verifyFilled()` — re-read every filled field ~350ms later, re-apply once,
-   downgrade to `needs_review` if the page cleared it.
+   then wait the same moment again before judging. Reading the value back on
+   the line after setting it only proves the write landed; a page that
+   clears on its next render passed that and was reported filled.
 7. Learn: from Claude's answers, from what was already on the page, and
    (ongoing) from what the user types afterwards.
 8. Record misses and the application row. Render results in the panel.
@@ -99,17 +134,60 @@ tests/
   Long lists are paged and fetched through its search box. `icimsWidget()` in
   `extractor.js`, `_setIcimsValue()`/`_icimsSearch()` in `filler.js`.
 - Both have frozen fixtures: `workday_questions.html`, `icims_profile.html`.
+- **iCIMS's own questionnaires** (`icims_questionnaire.html`) are bare text in
+  table cells: the word naming a radio option is a text node *after* the
+  input with no `<label>`, and the question is the cell's text, often under
+  several bullet lists. `followingOptionText` reads the first,
+  `containerQuestion` (up to the first `?` when long) the second, and
+  `stripOptionControls` removes an option's words along with its control so
+  the two partition the cell. None of these questions can come from a
+  profile — they are about that company — so being readable is what lets
+  Learn this form answer them from then on.
 
 ### Learning (three stores, different rules)
 
 | Store | Holds | Written from |
 |---|---|---|
-| `learned_answers` | label -> answer text | Questions the profile has no field for |
+| `learned_answers` | label -> `{v, n, t}` | Questions the profile has no field for |
 | `learned_aliases` | label -> profile field | Claude's declared `profile_field` |
 | `profile_suggestions` | profile field -> value | Gaps found on the page; **suggested, never written** |
 
 Sensitive and consent answers go **only** to `profile_suggestions`, never to
 `learned_answers`. That routing is the safety property — see rule 5.
+
+**Learn this form** (the panel button, `learnFromPage` in `filler.js`) reads
+a form the applicant filled in by hand and stores every answer in it,
+setting nothing on the page. It builds a report in which nothing was filled
+and hands it to `learnFromPrefilled`, so it inherits that same routing
+rather than carrying a second copy of the gate. Wired in `run.js` via
+`panel.onLearn`.
+
+With `use_llm` on, the button then calls `mapLabelsWithClaude` (llm.js) and
+asks which *profile field* each question was asking for — never what the
+answer is, which the applicant has already given. A `learned_answer` is
+keyed by one form's exact wording; an alias holds for any wording of that
+field anywhere, so this is what generalises. Rule 5 still decides what
+lands: the reply goes through `sanitizeLearnedAliases`, and llm.js keeps
+its own copy of the refused field names so they are never offered to the
+model — that copy is not the gate, and says so.
+
+A learned answer is `{v, n, t}` — the answer, how many forms have asked for
+it, how recently. Bare strings from before the shape change are still read
+(`answerValueOf`), never written. `mergeLearnedAnswers` increments on a repeat
+and resets to 1 on a correction; `capLearned` evicts by how little a thing has
+been wanted rather than by what arrived first, the way `capMisses` already did.
+
+`learnedAnswerFor` tries the exact wording, then a **content key**: the
+question's meaning-bearing words, stemmed and sorted, with stopwords dropped.
+This is deliberately not a similarity score, and measuring is why — on a real
+RTX form, the CURRENT and FORMER federal-employee questions score **0.952**
+against each other, higher than "Did you previously work" vs "Have you
+previously worked" at **0.907**, which is genuinely the same question. No
+threshold separates those. What separates them is whether the differing words
+carry meaning, so `_QUESTION_STOPWORDS` is defined by what it leaves out:
+current, former, now, future, relocate, travel all stay. Two labels sharing a
+content key but disagreeing on the answer serve neither — an exact match on
+either still works, guessing between them does not.
 
 Capped in `background.js` (`capLearned`, `capMisses` in `llm.js`).
 
@@ -117,13 +195,21 @@ Capped in `background.js` (`capLearned`, `capMisses` in `llm.js`).
 
 | Key | Default | What it does |
 |---|---|---|
-| `use_llm` | off | The AI pass at all. Needs `llm_api_key`. |
-| `route_saved_answers` | off | Let Claude route saved answers to sensitive/consent questions |
+| `use_llm` | off, on once a key is saved | The AI pass at all. Needs `llm_api_key`. |
+| `route_saved_answers` | **on** | Let Claude route saved answers to sensitive/consent questions (no effect unless `use_llm`) |
 | `tailor_cover_letter` | off | Draft a letter per job instead of the saved one |
-| `auto_fill_known_sites` | off | Fill on page load across 16 ATS domains |
+| `auto_fill_known_sites` | **on** | Inject and fill on page load across 16 ATS domains |
+| `manual_fill` | off | Open the panel but fill nothing until **Autofill** is pressed |
 | `watch_and_learn` | **on** | Notice what the user types into blanks |
 | `show_panel` | **on** | The side panel |
 | `auto_create_accounts` | off | Generate a password per site |
+
+A changed default only reaches an install that has never opened Options:
+saving there writes every key explicitly. `applyDefaultsOnce()` in
+`background.js` carries an existing install over on update, once, recorded
+under `migrations` so a setting turned off afterwards stays off. Add a new
+key there rather than only changing a default, or the change reaches nobody
+who already has this installed.
 
 ---
 
@@ -156,12 +242,51 @@ are DOM-behaviour bugs a mock can't reproduce.
   it does not close by cleverness.
 - **Fixtures are frozen snapshots.** A green test does not mean the real site
   still looks like that.
-- **The Claude API path has never run live.** No key available in the dev
-  environment. Request shape, headers, retry and error handling are tested
-  against a stubbed `fetch`; the actual round trip is unverified.
-- **SPA re-renders drop watch-and-learn listeners** when elements are replaced.
-- **The panel only draws in the top frame**, so a form inside an iframe fills
-  correctly but reports through the badge only.
+- **The Claude API path is only partly verified.** No key in the dev
+  environment, so request shape, headers, retry and error handling are
+  tested against a stubbed `fetch`. One thing has now been seen live: the
+  resume schema was refused with "Schema is too complex" because its 14
+  scalar fields were optional under `required: []`, which asks the schema
+  compiler to allow all 2^14 subsets of them. Structured-output schemas
+  here require every property and use "" for absent, with `_pruneEmpty`
+  dropping the blanks before anything is offered as an import.
+- **Corrections are still not learned automatically.** `watchForCorrections`
+  skips every field the fill touched (`filler.js`, the `filled.has(...)`
+  guards), so a wrong fill the applicant fixes by hand teaches nothing on
+  its own. **Learn this form** is the manual answer to that and covers the
+  case in practice; doing it without the button press is still open.
+- **Context bleed mislabels questions.** `wideContext()` keeps up to 4000
+  characters of surrounding text and the sensitive gate reads it, so an
+  iCIMS search box was flagged as a self-identification question 7 times
+  and a terms-and-conditions tick box as criminal-history 3 times.
+  Narrowing the gate to label + group label was tried and reverted: an LDG
+  legend had swallowed "Veteran status" from a neighbouring block, which
+  made an SMS consent box demographic. `ldg_form.html`'s baseline caught
+  it. Needs those two forms as fixtures before trying again.
+- **Blue Origin clears every core field after it is filled** — 13
+  occurrences across first/last name, address, city, postal code, phone.
+  `verifyFilled` re-applies once and still loses. What the report proves is
+  narrower than it looks: the re-read after the second write is synchronous,
+  so the value is gone *as it is set*, not on a later re-render — the site's
+  own change handler is rejecting it. `_setNativeValue` already does the
+  native-setter-plus-events dance, so it is not the usual React-controlled-
+  input problem. Needs a saved copy of that page to go further.
+- `NOT_APPLICABLE_FIELDS` in `field_aliases.js` holds the fields this
+  applicant hasn't got (middle name, address line 2). Blank is the answer
+  for those, so they are neither typed into nor counted as gaps. Add to it
+  rather than teaching the matcher to miss them.
+- **A hidden control needs something visible standing in for it** before the
+  extractor will surface it — an iCIMS `<select>` behind its widget anchor,
+  a `display:none` file input behind an "Upload Resume" button
+  (`uploadProxy` in `extractor.js`). The file-input rule is deliberately
+  narrow: no id, no name, no aria-label, and a visible control beside it
+  whose text says what it is for. A labelled hidden file input is still
+  skipped; widen it from a real form, not from a guess.
+- **The panel only draws in the top frame.** A form inside an iframe fills
+  correctly and is outlined in place, but cannot list its fields in a panel.
+  On a click the top frame now draws one anyway and reports the cross-frame
+  tally the service worker collected (`ja-tally`), so the fill is at least
+  visible. Field-by-field results from a child frame still aren't.
 - `ja/*.py` lacks all widget and AI support. Intentional.
 
 ---

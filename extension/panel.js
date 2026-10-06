@@ -13,14 +13,44 @@ var JA_PANEL_ID = "ja-autofill-panel";
 var _PANEL_CSS = `
   :host { all: initial; }
   * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  /* Only as tall as it needs to be, rather than the full height of the
+     window. A full-height rail covers whatever the page has down the right
+     -- which on a lot of application forms is the submit button. */
   .wrap {
-    position: fixed; top: 12px; right: 12px; bottom: 12px; width: 340px;
+    position: fixed; top: 12px; right: 12px; width: 312px;
+    max-height: calc(100vh - 24px);
     z-index: 2147483647; display: flex; flex-direction: column;
     background: #0f172a; color: #e2e8f0; border: 1px solid rgba(148,163,184,.25);
     border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.45);
     font-size: 13px; line-height: 1.5; overflow: hidden;
   }
-  .wrap.min { bottom: auto; height: auto; }
+  .wrap.min { height: auto; }
+  /* Wider, and with more room for the conversation rather than the field
+     list -- reading a long answer in a 312px column is the thing being
+     complained about. */
+  .wrap.big { width: 520px; }
+  .wrap.big .body { max-height: 38vh; }
+  .wrap.big .msgs { max-height: 40vh; }
+  /* Closing used to remove the panel outright, with nothing to bring it
+     back but running the fill again. */
+  .launcher {
+    position: fixed; top: 12px; right: 12px; z-index: 2147483647;
+    width: 40px; height: 40px; border-radius: 50%;
+    background: #0f172a; color: #e2e8f0;
+    border: 1px solid rgba(148,163,184,.35); box-shadow: 0 6px 20px rgba(0,0,0,.45);
+    cursor: pointer; font-size: 17px; line-height: 1;
+    display: none; align-items: center; justify-content: center;
+  }
+  .launcher:hover { border-color: #38bdf8; }
+  .ai-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 0 8px; color: #94a3b8; font-size: 11px;
+  }
+  .ai-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .ai-row input { width: 14px; height: 14px; accent-color: #38bdf8; cursor: pointer; }
+  .wrap.dragging { user-select: none; }
+  header { cursor: move; }
+  .body { max-height: 46vh; }
   header {
     display: flex; align-items: center; gap: 8px; padding: 10px 12px;
     border-bottom: 1px solid rgba(148,163,184,.18); flex: 0 0 auto;
@@ -31,6 +61,12 @@ var _PANEL_CSS = `
     font-size: 15px; padding: 2px 6px; border-radius: 6px;
   }
   header button:hover { background: rgba(148,163,184,.15); color: #e2e8f0; }
+  header button.fill, header button.learn {
+    font-size: 11px; padding: 3px 8px; border-radius: 6px;
+    border: 1px solid rgba(148,163,184,.35); color: #cbd5e1;
+  }
+  header button.fill { margin-left: auto; }
+  header button.fill:disabled, header button.learn:disabled { opacity: .6; cursor: default; }
   .body { flex: 1 1 auto; overflow-y: auto; padding: 10px 12px; }
   .wrap.min .body, .wrap.min .chat { display: none; }
   .line { display: flex; gap: 7px; align-items: baseline; margin-bottom: 4px; color: #cbd5e1; }
@@ -106,11 +142,18 @@ function createPanel() {
   wrap.innerHTML = `
     <header>
       <strong>Autofill</strong>
+      <button class="big" title="Make this panel wider">&#10530;</button>
+      <button class="fill" title="Fill this form in from your profile">Autofill</button>
+      <button class="learn" title="Remember every answer on this page, so the next form like it fills itself">Learn this form</button>
       <button class="min" title="Collapse">&minus;</button>
       <button class="close" title="Close">&times;</button>
     </header>
     <div class="body"></div>
     <div class="chat">
+      <div class="ai-row">
+        <label><input type="checkbox" class="ai-on"> AI assist</label>
+        <span class="ai-note"></span>
+      </div>
       <div class="msgs"></div>
       <div class="row">
         <textarea placeholder="Ask about this form&hellip;" rows="1"></textarea>
@@ -118,6 +161,13 @@ function createPanel() {
       </div>
     </div>`;
   root.appendChild(wrap);
+
+  const launcher = document.createElement("button");
+  launcher.type = "button";
+  launcher.className = "launcher";
+  launcher.title = "Open the autofill panel";
+  launcher.innerHTML = "&#9776;";
+  root.appendChild(launcher);
   document.documentElement.appendChild(host);
 
   const body = wrap.querySelector(".body");
@@ -125,8 +175,149 @@ function createPanel() {
   const input = wrap.querySelector("textarea");
   const send = wrap.querySelector(".send");
 
-  wrap.querySelector(".close").onclick = () => host.remove();
+  const store = (() => {
+    try {
+      return typeof chrome !== "undefined" && chrome.storage && chrome.storage.local
+        ? chrome.storage.local
+        : null;
+    } catch (exc) {
+      return null;
+    }
+  })();
+  const learn = wrap.querySelector(".learn");
+  const fill = wrap.querySelector(".fill");
+
+  // Out of the way, not gone: the panel hides and leaves something to press.
+  wrap.querySelector(".close").onclick = () => {
+    wrap.style.display = "none";
+    launcher.style.display = "flex";
+  };
+  launcher.onclick = () => {
+    launcher.style.display = "none";
+    wrap.style.display = "flex";
+  };
   wrap.querySelector(".min").onclick = () => wrap.classList.toggle("min");
+
+  const bigBtn = wrap.querySelector("button.big");
+  const BIG_KEY = "panel_big";
+  const setBig = (on) => {
+    wrap.classList.toggle("big", !!on);
+    bigBtn.innerHTML = on ? "&#10529;" : "&#10530;";
+    bigBtn.title = on ? "Make this panel narrower" : "Make this panel wider";
+  };
+  bigBtn.onclick = () => {
+    const on = !wrap.classList.contains("big");
+    setBig(on);
+    try {
+      store?.set({ [BIG_KEY]: on });
+    } catch (exc) {
+      /* not remembered; it is still wider for this page */
+    }
+  };
+
+  // AI assist, where it is being used rather than three clicks away on the
+  // options page. It takes effect on the next fill and on the chat; the box
+  // below says so instead of looking broken.
+  const aiOn = wrap.querySelector(".ai-on");
+  const aiNote = wrap.querySelector(".ai-note");
+  const paintAi = (on) => {
+    aiOn.checked = !!on;
+    input.disabled = !on;
+    send.disabled = !on;
+    input.placeholder = on ? "Ask about this form\u2026" : "Turn AI assist on to ask about this form";
+    aiNote.textContent = on ? "" : "off -- fills from your profile only";
+  };
+  paintAi(false);
+
+  if (store) {
+    try {
+      store.get([BIG_KEY, "settings"], (got) => {
+        if (got && got[BIG_KEY]) setBig(true);
+        paintAi(!!(got && got.settings && got.settings.use_llm));
+      });
+    } catch (exc) {
+      /* defaults stand */
+    }
+  }
+
+  aiOn.onchange = () => {
+    const on = aiOn.checked;
+    paintAi(on);
+    if (!store) return;
+    try {
+      // Read and write the whole object: every other setting lives in it.
+      store.get(["settings"], (got) => {
+        const settings = { ...((got && got.settings) || {}), use_llm: on };
+        store.set({ settings });
+      });
+    } catch (exc) {
+      /* not saved; it holds for this page */
+    }
+  };
+
+  // Where the panel lands is over the page, and on plenty of forms that is
+  // exactly where the submit button is. Drag it by the header and it stays
+  // where it was put, on this and every later application -- moved once
+  // rather than fought with on each one.
+  //
+  // Position is kept in extension storage rather than the page's own
+  // localStorage: this is injected into someone else's site, and writing to
+  // their storage is a side effect the panel has no business having.
+  const POS_KEY = "panel_pos";
+
+  // Keep at least a corner of the header on screen whatever it is dragged
+  // towards, or it becomes unreachable and the only way back is a reload.
+  function place(left, top) {
+    const w = wrap.offsetWidth || 312;
+    wrap.style.left = `${Math.min(Math.max(left, 64 - w), window.innerWidth - 64)}px`;
+    wrap.style.top = `${Math.min(Math.max(top, 0), window.innerHeight - 36)}px`;
+    wrap.style.right = "auto";
+  }
+
+  if (store) {
+    try {
+      store.get([POS_KEY], (got) => {
+        const pos = got && got[POS_KEY];
+        if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
+          place(pos.left, pos.top);
+        }
+      });
+    } catch (exc) {
+      // Not remembered; it still opens where the CSS puts it.
+    }
+  }
+
+  const head = wrap.querySelector("header");
+  head.addEventListener("pointerdown", (e) => {
+    // The buttons in the header are buttons, not a grab handle.
+    if (e.target.closest("button")) return;
+    const box = wrap.getBoundingClientRect();
+    const dx = e.clientX - box.left;
+    const dy = e.clientY - box.top;
+    wrap.classList.add("dragging");
+
+    const move = (ev) => place(ev.clientX - dx, ev.clientY - dy);
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      wrap.classList.remove("dragging");
+      const now = wrap.getBoundingClientRect();
+      try {
+        store?.set({ [POS_KEY]: { left: now.left, top: now.top } });
+      } catch (exc) {
+        // Not remembered; it has still moved for this page.
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    e.preventDefault();
+  });
+
+  // A window narrowed after the panel was parked off to one side would
+  // otherwise leave it out of reach.
+  window.addEventListener("resize", () => {
+    if (wrap.style.left) place(parseFloat(wrap.style.left), parseFloat(wrap.style.top));
+  });
 
   const scroll = (el) => {
     el.scrollTop = el.scrollHeight;
@@ -201,6 +392,41 @@ function createPanel() {
       msgs.appendChild(div);
       scroll(msgs);
       return div;
+    },
+
+    // handler() -> Promise<void>. Disabled while it runs, so a second press
+    // cannot start a fill over the top of the one still going.
+    onFill(handler) {
+      fill.onclick = async () => {
+        fill.disabled = true;
+        const was = fill.textContent;
+        fill.textContent = "Filling\u2026";
+        try {
+          await handler();
+        } catch (exc) {
+          api.log(String(exc), "err");
+        }
+        fill.textContent = was;
+        fill.disabled = false;
+      };
+    },
+
+    // handler() -> Promise<string>, shown in the log. The button is disabled
+    // while it runs: reading the page twice over would store the same answers
+    // twice and read half-typed ones on the second pass.
+    onLearn(handler) {
+      learn.onclick = async () => {
+        learn.disabled = true;
+        const was = learn.textContent;
+        learn.textContent = "Learning\u2026";
+        try {
+          api.log((await handler()) || "Nothing on this page to remember.", "ok");
+        } catch (exc) {
+          api.log(String(exc), "err");
+        }
+        learn.textContent = was;
+        learn.disabled = false;
+      };
     },
 
     // handler(text) -> Promise<string>, whatever it resolves to is shown.

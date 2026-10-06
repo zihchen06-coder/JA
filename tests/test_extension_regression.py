@@ -48,7 +48,11 @@ PROFILE_JSON = json.dumps(PROFILE)
 EXPECTED = {
     "cc305_form.html": {"filled": 2, "review": 0},
     "edu_form.html": {"filled": 8, "review": 1},
-    "eeo.html": {"filled": 5, "review": 1},
+    # 6, not 5, since the self-ID answers stopped going through bestOption:
+    # a Hispanic/Latino question offering Yes and No used to be written off
+    # as "a yes/no question with no matching saved answer" before the saved
+    # answer was ever tried against it.
+    "eeo.html": {"filled": 6, "review": 1},
     "experience_repeater.html": {"filled": 9, "review": 0},
     "false_positive_check.html": {"filled": 0, "review": 0},
     "icims.html": {"filled": 3, "review": 0},
@@ -420,7 +424,7 @@ def test_llm_select_answer_must_match_an_option_exactly(browser):
     assert outcome["afterExact"] == "Bachelor's Degree"
 
 
-def _llm_call(browser, responses):
+def _llm_call(browser, responses, model=None):
     """Run llm.js against a stubbed fetch and report what it sent and returned.
 
     `responses` is the queue of {status, body} the fake API hands back, one
@@ -432,7 +436,8 @@ def _llm_call(browser, responses):
         page.goto("about:blank")
         page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
         return page.evaluate(
-            """async ({responses, profile}) => {
+            """async ({responses, profile, model}) => {
+                if (model) LLM_MODEL = model;
                 const sent = [];
                 const queue = [...responses];
                 window.fetch = async (url, init) => {
@@ -453,7 +458,7 @@ def _llm_call(browser, responses):
                 });
                 return {sent, result};
             }""",
-            {"responses": responses, "profile": PROFILE},
+            {"responses": responses, "profile": PROFILE, "model": model},
         )
     finally:
         page.close()
@@ -482,7 +487,7 @@ def test_llm_request_shape_and_answer_parsing(browser):
     assert sent["headers"]["anthropic-version"] == "2023-06-01"
     # Required to call the API from a browser context at all.
     assert sent["headers"]["anthropic-dangerous-direct-browser-access"] == "true"
-    assert sent["body"]["model"] == "claude-opus-5"
+    assert sent["body"]["model"] == "claude-sonnet-5"
     assert sent["body"]["output_config"]["format"]["type"] == "json_schema"
 
     # The resume and cover letter are stored as base64 data URLs for
@@ -496,7 +501,8 @@ def test_llm_request_shape_and_answer_parsing(browser):
 def test_llm_retries_once_without_the_fallback_beta_on_a_400(browser):
     """The server-side fallbacks parameter is the newest thing in the request.
     If the API rejects the shape, still get an answer rather than failing the
-    fill over an optional extra.
+    fill over an optional extra. Pinned to a model that sends it at all --
+    see the test below for the one that doesn't.
     """
     out = _llm_call(
         browser,
@@ -506,6 +512,7 @@ def test_llm_retries_once_without_the_fallback_beta_on_a_400(browser):
                 {"ja_id": "ja-1", "value": "Second time.", "skip_reason": ""},
             ])},
         ],
+        model="claude-opus-5",
     )
     assert len(out["sent"]) == 2
     assert "anthropic-beta" in out["sent"][0]["headers"]
@@ -1811,3 +1818,1153 @@ def test_an_unset_profile_yes_no_does_not_untick_a_box_you_ticked(browser):
 
     assert out["stillTicked"] is True
     assert out["action"] == "skipped_no_data"
+
+
+# --- The RTX/Workday form the applicant had already filled in once ---------
+
+REMEMBERED_RTX = {
+    "did you previously work for rtx including its predecessors or any of its "
+    "businesses in any capacity": "No",
+    "are you a current u s federal government civilian or military active duty "
+    "or reserves employee": "No",
+    "are you a former u s federal government civilian or military active duty "
+    "or reserves employee": "No",
+}
+
+
+def test_a_remembered_answer_reaches_a_workday_listbox(browser):
+    """Workday's questions are <button aria-haspopup="listbox"> with no options
+    in the DOM until the button is clicked, so f.options is empty at extraction
+    time. The remembered-answer path read that empty list instead of opening
+    the widget, and reported every question answered on an earlier application
+    as "Remembered 'No', but no option matched it".
+    """
+    out = _evaluate_on(
+        browser, "workday_remembered.html",
+        """async ({profile, remembered}) => {
+            setLearnedAnswers(remembered);
+            const report = await fillForm(profile, null, {});
+            return {
+                answers: Object.fromEntries(
+                    Array.from(document.querySelectorAll('button[aria-haspopup="listbox"]'))
+                         .map((b) => [b.name, b.textContent.trim()])),
+                results: report.results
+                    .filter((r) => r.detail && r.detail.includes('no option matched'))
+                    .map((r) => r.label),
+                stillOpen: document.querySelectorAll('[role="listbox"]').length,
+            };
+        }""",
+        {"profile": PROFILE, "remembered": REMEMBERED_RTX},
+    )
+
+    assert out["answers"]["q1"] == "No"
+    assert out["answers"]["q2"] == "No"
+    assert out["answers"]["q3"] == "No"
+    assert out["results"] == [], out["results"]
+    # Nothing may be left hanging open over the rest of the form.
+    assert out["stillOpen"] == 0
+
+
+def test_a_work_authorisation_question_is_not_a_self_identification_question(browser):
+    """8 U.S.C. 1324b calls a work-authorised applicant a "protected
+    individual", so RTX's "Are you a U.S. Person?" -- a work-authorisation
+    question wrapped in the statutory definition -- matched the sensitive
+    gate's "protected" keyword and was flagged as self-identification on every
+    form, with no answer the applicant could save that would ever fill it.
+    """
+    out = _evaluate_on(
+        browser, "workday_remembered.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.label.includes('U.S. Person'));
+            return {found: !!r, detail: r ? r.detail : null};
+        }""",
+        PROFILE,
+    )
+
+    assert out["found"], "the U.S. Person question was not reported at all"
+    assert "Self-identification" not in (out["detail"] or ""), out["detail"]
+
+
+def test_real_self_identification_wording_is_still_caught(browser):
+    """The guard above narrows what counts as a self-ID question, so this is
+    the other half of it: the wording that genuinely is one still is. Asserts
+    the fixture offered these at all first -- an empty report would pass the
+    absence check above trivially.
+    """
+    blank = {**PROFILE}
+    for k in ("gender", "pronouns", "hispanic_latino", "race_ethnicity",
+              "veteran_status", "disability_status"):
+        blank[k] = ""
+
+    out = _evaluate_on(
+        browser, "eeo.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            return report.results
+                .filter((r) => r.detail && r.detail.includes('Self-identification'))
+                .map((r) => r.label);
+        }""",
+        blank,
+    )
+
+    assert len(out) >= 3, f"the EEO fixture flagged almost nothing: {out}"
+
+
+def test_the_phone_number_never_goes_into_a_phone_extension_box(browser):
+    """"phone" is a whole word inside "Phone Extension", so the alias matched
+    and the full number went into the extension box -- on three Workday
+    tenants, each of which then cleared it. An extension is not part of a
+    phone number and is not on the profile: there is nothing to put here.
+    """
+    out = _evaluate_on(
+        browser, "workday_remembered.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const ext = document.getElementById('phone-ext');
+            return {
+                extValue: ext.value,
+                phoneValue: document.getElementById('phone-number').value,
+                extResult: (report.results.find((r) => r.label.includes('Extension')) || {}).action,
+            };
+        }""",
+        PROFILE,
+    )
+
+    assert out["extValue"] == "", f"phone extension got {out['extValue']!r}"
+    # The real phone box still fills -- the guard is not a blanket phone block.
+    assert out["phoneValue"] != ""
+    assert out["extResult"] != "filled"
+
+
+# --- "Learn this form" -----------------------------------------------------
+
+def test_learning_a_form_remembers_what_was_typed_into_it(browser):
+    """The form that comes round again: fill it in by hand once, press Learn,
+    and the next one like it fills itself. watch-and-learn does not cover
+    this -- it only watches what was left blank, and never sees an answer
+    entered before the panel opened or one the applicant corrected.
+    """
+    out = _evaluate_on(
+        browser, "unknowns.html",
+        """async (profile) => {
+            // The applicant fills it in themselves.
+            const typed = {q2: 'Octopus', q4: 'Available from June.'};
+            for (const [id, v] of Object.entries(typed)) {
+                const el = document.getElementById(id);
+                el.value = v;
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+            }
+            const learned = learnFromPage(profile);
+            // Nothing may be written to the page by learning it.
+            return {
+                answers: learned.answers,
+                stillTyped: document.getElementById('q2').value,
+                firstNameUntouched: document.getElementById('fn').value,
+            };
+        }""",
+        PROFILE,
+    )
+
+    assert out["answers"].get("what is your spirit animal") == "Octopus"
+    assert out["answers"].get("anything else we should know") == "Available from June."
+    assert out["stillTyped"] == "Octopus"
+    assert out["firstNameUntouched"] == ""
+
+
+def test_learning_a_form_never_puts_a_self_id_answer_in_the_label_store(browser):
+    """The safety property, on the new path. A label-keyed answer is consulted
+    before every other check, so one holding a disability or veteran
+    declaration would pour it into any field carrying that label. These go to
+    the profile-suggestion store instead, which is not written automatically.
+    """
+    blank = {**PROFILE}
+    for k in ("gender", "pronouns", "hispanic_latino", "race_ethnicity",
+              "veteran_status", "disability_status"):
+        blank[k] = ""
+
+    out = _evaluate_on(
+        browser, "eeo.html",
+        """async (profile) => {
+            const gender = document.getElementById('g');
+            gender.selectedIndex = 1;
+            gender.dispatchEvent(new Event('change', {bubbles: true}));
+            const vet = document.getElementById('v1');
+            vet.checked = true;
+            vet.dispatchEvent(new Event('change', {bubbles: true}));
+            const learned = learnFromPage(profile);
+            return {answers: learned.answers, suggestions: learned.suggestions,
+                    genderText: gender.options[gender.selectedIndex].text};
+        }""",
+        blank,
+    )
+
+    # Asserted non-empty first: an empty result would pass the absence check
+    # below for the wrong reason.
+    assert out["suggestions"], f"learned nothing at all: {out}"
+    assert out["suggestions"].get("gender") == out["genderText"]
+    assert out["suggestions"].get("veteran_status") == "I am not a protected veteran"
+
+    joined = " ".join(out["answers"].keys()).lower()
+    assert "gender" not in joined, out["answers"]
+    assert "veteran" not in joined, out["answers"]
+
+
+def test_a_field_the_applicant_hasnt_got_is_not_a_gap(browser):
+    """An empty profile field is normally a gap worth filling, which is why
+    the Gaps tab counts one. A middle name the applicant does not have is not
+    a gap -- blank is the answer -- and counting it put 18 occurrences of two
+    such fields at the top of a 250-occurrence list.
+    """
+    no_middle = {**PROFILE, "middle_name": ""}
+
+    out = _evaluate_on(
+        browser, "icims.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'middle_name');
+            return {
+                found: !!r,
+                action: r ? r.action : null,
+                detail: r ? r.detail : null,
+                box: (document.getElementById('PersonProfileFields.MiddleName') || {}).value,
+                counted: missedFields(report).map((m) => m.label),
+            };
+        }""",
+        no_middle,
+    )
+
+    assert out["found"], "the middle name field was not reported at all"
+    assert out["box"] == "", f"something was typed into it: {out['box']!r}"
+    # Not outstanding, and not counted against the next thing worth fixing.
+    assert out["action"] != "skipped_no_data"
+    assert not any("middle" in m.lower() for m in out["counted"]), out["counted"]
+
+
+def test_a_field_that_is_merely_empty_is_still_a_gap(browser):
+    """The other half: the counting still works for everything else, or the
+    check above passes because nothing is ever counted.
+    """
+    out = _evaluate_on(
+        browser, "icims.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            return missedFields(report).length;
+        }""",
+        {**PROFILE, "middle_name": ""},
+    )
+
+    assert out > 0
+
+
+def test_the_panel_offers_autofill_and_learn_as_separate_presses(browser):
+    """Running alongside another autofill extension, filling on arrival is the
+    wrong default: both tools listen for the same change events and overwrite
+    each other. The panel has to be able to open having touched nothing, and
+    let the applicant say which of the two things they want on this form.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'screening.html')}")
+        for js in SCRIPT_FILES + ["panel.js"]:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async () => {
+                const panel = createPanel();
+                const pressed = [];
+                panel.onFill(async () => { pressed.push('fill'); });
+                panel.onLearn(async () => { pressed.push('learn'); return 'done'; });
+
+                const root = document.getElementById('ja-autofill-panel').shadowRoot;
+                const fill = root.querySelector('button.fill');
+                const learn = root.querySelector('button.learn');
+                const labels = {fillText: fill.textContent, learnText: learn.textContent};
+
+                // Each handler is async and relabels its button while it runs,
+                // so let both settle before reading anything back.
+                fill.click();
+                await new Promise((r) => setTimeout(r, 50));
+                learn.click();
+                await new Promise((r) => setTimeout(r, 50));
+
+                return {
+                    ...labels,
+                    hasBoth: !!fill && !!learn,
+                    // Back to their resting labels, not stuck on "Filling...".
+                    fillAfter: fill.textContent,
+                    learnAfter: learn.textContent,
+                    enabledAfter: !fill.disabled && !learn.disabled,
+                    pressed,
+                };
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["hasBoth"]
+    assert out["fillText"] == "Autofill"
+    assert out["learnText"] == "Learn this form"
+    assert out["pressed"] == ["fill", "learn"]
+    assert out["fillAfter"] == "Autofill"
+    assert out["learnAfter"] == "Learn this form"
+    assert out["enabledAfter"]
+
+
+def test_the_fill_is_a_function_the_button_can_call_rather_than_the_script_body():
+    """run.js is not loaded by the browser fixtures, so this is a static check
+    of the shape the buttons depend on: the fill has to be callable more than
+    once, and the things that read its report have to tolerate it not having
+    run at all.
+    """
+    src = open(os.path.join(EXT_DIR, "run.js"), encoding="utf-8").read()
+
+    assert "async function doFill()" in src
+    assert "panel?.onFill(doFill)" in src
+    # Manual mode leaves report null; both readers have to be guarded.
+    assert src.count("if (report && (!settings || settings.watch_and_learn !== false))") == 2
+    assert "let report = null;" in src
+
+
+def test_the_panel_can_be_dragged_off_the_submit_button(browser):
+    """It is injected over someone else's form, and where it lands is often
+    exactly where the submit button is. Dragging it by the header moves it;
+    the header's own buttons stay buttons rather than becoming a grab handle.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'screening.html')}")
+        for js in SCRIPT_FILES + ["panel.js"]:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """() => {
+                const panel = createPanel();
+                const root = document.getElementById('ja-autofill-panel').shadowRoot;
+                const wrap = root.querySelector('.wrap');
+                const head = root.querySelector('header');
+
+                const drag = (fromX, fromY, toX, toY, target) => {
+                    (target || head).dispatchEvent(new PointerEvent('pointerdown', {
+                        clientX: fromX, clientY: fromY, bubbles: true, composed: true}));
+                    window.dispatchEvent(new PointerEvent('pointermove', {
+                        clientX: toX, clientY: toY, bubbles: true}));
+                    window.dispatchEvent(new PointerEvent('pointerup', {bubbles: true}));
+                };
+
+                const before = wrap.getBoundingClientRect();
+                drag(before.left + 40, before.top + 10, 300, 400);
+                const afterDrag = wrap.getBoundingClientRect();
+
+                // Pressing a header button must not drag the panel with it.
+                const parked = wrap.getBoundingClientRect();
+                drag(parked.left + 6, parked.top + 10, 900, 20,
+                     root.querySelector('button.learn'));
+                const afterButton = wrap.getBoundingClientRect();
+
+                // Hurled far off-screen, a corner has to stay reachable.
+                drag(afterButton.left + 40, afterButton.top + 10, -5000, -5000);
+                const afterYeet = wrap.getBoundingClientRect();
+
+                return {
+                    movedX: Math.round(afterDrag.left), movedY: Math.round(afterDrag.top),
+                    startedRight: Math.round(before.left),
+                    buttonMovedTo: Math.round(afterButton.left),
+                    parkedAt: Math.round(parked.left),
+                    yeetX: Math.round(afterYeet.left), yeetY: Math.round(afterYeet.top),
+                    width: Math.round(afterYeet.width),
+                    viewport: {w: window.innerWidth, h: window.innerHeight},
+                };
+            }"""
+        )
+    finally:
+        page.close()
+
+    # It actually moved, and to roughly where it was dragged.
+    assert out["movedX"] != out["startedRight"]
+    assert abs(out["movedX"] - 260) <= 2, out
+    assert abs(out["movedY"] - 390) <= 2, out
+    # The button press left it where it was.
+    assert out["buttonMovedTo"] == out["parkedAt"], out
+    # Still grabbable after being thrown at the top-left corner.
+    assert out["yeetX"] + out["width"] >= 64, out
+    assert out["yeetY"] >= 0, out
+
+
+def test_the_panel_does_not_run_the_full_height_of_the_window(browser):
+    """A full-height right rail covers whatever the page has down that side,
+    which on an application form is usually the submit button.
+    """
+    page = browser.new_page()
+    try:
+        page.set_viewport_size({"width": 1280, "height": 900})
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'screening.html')}")
+        for js in SCRIPT_FILES + ["panel.js"]:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """async (profile) => {
+                const report = await fillForm(profile, null, {});
+                const panel = createPanel();
+                panel.showResults(report);
+                const wrap = document.getElementById('ja-autofill-panel')
+                    .shadowRoot.querySelector('.wrap');
+                const box = wrap.getBoundingClientRect();
+                return {height: box.height, width: box.width, viewportH: window.innerHeight};
+            }""",
+            PROFILE,
+        )
+    finally:
+        page.close()
+
+    # Leaves room below it even with a full report showing.
+    assert out["height"] < out["viewportH"] * 0.92, out
+    assert out["width"] <= 320, out
+
+
+# --- Workday's race/ethnicity wording --------------------------------------
+
+WORKDAY_ETHNICITY = [
+    ("Asian", "Asian (Not Hispanic or Latino) (United States of America)"),
+    ("White", "White (Not Hispanic or Latino) (United States of America)"),
+    ("Black or African American",
+     "Black or African American (Not Hispanic or Latino) (United States of America)"),
+    ("Hispanic or Latino", "Hispanic or Latino (United States of America)"),
+    ("Two or More Races",
+     "Two or More Races (Not Hispanic or Latino) (United States of America)"),
+    ("Decline to self-identify",
+     "I do not wish to self-identify my ethnicity (United States of America)"),
+]
+
+
+@pytest.mark.parametrize("saved,expected", WORKDAY_ETHNICITY)
+def test_a_saved_race_reaches_workdays_own_wording_for_it(browser, saved, expected):
+    """The answer was in the profile the whole time. bestOption scores
+    "Asian (Not Hispanic or Latino) (United States of America)" at 0.42
+    against a saved "Asian", under its 0.5 bar, so the question came back
+    required-and-blank on every Workday form -- and loosening that bar is the
+    wrong fix, because every non-Hispanic choice contains the string
+    "hispanic or latino" and a containment bonus picks the negation.
+    """
+    out = _evaluate_on(
+        browser, "workday_ethnicity.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'race_ethnicity');
+            return {
+                action: r ? r.action : null,
+                detail: r ? r.detail : null,
+                button: document.querySelector('button[aria-haspopup="listbox"]').textContent.trim(),
+                stillOpen: document.querySelectorAll('[role="listbox"]').length,
+            };
+        }""",
+        {**PROFILE, "race_ethnicity": saved},
+    )
+
+    assert out["action"] == "filled", out
+    assert out["button"] == expected, out
+    assert out["stillOpen"] == 0
+
+
+def test_an_unset_race_is_still_left_for_the_applicant(browser):
+    """The gate does not move: nothing is inferred, and unset stays flagged.
+    Without this the check above could be passing because the matcher got
+    loose rather than because it got right.
+    """
+    out = _evaluate_on(
+        browser, "workday_ethnicity.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results[0];
+            return {action: r.action, detail: r.detail,
+                    button: document.querySelector('button[aria-haspopup="listbox"]').textContent.trim()};
+        }""",
+        {**PROFILE, "race_ethnicity": ""},
+    )
+
+    assert out["action"] == "needs_review"
+    assert "Self-identification" in out["detail"]
+    assert out["button"] == "Select One"
+
+
+# --- A campus screening questionnaire --------------------------------------
+
+def test_a_question_asking_how_many_is_not_answered_from_a_noun_it_mentions(browser):
+    """"How many credit hours towards your degree...?" put the applicant's
+    "B.S." in a box asking for a number, because the label contains the word
+    "degree". Refusing the alias alone moved the wrong answer along rather
+    than stopping it: it fuzzy-matched gpa next, and then the machine-name
+    fallback matched gpa again off the field id, which carries the
+    questionnaire's name ("Campus - GPA Not Required - Clearance - 2025").
+    """
+    out = _evaluate_on(
+        browser, "campus_questionnaire.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.label.includes('credit hours'));
+            return {action: r.action, canonical: r.canonical, detail: r.detail,
+                    box: document.querySelector('textarea').value};
+        }""",
+        {**PROFILE, "gpa": "3.7"},
+    )
+
+    assert out["action"] != "filled", out
+    assert out["canonical"] is None, out
+    assert out["box"] == "", f"something was typed into it: {out['box']!r}"
+
+
+def test_how_many_years_of_experience_still_matches(browser):
+    """The other half: the guard only refuses a single-word alias and the
+    fuzzy pass, so a question naming the whole field still resolves.
+    """
+    page = browser.new_page()
+    try:
+        page.goto(f"file://{os.path.join(FIXTURES_DIR, 'campus_questionnaire.html')}")
+        for js in ["field_aliases.js", "matcher.js"]:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            """() => ({
+                years: matchField("How many years of experience do you have?"),
+                credits: matchField("How many credit hours towards your degree do you anticipate having completed by the time you would start this position?"),
+                gpa: matchField("What is your cumulative GPA?"),
+            })"""
+        )
+    finally:
+        page.close()
+
+    assert out["years"] == "years_experience"
+    assert out["credits"] is None
+    assert out["gpa"] == "gpa"
+
+
+@pytest.mark.parametrize("gpa,bracket", [
+    ("3.7", "3.5 or higher"),
+    ("4.0", "3.5 or higher"),
+    ("3.5", "3.5 or higher"),
+    ("3.49", "3.0 - 3.49"),
+    ("2.6", "2.5 - 2.99"),
+    ("2.0", "2.0 - 2.49"),
+    ("1.8", "Below 2.0"),
+    ("3.7/4.0", "3.5 or higher"),
+])
+def test_a_gpa_lands_in_the_bracket_that_contains_it(browser, gpa, bracket):
+    """A GPA dropdown offers ranges and a GPA is a number: no amount of string
+    matching gets 3.7 into "3.5 or higher".
+    """
+    out = _evaluate_on(
+        browser, "campus_questionnaire.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'gpa');
+            return {action: r.action, detail: r.detail};
+        }""",
+        {**PROFILE, "gpa": gpa},
+    )
+
+    assert out["action"] == "filled", out
+    assert out["detail"] == bracket, out
+
+
+def test_a_gpa_that_fits_no_bracket_is_left_alone(browser):
+    """Nothing is forced into the nearest bracket."""
+    out = _evaluate_on(
+        browser, "campus_questionnaire.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'gpa');
+            return {action: r.action, detail: r.detail};
+        }""",
+        {**PROFILE, "gpa": "first class honours"},
+    )
+
+    assert out["action"] != "filled", out
+
+
+# --- The resume upload iCIMS hides -----------------------------------------
+
+FAKE_RESUME = {
+    "name": "resume.pdf",
+    "dataUrl": "data:application/pdf;base64,JVBERi0xLjQgZmFrZQ==",
+}
+
+
+def test_a_resume_reaches_the_input_icims_hides(browser):
+    """iCIMS's file input is display:none with no id, no name and no label;
+    the "Upload Resume" button beside it is what the applicant sees and what
+    its own script wires up. Skipped for being invisible, the resume was
+    never attached on any iCIMS application -- and never reported as missing
+    either, since the field was not in the report at all.
+    """
+    out = _evaluate_on(
+        browser, "icims_resume.html",
+        """async (profile) => {
+            const fields = extractFields();
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'resume_file');
+            const input = document.querySelector('input[type=file]');
+            return {
+                labels: fields.map((f) => f.label),
+                action: r ? r.action : null,
+                attached: input.files.length ? input.files[0].name : null,
+            };
+        }""",
+        {**PROFILE, "resume_file": FAKE_RESUME},
+    )
+
+    assert out["labels"] == ["Upload Resume"], out
+    assert out["action"] == "filled", out
+    assert out["attached"] == "resume.pdf", out
+
+
+def test_a_missing_resume_is_reported_rather_than_silently_skipped(browser):
+    """Being invisible to the extractor is worse than being unanswerable:
+    with no resume saved the applicant should at least be told.
+    """
+    out = _evaluate_on(
+        browser, "icims_resume.html",
+        """async (profile) => {
+            const report = await fillForm(profile, null, {});
+            const r = report.results.find((x) => x.canonical === 'resume_file');
+            return {action: r ? r.action : null, detail: r ? r.detail : null};
+        }""",
+        {**PROFILE, "resume_file": None},
+    )
+
+    assert out["action"] == "needs_review"
+    assert "No resume saved" in out["detail"]
+
+
+def test_a_hidden_file_input_with_nothing_pointing_at_it_stays_hidden(browser):
+    """The exception is for an input a visible control plainly stands in for.
+    A hidden file input on its own is hidden for a reason and is left alone.
+    """
+    page = browser.new_page()
+    try:
+        page.set_content(
+            "<body><form>"
+            "<input type='file' style='display:none'>"
+            "<div><input type='file' style='display:none'>"
+            "<button type='button'>Continue</button></div>"
+            "<label for='v'>Email</label><input id='v'>"
+            "</form></body>"
+        )
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        out = page.evaluate(
+            "() => extractFields().map((f) => ({type: f.type, label: f.label}))"
+        )
+    finally:
+        page.close()
+
+    assert [f for f in out if f["type"] == "file"] == [], out
+    # Asserted non-empty, or the check above passes for the wrong reason.
+    assert any(f["label"] == "Email" for f in out), out
+
+
+# --- Reading a resume ------------------------------------------------------
+
+def _resume_call(browser, responses):
+    """Run parseResumeWithClaude against a stubbed fetch. `responses` is the
+    queue of {status, body} the fake API hands back, one per request.
+    """
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        return page.evaluate(
+            """async (responses) => {
+                const sent = [];
+                const queue = [...responses];
+                window.fetch = async (url, init) => {
+                    sent.push(JSON.parse(init.body));
+                    const next = queue.shift();
+                    return {
+                        ok: next.status === 200,
+                        status: next.status,
+                        text: async () => JSON.stringify(next.body),
+                    };
+                };
+                const result = await parseResumeWithClaude({
+                    apiKey: "sk-ant-test",
+                    text: "Jamie Rivera\\nTest Engineer at Test Industries",
+                });
+                return {sent, result};
+            }""",
+            responses,
+        )
+    finally:
+        page.close()
+
+
+def _ok(text):
+    return {"status": 200, "body": {"content": [{"type": "text", "text": text}]}}
+
+
+PARSED = json.dumps({
+    "education": [{"school": "State University", "degree": "B.S.",
+                   "field_of_study": "Mechanical Engineering", "graduation_year": "2027"}],
+    "experience": [],
+    "fields": {"first_name": "Jamie", "last_name": "Rivera", "email": "", "phone": "",
+               "city": "", "state": "", "linkedin_url": "", "github_url": "",
+               "portfolio_url": "", "gpa": "", "education_level": "", "languages": "",
+               "current_company": "", "current_title": ""},
+})
+
+
+def test_the_resume_schema_asks_for_one_shape_not_sixteen_thousand(browser):
+    """Every scalar optional under required: [] asks the schema compiler to
+    allow every subset of fourteen keys, and the API answered the whole
+    request with "Schema is too complex" -- so reading a resume failed before
+    the document was ever looked at. Requiring them all is one shape.
+    """
+    out = _resume_call(browser, [_ok(PARSED)])
+    schema = out["sent"][0]["output_config"]["format"]["schema"]
+    props = schema["properties"]["fields"]["properties"]
+
+    assert sorted(schema["properties"]["fields"]["required"]) == sorted(props.keys())
+    assert out["result"].get("error") is None, out["result"]
+
+
+def test_a_refused_schema_still_gets_the_resume_read(browser):
+    """A schema the API won't compile is a 400 before the resume is read, and
+    the applicant sees an error about a schema they have never heard of.
+    Asking for the same JSON in words guarantees nothing about the shape, but
+    it is worth more than nothing.
+    """
+    out = _resume_call(browser, [
+        {"status": 400, "body": {"error": {"message": "Schema is too complex."}}},
+        _ok("```json\n" + PARSED + "\n```"),
+    ])
+
+    assert len(out["sent"]) == 2, out["sent"]
+    # The retry drops the schema and asks in the prompt instead.
+    assert "output_config" not in out["sent"][1]
+    assert any(
+        "JSON only" in b.get("text", "")
+        for b in out["sent"][1]["messages"][0]["content"]
+    ), out["sent"][1]
+    # A fenced reply is still read.
+    assert out["result"]["parsed"]["fields"]["first_name"] == "Jamie", out["result"]
+
+
+def test_what_the_resume_does_not_say_is_not_offered_as_an_answer(browser):
+    """Requiring every scalar means the reply carries "" for everything the
+    document is silent about. An empty string offered as an import reads as
+    an answer, and accepting it would blank a field already filled in by hand.
+    """
+    out = _resume_call(browser, [_ok(PARSED)])
+    fields = out["result"]["parsed"]["fields"]
+
+    assert fields == {"first_name": "Jamie", "last_name": "Rivera"}, fields
+    # Asserted against something present, or the check above is vacuous.
+    assert out["result"]["parsed"]["education"][0]["school"] == "State University"
+
+
+def test_reading_a_resume_uses_sonnet(browser):
+    """Extraction against a fixed schema, checked by the applicant before any
+    of it becomes a profile -- not the judgement the fill itself needs.
+    """
+    out = _resume_call(browser, [_ok(PARSED)])
+    assert out["sent"][0]["model"] == "claude-sonnet-5", out["sent"][0]["model"]
+
+
+def test_sonnet_never_sends_the_fallback_beta_at_all(browser):
+    """Server-side refusal fallbacks exist for the models that run safety
+    classifiers and can answer with stop_reason: "refusal". Sonnet does not,
+    so sending the parameter there buys a 400 and a silent retry on every
+    request -- two calls where one would do.
+    """
+    out = _llm_call(
+        browser,
+        [{"status": 200, "body": _ok_body([
+            {"ja_id": "ja-1", "value": "First time.", "skip_reason": ""},
+        ])}],
+    )
+
+    assert len(out["sent"]) == 1, out["sent"]
+    assert out["sent"][0]["body"]["model"] == "claude-sonnet-5"
+    assert "anthropic-beta" not in out["sent"][0]["headers"]
+    assert "fallbacks" not in out["sent"][0]["body"]
+
+
+# --- Learning a mapping, not just an answer --------------------------------
+
+def _map_call(browser, body, profile=None, items=None):
+    page = browser.new_page()
+    try:
+        page.goto("about:blank")
+        page.add_script_tag(path=os.path.join(EXT_DIR, "llm.js"))
+        return page.evaluate(
+            """async ({body, profile, items}) => {
+                const sent = [];
+                window.fetch = async (url, init) => {
+                    sent.push(JSON.parse(init.body));
+                    return {ok: true, status: 200, text: async () => JSON.stringify(body)};
+                };
+                const result = await mapLabelsWithClaude({
+                    apiKey: "sk-ant-test", profile, items,
+                });
+                return {sent, result};
+            }""",
+            {"body": body, "profile": profile or {**PROFILE},
+             "items": items or [{"label": "home telephone", "answer": "(555) 123-4567"}]},
+        )
+    finally:
+        page.close()
+
+
+def _mapping_body(rows):
+    return {"content": [{"type": "text",
+                         "text": json.dumps({"mappings": rows})}]}
+
+
+def test_learning_asks_which_field_not_what_the_answer_is(browser):
+    """A remembered answer is keyed by this form's exact wording, so the same
+    question worded differently on the next site misses. An alias maps the
+    question to a profile field and holds for any wording of it.
+    """
+    out = _map_call(browser, _mapping_body([
+        {"label": "home telephone", "profile_field": "phone"},
+    ]))
+
+    assert out["result"]["mappings"] == {"home telephone": "phone"}
+    # The applicant's own answer goes along as context -- "Number" on its own
+    # says nothing -- but what comes back is a field name, never a value.
+    sent = json.dumps(out["sent"][0])
+    assert "(555) 123-4567" in sent
+    schema = out["sent"][0]["output_config"]["format"]["schema"]
+    props = schema["properties"]["mappings"]["items"]["properties"]
+    assert set(props) == {"label", "profile_field"}
+
+
+def test_a_mapping_onto_a_self_id_field_is_dropped(browser):
+    """HANDOFF rule 5: a learned label mapping may never point at a sensitive
+    field, because learned aliases are consulted before every other check and
+    one pointing at race_ethnicity would bypass the sensitive gate entirely.
+    Refused in the worker as well as by sanitizeLearnedAliases downstream.
+    """
+    out = _map_call(browser, _mapping_body([
+        {"label": "what is your background", "profile_field": "race_ethnicity"},
+        {"label": "do you agree to the terms", "profile_field": "consent_general"},
+        {"label": "have you ever been convicted", "profile_field": "criminal_history"},
+        {"label": "home telephone", "profile_field": "phone"},
+    ]))
+
+    # Asserted non-empty first, or the absence checks below pass trivially.
+    assert out["result"]["mappings"] == {"home telephone": "phone"}
+
+
+def test_a_sensitive_field_is_never_even_offered_as_a_choice(browser):
+    """The list of field names sent to the model leaves them out, so the
+    refusal above is a second line rather than the only one.
+    """
+    out = _map_call(browser, _mapping_body([]))
+    sent = json.dumps(out["sent"][0])
+
+    assert "race_ethnicity" not in sent, sent[:400]
+    assert "veteran_status" not in sent
+    assert "criminal_history" not in sent
+    assert "consent_general" not in sent
+    # Ordinary fields are offered, or the checks above mean nothing.
+    assert "phone" in sent and "linkedin_url" in sent
+
+
+def test_an_empty_mapping_is_not_stored_as_a_field_named_nothing(browser):
+    """"" is what the model is told to return when none of the fields fits,
+    and it has to stay nothing rather than becoming an alias to "".
+    """
+    out = _map_call(browser, _mapping_body([
+        {"label": "which shift suits you", "profile_field": ""},
+    ]))
+
+    assert out["result"]["mappings"] == {}
+
+
+def test_the_learn_button_runs_the_mapping_through_the_real_gate():
+    """run.js is not loaded by the browser fixtures, so this is a static check
+    that what comes back from the model goes through sanitizeLearnedAliases --
+    which reads field_aliases.js's own sets -- before it reaches storage.
+    """
+    src = open(os.path.join(EXT_DIR, "run.js"), encoding="utf-8").read()
+    learn = src[src.index("panel?.onLearn("):src.index("// Whatever arrived already filled")]
+
+    assert '"ja-learn-map"' in learn
+    assert "sanitizeLearnedAliases(reply.mappings, profile)" in learn
+    # The sanitized set is what gets stored, not the raw reply.
+    assert "learned: safe" in learn
+    assert "learned: reply.mappings" not in learn
+
+
+# --- iCIMS's own questionnaires --------------------------------------------
+
+BOEING_Q1 = "1. Do your current job duties involve Boeing under any of the following conditions?"
+BOEING_Q2 = ("2. Have you ever been employed by the U.S. Government (federal, state, county, "
+             "or local, including publicly funded institutions) in either a civilian or "
+             "military capacity?")
+
+
+def test_icims_radio_options_get_the_word_that_names_them(browser):
+    """The word is a bare text node after the input, with no <label>. Without
+    it there is no way to tell the Yes radio from the No one, and the whole
+    form was unanswerable for want of two words.
+    """
+    out = _evaluate_on(
+        browser, "icims_questionnaire.html",
+        """async () => extractFields()
+            .filter((f) => f.type === 'radio')
+            .map((f) => f.label)""",
+        None,
+    )
+
+    assert out == ["Yes", "No", "Yes", "No"], out
+
+
+def test_a_question_buried_under_its_own_bullet_lists_is_still_the_question(browser):
+    """Question 1 states itself and then spends three bullet lists qualifying
+    it. Over 300 characters the cell was given up on, and the nearest
+    preceding text -- the last bullet -- was taken as the question instead.
+    """
+    out = _evaluate_on(
+        browser, "icims_questionnaire.html",
+        """async () => {
+            const groups = {};
+            for (const f of extractFields()) {
+                if (f.type === 'radio') groups[f.name] = f.group_label;
+            }
+            return groups;
+        }""",
+        None,
+    )
+
+    assert out["icims_f_Q1"] == BOEING_Q1, out
+    assert out["icims_f_Q2"] == BOEING_Q2, out
+
+
+def test_a_question_written_straight_into_the_cell_is_read(browser):
+    """Question 6 is a textarea preceded by a bare text node.
+    nearestPrecedingText only walks previousElementSibling, so it had no
+    label at all -- nothing to match against and nothing to learn.
+    """
+    out = _evaluate_on(
+        browser, "icims_questionnaire.html",
+        """async () => (extractFields().find((f) => f.tag === 'textarea') || {}).label""",
+        None,
+    )
+
+    assert out.startswith("6. Describe how you found out about this job"), out
+
+
+def test_an_icims_questionnaire_fills_from_what_it_was_taught(browser):
+    """None of these can come from a profile -- they are about this company.
+    What matters is that they can be answered once and fill from then on,
+    which needs every one of the three readings above to work.
+    """
+    out = _evaluate_on(
+        browser, "icims_questionnaire.html",
+        """async ({profile, remembered}) => {
+            setLearnedAnswers(remembered);
+            const report = await fillForm(profile, null, {});
+            const checked = [...document.querySelectorAll('input[type=radio]:checked')]
+                .map((el) => el.id);
+            return {checked, filled: report.results.filter((r) => r.action === 'filled').length};
+        }""",
+        {"profile": PROFILE, "remembered": {
+            _norm_q(BOEING_Q1): "No",
+            _norm_q(BOEING_Q2): "No",
+        }},
+    )
+
+    assert sorted(out["checked"]) == ["icims_f_Q1_no", "icims_f_Q2_no"], out
+
+
+def _norm_q(text):
+    import re
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", text.lower())).strip()
+
+
+# --- Asking the panel to fix something it already filled -------------------
+
+FILLED_FORM = """<body><form>
+  <label for="d">Degree</label>
+  <select id="d" name="degree">
+    <option value="">Select</option><option>B.S.</option><option>M.S.</option>
+  </select>
+  <label for="g">Gender</label>
+  <select id="g" name="gender">
+    <option value="">Select</option><option>Male</option><option>Female</option>
+  </select>
+  <label for="q">What interests you about this role?</label>
+  <textarea id="q" name="q"></textarea>
+</form></body>"""
+
+
+def _offered(browser, include_filled):
+    page = browser.new_page()
+    try:
+        page.set_content(FILLED_FORM)
+        for js in SCRIPT_FILES:
+            page.add_script_tag(path=os.path.join(EXT_DIR, js))
+        return page.evaluate(
+            """async ({profile, includeFilled}) => {
+                const report = await fillForm(profile, null, {});
+                const fields = llmFieldsFor(report, includeFilled ? {includeFilled: true} : undefined);
+                return {
+                    labels: fields.map((f) => f.label),
+                    degree: fields.find((f) => f.label === 'Degree') || null,
+                    filledDegree: (report.results.find((r) => r.canonical === 'degree') || {}).action,
+                };
+            }""",
+            {"profile": {**PROFILE, "degree": "B.S.", "gender": "Male"},
+             "includeFilled": include_filled},
+        )
+    finally:
+        page.close()
+
+
+def test_the_chat_can_reach_a_field_the_fill_already_set(browser):
+    """"I can't edit those fields since they're locked from this side" -- the
+    chat was handed only what the fill left alone, so the one thing anybody
+    asks it for, fixing something that came out wrong, was the one thing it
+    could not do.
+    """
+    without = _offered(browser, False)
+    with_filled = _offered(browser, True)
+
+    assert with_filled["filledDegree"] == "filled", with_filled
+    # The fill pass still must not be handed it: re-answering what is done
+    # costs money and invites a worse answer.
+    assert "Degree" not in without["labels"], without["labels"]
+    assert "Degree" in with_filled["labels"], with_filled["labels"]
+    # And it carries what is in the box, so the correction can be asked for
+    # by what is wrong with it.
+    assert with_filled["degree"]["current"] == "B.S.", with_filled["degree"]
+
+
+def test_a_self_id_question_stays_out_of_reach_either_way(browser):
+    """Widening what the chat may touch moves nothing about what may be
+    answered. Asserted against a list that is otherwise non-empty.
+    """
+    with_filled = _offered(browser, True)
+
+    assert with_filled["labels"], "nothing was offered at all"
+    assert "Gender" not in with_filled["labels"], with_filled["labels"]
+
+
+# --- The panel's own controls ----------------------------------------------
+
+def _panel_page(browser, seed):
+    """A panel with chrome.storage stubbed under it, so what it remembers can
+    be read back.
+    """
+    page = browser.new_page()
+    page.add_init_script(
+        """((seedJson) => {
+            const store = JSON.parse(seedJson);
+            window.__store = store;
+            window.chrome = {storage: {local: {
+                get: (keys, cb) => {
+                    const out = Object.fromEntries(
+                        (Array.isArray(keys) ? keys : [keys])
+                            .filter((k) => k in store).map((k) => [k, store[k]]));
+                    if (cb) cb(out);
+                    return Promise.resolve(out);
+                },
+                set: (obj) => { Object.assign(store, obj); return Promise.resolve(); },
+            }}};
+        })(SEED);""".replace("SEED", repr(json.dumps(seed)))
+    )
+    page.goto("about:blank")
+    page.set_content("<body><form><label for='a'>Email</label><input id='a'></form></body>")
+    for js in SCRIPT_FILES + ["panel.js"]:
+        page.add_script_tag(path=os.path.join(EXT_DIR, js))
+    page.evaluate("() => { window.__panel = createPanel(); }")
+    page.wait_for_timeout(120)
+    return page
+
+
+def test_closing_the_panel_leaves_something_to_bring_it_back(browser):
+    """It used to remove itself outright, with nothing to reopen it short of
+    running the fill again.
+    """
+    page = _panel_page(browser, {"settings": {}})
+    try:
+        out = page.evaluate(
+            """() => {
+                const root = document.getElementById('ja-autofill-panel').shadowRoot;
+                const wrap = root.querySelector('.wrap');
+                const launcher = root.querySelector('.launcher');
+                root.querySelector('button.close').click();
+                const closed = {wrap: wrap.style.display, launcher: launcher.style.display};
+                launcher.click();
+                return {closed, reopened: {wrap: wrap.style.display, launcher: launcher.style.display},
+                        stillThere: !!document.getElementById('ja-autofill-panel')};
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["closed"] == {"wrap": "none", "launcher": "flex"}, out
+    assert out["reopened"] == {"wrap": "flex", "launcher": "none"}, out
+    assert out["stillThere"]
+
+
+def test_the_panel_can_be_made_wider_and_stays_that_way(browser):
+    page = _panel_page(browser, {"settings": {}})
+    try:
+        out = page.evaluate(
+            """async () => {
+                const root = document.getElementById('ja-autofill-panel').shadowRoot;
+                const wrap = root.querySelector('.wrap');
+                const narrow = wrap.getBoundingClientRect().width;
+                root.querySelector('button.big').click();
+                await new Promise((r) => setTimeout(r, 50));
+                return {narrow, wide: wrap.getBoundingClientRect().width,
+                        remembered: window.__store.panel_big};
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["wide"] > out["narrow"], out
+    assert out["remembered"] is True, out
+
+
+def test_a_panel_opened_after_being_widened_opens_wide(browser):
+    page = _panel_page(browser, {"settings": {}, "panel_big": True})
+    try:
+        wide = page.evaluate(
+            """() => document.getElementById('ja-autofill-panel')
+                .shadowRoot.querySelector('.wrap').classList.contains('big')"""
+        )
+    finally:
+        page.close()
+
+    assert wide
+
+
+def test_ai_assist_can_be_turned_off_from_the_panel(browser):
+    """Three clicks away on the options page is too far from where it is
+    being used. The box below says what off means rather than looking broken.
+    """
+    page = _panel_page(browser, {"settings": {"use_llm": True, "manual_fill": True}})
+    try:
+        out = page.evaluate(
+            """async () => {
+                const root = document.getElementById('ja-autofill-panel').shadowRoot;
+                const box = root.querySelector('.ai-on');
+                const ask = root.querySelector('textarea');
+                const on = {checked: box.checked, askDisabled: ask.disabled};
+                box.checked = false;
+                box.dispatchEvent(new Event('change'));
+                await new Promise((r) => setTimeout(r, 50));
+                return {on, off: {askDisabled: ask.disabled,
+                                  note: root.querySelector('.ai-note').textContent},
+                        stored: window.__store.settings};
+            }"""
+        )
+    finally:
+        page.close()
+
+    assert out["on"] == {"checked": True, "askDisabled": False}, out
+    assert out["off"]["askDisabled"] is True
+    assert "off" in out["off"]["note"]
+    assert out["stored"]["use_llm"] is False
+    # Every other setting survives the write.
+    assert out["stored"]["manual_fill"] is True, out["stored"]

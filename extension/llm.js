@@ -17,7 +17,28 @@
 
 var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 var ANTHROPIC_VERSION = "2023-06-01";
-var LLM_MODEL = "claude-opus-5";
+var LLM_MODEL = "claude-sonnet-5";
+
+var RESUME_MODEL = "claude-sonnet-5";
+
+// Server-side refusal fallbacks exist for the models that run safety
+// classifiers and can answer with stop_reason: "refusal" -- Opus and Fable.
+// Sonnet does not, so sending the parameter there buys a 400 and a silent
+// retry on every single request. Keyed off the model rather than hardcoded,
+// so moving a model back up picks it up again.
+function _wantsFallbacks(model) {
+  return /^claude-(opus|fable|mythos)/.test(String(model));
+}
+
+// Only sent if the schema itself is refused; otherwise the schema does this.
+var RESUME_JSON_FALLBACK =
+  'Reply with JSON only -- no prose, no code fence. Shape: ' +
+  '{"education":[{"school","degree","field_of_study","graduation_year"}],' +
+  '"experience":[{"company","title","location","start_date","end_date","description"}],' +
+  '"fields":{"first_name","last_name","email","phone","city","state",' +
+  '"linkedin_url","github_url","portfolio_url","gpa","education_level",' +
+  '"languages","current_company","current_title"}}. ' +
+  'Use "" for anything the resume does not state.';
 var FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
 var LLM_SYSTEM_RULES = `You are helping one job applicant fill in a job
@@ -230,10 +251,41 @@ async function _postMessages(apiKey, body, useFallbacks) {
 // a lot of them. Extension storage is finite, so the stores that grow with
 // use are trimmed to the most recently added -- object key order is
 // insertion order, and a merge puts new entries last.
+// An answer carrying {v, n, t} is dropped on how little it has been wanted,
+// the way misses already are -- the one asked for on nine forms outlives the
+// one seen once, whichever arrived first. Bare-string entries (aliases, and
+// answers stored before the record shape) have nothing to sort on and keep
+// the old insertion-order behaviour; they sort last, so a record with any
+// history beats an entry with none.
 function capLearned(map, limit = 2000) {
   const entries = Object.entries(map || {});
   if (entries.length <= limit) return { ...(map || {}) };
-  return Object.fromEntries(entries.slice(entries.length - limit));
+
+  const weight = (e) => (e && typeof e === "object" ? [e.n || 0, e.t || 0] : [-1, -1]);
+  const ranked = entries
+    .map((pair, i) => ({ pair, i, w: weight(pair[1]) }))
+    .sort((a, b) => (b.w[0] - a.w[0]) || (b.w[1] - a.w[1]) || (b.i - a.i));
+  return Object.fromEntries(ranked.slice(0, limit).map((r) => r.pair));
+}
+
+// Merging, rather than overwriting: an answer asked for again is the same
+// answer confirmed, and that is the only record of how much any of this is
+// actually worth keeping. A changed answer replaces the old one and starts
+// its count over -- they corrected it, so the old count was counting
+// something else.
+function mergeLearnedAnswers(existing, incoming, now) {
+  const at = now || Date.now();
+  const out = { ...(existing || {}) };
+  for (const [label, value] of Object.entries(incoming || {})) {
+    if (value === null || value === undefined || value === "") continue;
+    const had = out[label];
+    const previous = had && typeof had === "object" ? had.v : had;
+    out[label] =
+      previous === value
+        ? { v: value, n: ((had && had.n) || 1) + 1, t: at }
+        : { v: value, n: 1, t: at };
+  }
+  return out;
 }
 
 // Misses carry their own count and timestamp, so the ones worth keeping are
@@ -311,7 +363,7 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeS
     ],
   };
 
-  let result = await _postMessages(apiKey, body, true);
+  let result = await _postMessages(apiKey, body, _wantsFallbacks(body.model));
   // The fallbacks parameter and its beta header are the newest thing in this
   // request. If the API rejects the shape, the useful thing is still to get
   // an answer, so try once more without them rather than failing the fill.
@@ -378,7 +430,12 @@ async function resolveWithClaude({ apiKey, profile, fields, pageUrl, job, routeS
 var CHAT_SYSTEM_RULES = `You are the assistant inside a job-application
 autofill extension, talking to the applicant while they look at a form it
 has just filled. You are given their profile, what the fill did to every
-field, and which fields can still be changed.
+field, and which fields can be changed.
+
+A field the fill already set is on that list too, with "current" holding
+what is in it now. Correcting one is an ordinary request and you should
+just do it -- "that date is wrong", "make this shorter", "the degree should
+be a B.S." -- rather than saying you cannot reach it.
 
 Answer plainly and briefly -- this is a narrow side panel, not a document.
 Two or three sentences is usually right. No preamble, no restating their
@@ -536,7 +593,18 @@ var RESUME_SCHEMA = {
         education_level: { type: "string" }, languages: { type: "string" },
         current_company: { type: "string" }, current_title: { type: "string" },
       },
-      required: [],
+      // Every one of these is required, and absent means "". They used to be
+      // optional with required: [], which asks the schema compiler to allow
+      // every subset of fourteen keys -- 16,384 of them -- and the API
+      // rejected the whole request with "Schema is too complex", so reading a
+      // resume failed outright. Requiring them all is one shape instead, and
+      // RESUME_RULES already says to leave absent things empty; _pruneEmpty
+      // drops the blanks before any of this is offered as an import.
+      required: [
+        "first_name", "last_name", "email", "phone", "city", "state",
+        "linkedin_url", "github_url", "portfolio_url", "gpa",
+        "education_level", "languages", "current_company", "current_title",
+      ],
       additionalProperties: false,
     },
   },
@@ -558,6 +626,159 @@ Dates as YYYY-MM. A job still held ends "Present". Newest first.
 Each experience description: one or two sentences of what they actually did,
 drawn from the bullets, not a rewrite of them.`;
 
+// Under the schema the reply is bare JSON. Down the worded fallback above it
+// can arrive wrapped in a ```json fence, which JSON.parse chokes on.
+function _jsonFrom(text) {
+  const fenced = String(text).match(/```(?:json)?\s*([\s\S]*?)```/);
+  return (fenced ? fenced[1] : String(text)).trim();
+}
+
+// Every scalar is required now, so the reply carries "" for everything the
+// resume does not state. An empty string offered as an import reads as an
+// answer -- and would blank a field the applicant had already filled in by
+// hand -- so the blanks come out before anyone is shown them.
+function _pruneEmpty(parsed) {
+  const out = { ...parsed };
+  if (out.fields && typeof out.fields === "object") {
+    const kept = {};
+    for (const [k, v] of Object.entries(out.fields)) {
+      if (typeof v === "string" ? v.trim() !== "" : v !== null && v !== undefined) {
+        kept[k] = v;
+      }
+    }
+    out.fields = kept;
+  }
+  for (const list of ["education", "experience"]) {
+    if (!Array.isArray(out[list])) continue;
+    out[list] = out[list].filter(
+      (row) => row && typeof row === "object" &&
+        Object.values(row).some((v) => String(v == null ? "" : v).trim() !== "")
+    );
+  }
+  return out;
+}
+
+// "Learn this form" with the AI pass on. The local learn already stored the
+// applicant's own answers keyed by label, which is exact and brittle: the
+// same question worded differently on the next site misses. This asks Claude
+// only which profile field each question is asking for -- never what the
+// answer is, which the applicant has already supplied -- and the mapping
+// generalises to any wording of that field anywhere.
+//
+// The answer is sent as context because the question alone is often
+// ambiguous ("Number" on an iCIMS phone row), and the shape of what is in
+// the box is what disambiguates it. Values are truncated: this is about
+// which field, not what was written.
+// The service worker loads llm.js and nothing else, so field_aliases.js's
+// SELF_ID_FIELDS / CONSENT_FIELDS are not in scope here. This list is not the
+// gate -- sanitizeLearnedAliases in filler.js is, and it reads those sets
+// directly, so an alias reaching storage is checked against the real thing.
+// This copy exists so these field names are never offered to the model in the
+// first place, and so a mapping naming one is dropped before it leaves the
+// worker. If it ever drifts from field_aliases.js the gate still holds.
+var _UNLEARNABLE_FOR_LEARN = new Set([
+  "gender", "pronouns", "hispanic_latino", "race_ethnicity", "veteran_status",
+  "disability_status", "sexual_orientation", "transgender_status",
+  "criminal_history", "consent_general", "consent_background_check",
+  "consent_drug_test", "sms_consent", "custom_answers", "cover_letter_text",
+]);
+
+var LEARN_RULES = `Each item below is a question from a job application form
+and the answer this applicant gave it.
+
+For each one, name the single profile field the question is asking for, using
+the exact field name from the list. This is a naming task, not a judgement:
+if none of the fields is what the question asks for, return "" rather than
+the closest thing. A wrong mapping sends the wrong answer out on every later
+application, and "" costs nothing -- the answer they gave is already stored
+against this exact wording either way.
+
+Return "" for anything asking about race, ethnicity, gender, disability,
+veteran status, criminal history, or consent to anything. Those are never
+learned from a mapping.`;
+
+var LEARN_SCHEMA = {
+  type: "object",
+  properties: {
+    mappings: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          profile_field: {
+            type: "string",
+            description: 'Exact field name from the list, or "" if none fits.',
+          },
+        },
+        required: ["label", "profile_field"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["mappings"],
+  additionalProperties: false,
+};
+
+async function mapLabelsWithClaude({ apiKey, profile, items }) {
+  if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
+  const asked = (items || []).filter((i) => i && i.label).slice(0, 60);
+  if (!asked.length) return { mappings: {} };
+
+  const fieldNames = Object.keys(profile || {}).filter((k) => !_UNLEARNABLE_FOR_LEARN.has(k));
+
+  const result = await _postMessages(
+    apiKey,
+    {
+      model: LLM_MODEL,
+      max_tokens: 4000,
+      output_config: { effort: "low", format: { type: "json_schema", schema: LEARN_SCHEMA } },
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Profile fields:\n${fieldNames.join(", ")}`,
+              cache_control: { type: "ephemeral" },
+            },
+            { type: "text", text: LEARN_RULES },
+            {
+              type: "text",
+              text: asked
+                .map((i) => `Q: ${i.label}\nA: ${String(i.answer || "").slice(0, 120)}`)
+                .join("\n\n"),
+            },
+          ],
+        },
+      ],
+    },
+    false
+  );
+  if (!result.ok) return { error: _apiErrorMessage(result) };
+  if (!result.body || typeof result.body !== "object") {
+    return { error: `Unreadable reply from the API: ${result.raw.slice(0, 200)}` };
+  }
+
+  const block = (result.body.content || []).find((b) => b.type === "text");
+  if (!block) return { error: "Nothing came back." };
+  try {
+    const parsed = JSON.parse(_jsonFrom(block.text));
+    const mappings = {};
+    for (const row of (parsed && parsed.mappings) || []) {
+      if (!row || !row.label || !row.profile_field) continue;
+      // Claude naming a field it was told to leave alone is the one thing
+      // that would defeat the gate, so it is refused here too rather than
+      // relied on from the prompt.
+      if (_UNLEARNABLE_FOR_LEARN.has(row.profile_field)) continue;
+      mappings[String(row.label)] = String(row.profile_field);
+    }
+    return { mappings, usage: result.body.usage || null };
+  } catch (exc) {
+    return { error: `Could not read the result: ${exc}` };
+  }
+}
+
 async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   if (!apiKey) return { error: "No API key saved -- add one under Options -> AI assist." };
 
@@ -574,16 +795,41 @@ async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   }
   content.push({ type: "text", text: RESUME_RULES });
 
-  const result = await _postMessages(
+  const base = {
+    model: RESUME_MODEL,
+    max_tokens: 8000,
+    messages: [{ role: "user", content }],
+  };
+
+  let result = await _postMessages(
     apiKey,
     {
-      model: LLM_MODEL,
-      max_tokens: 8000,
+      ...base,
       output_config: { effort: "medium", format: { type: "json_schema", schema: RESUME_SCHEMA } },
-      messages: [{ role: "user", content }],
     },
     false
   );
+
+  // A schema the API won't compile is a 400 before the resume is ever read,
+  // and the applicant sees the import fail with an API error about a schema
+  // they have never heard of. Asking for the same JSON in words is worse --
+  // nothing guarantees the shape -- but it is worth more than nothing, and
+  // everything below already copes with a reply that doesn't parse.
+  if (!result.ok && result.status === 400) {
+    result = await _postMessages(
+      apiKey,
+      {
+        ...base,
+        messages: [
+          {
+            role: "user",
+            content: [...content, { type: "text", text: RESUME_JSON_FALLBACK }],
+          },
+        ],
+      },
+      false
+    );
+  }
   if (!result.ok) return { error: _apiErrorMessage(result) };
   // A 200 whose body isn't JSON: a proxy's error page, a captive portal, a
   // truncated stream. Everything below reads fields off it.
@@ -594,11 +840,11 @@ async function parseResumeWithClaude({ apiKey, text, fileData, mediaType }) {
   const block = (result.body.content || []).find((b) => b.type === "text");
   if (!block) return { error: "Nothing came back." };
   try {
-    const parsed = JSON.parse(block.text);
+    const parsed = JSON.parse(_jsonFrom(block.text));
     if (!parsed || typeof parsed !== "object") {
       return { error: "The result came back in a shape this can't read." };
     }
-    return { parsed };
+    return { parsed: _pruneEmpty(parsed) };
   } catch (exc) {
     return { error: `Could not read the result: ${exc}` };
   }

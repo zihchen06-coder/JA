@@ -1,0 +1,131 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Workday application questions, answered on an earlier application</title>
+<!--
+  The questions from a real Workday "Application Questions" step that the
+  applicant had already answered once on an identical form, plus the phone
+  row from the same flow's contact step.
+
+  Structure is the same as workday_questions.html: every question is a
+  <button aria-haspopup="listbox"> with no <select> and no options in the DOM
+  until the button is clicked, and the script at the bottom stands in for
+  Workday's own bundle by implementing the ARIA contract.
+
+  Three things here were wrong at once, all of them on this one page:
+
+  1. None of these questions matches a profile field, so they fill from
+     learned_answers -- and that path never opened the widget, so it read an
+     empty option list and reported "Remembered 'No', but no option matched
+     it" for every one of them.
+  2. The U.S. Person question is a work-authorisation question. 8 U.S.C.
+     1324b calls a work-authorised applicant a "protected individual", the
+     sensitive gate matched on "protected", and it was flagged as a
+     self-identification question on every form, forever.
+  3. "Phone Extension" contains "phone" as a whole word, so the alias matched
+     and the full phone number went into the extension box.
+-->
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 24px; }
+  fieldset { border: 1px solid #ccc; margin: 0 0 16px; padding: 12px; }
+  button[aria-haspopup="listbox"] { display: block; width: 280px; text-align: left; padding: 6px 8px; }
+  ul[role="listbox"] { position: absolute; z-index: 10; background: #fff;
+    border: 1px solid #999; list-style: none; margin: 2px 0 0; padding: 4px 0; width: 280px; }
+  li[role="option"] { padding: 4px 8px; cursor: pointer; }
+</style>
+
+<div data-automation-id="applyFlowPrimaryQuestionsPage">
+<div role="group" aria-labelledby="primaryQuestionnaire-section">
+
+<div data-automation-id="formField-q1" class="css-gvoll6">
+<fieldset>
+<legend><div class="css-f6y8ld"><div data-automation-id="richText"><p>
+<b>Did you previously work for RTX (including its predecessors or any of its businesses) in any capacity?</b>
+<abbr title="required" class="requiredAsterisk">*</abbr>
+</p></div></div></legend>
+<div class="css-12zup1l">
+<button aria-haspopup="listbox" type="button" value="" aria-label=" Select One Required" name="q1" id="primaryQuestionnaire--q1">Select One</button>
+</div>
+</fieldset>
+</div>
+
+<div data-automation-id="formField-q2" class="css-gvoll6">
+<fieldset>
+<legend><div class="css-f6y8ld"><div data-automation-id="richText"><p>
+<b>Are you a CURRENT U.S. federal government civilian or military (active duty or reserves) employee?</b>
+<abbr title="required" class="requiredAsterisk">*</abbr>
+</p></div></div></legend>
+<div class="css-12zup1l">
+<button aria-haspopup="listbox" type="button" value="" aria-label=" Select One Required" name="q2" id="primaryQuestionnaire--q2">Select One</button>
+</div>
+</fieldset>
+</div>
+
+<div data-automation-id="formField-q3" class="css-gvoll6">
+<fieldset>
+<legend><div class="css-f6y8ld"><div data-automation-id="richText"><p>
+<b>Are you a FORMER U.S. federal government civilian or military (active duty or reserves) employee?</b>
+<abbr title="required" class="requiredAsterisk">*</abbr>
+</p></div></div></legend>
+<div class="css-12zup1l">
+<button aria-haspopup="listbox" type="button" value="" aria-label=" Select One Required" name="q3" id="primaryQuestionnaire--q3">Select One</button>
+</div>
+</fieldset>
+</div>
+
+<div data-automation-id="formField-q4" class="css-gvoll6">
+<fieldset>
+<legend><div class="css-f6y8ld"><div data-automation-id="richText"><p>
+<b>A U.S. Person is a lawful permanent resident as defined in 8 U.S.C. 1101(a)(20) or who is a protected individual as defined by 8 U.S.C. 1324b(a)(3). U.S. citizens, U.S. nationals, U.S. permanent residents, or individuals granted refugee or asylee status in the U.S. are considered U.S. persons. NOTE: Having an employment authorization document (EAD) to work in the United States (for example, an H1-B visa) does NOT qualify you as a U.S. Person. For a complete definition of a U.S. Person click here. Are you a U.S. Person?</b>
+<abbr title="required" class="requiredAsterisk">*</abbr>
+</p></div></div></legend>
+<div class="css-12zup1l">
+<button aria-haspopup="listbox" type="button" value="" aria-label=" Select One Required" name="q4" id="primaryQuestionnaire--q4">Select One</button>
+</div>
+</fieldset>
+</div>
+
+</div>
+</div>
+
+<div data-automation-id="contactInformationPage">
+<div class="css-gvoll6">
+<label for="phone-number">Phone Number</label>
+<input type="text" id="phone-number" name="phoneNumber" value="">
+</div>
+<div class="css-gvoll6">
+<label for="phone-ext">Phone Extension</label>
+<input type="text" id="phone-ext" name="phoneExtension" value="">
+</div>
+</div>
+
+<script>
+  // Stand-in for Workday's own dropdown script -- see the note at the top.
+  var CHOICES = {q1: ["Yes", "No"], q2: ["Yes", "No"], q3: ["Yes", "No"], q4: ["Yes", "No"]};
+  var openList = null;
+
+  function close() { if (openList) { openList.remove(); openList = null; } }
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
+
+  document.querySelectorAll('button[aria-haspopup="listbox"]').forEach(function (button) {
+    button.addEventListener("click", function () {
+      if (openList && openList.dataset.owner === button.name) { close(); return; }
+      close();
+      var list = document.createElement("ul");
+      list.setAttribute("role", "listbox");
+      list.dataset.owner = button.name;
+      (CHOICES[button.name] || []).forEach(function (text) {
+        var li = document.createElement("li");
+        li.setAttribute("role", "option");
+        li.textContent = text;
+        li.addEventListener("click", function () {
+          button.textContent = text;
+          button.value = text;
+          close();
+        });
+        list.appendChild(li);
+      });
+      button.parentElement.appendChild(list);
+      openList = list;
+    });
+  });
+</script>

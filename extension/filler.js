@@ -462,9 +462,14 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
         "Left for Claude to write for this job.", required);
       return;
     }
-    // The machine-name fallback must not undo an escape-hatch label:
-    // "Other School" is named OtherSchool, which reads as a plain school.
-    if (canonical === null && !isEscapeHatchLabel(label)) {
+    // The machine-name fallback must not undo a label that was refused on
+    // purpose. "Other School" is named OtherSchool, which reads as a plain
+    // school. And a machine name is often the whole questionnaire's, not the
+    // field's: the credit-hours box on a campus form is
+    // "secondaryJsqData.Campus - GPA Not Required - Clearance - 2025.b",
+    // which matched *gpa* off the questionnaire's title and put a grade point
+    // average in a box asking for a number of hours.
+    if (canonical === null && !isEscapeHatchLabel(label) && !isQuantityLabel(label)) {
       canonical = matchFieldByName(f.name || "", f.id || "");
     }
     if (canonical === null) {
@@ -487,7 +492,7 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
       // here to stop.
       const remembered = learnedAnswerFor(label);
       if (remembered !== null) {
-        _fillRemembered(report, f, label, remembered, required);
+        await _fillRemembered(report, f, label, remembered, required);
         return;
       }
       if (required) _mark(f.ja_id, MARK_BLANK);
@@ -499,6 +504,15 @@ async function _handleSimpleFieldInner(profile, report, f, creds) {
 
   value = _scalar(value);
   if (value === null || value === undefined || value === "") {
+    // A field the applicant hasn't got is answered, not missing: blank is the
+    // right value and there is nothing to flag or count. Still reported, so
+    // the panel can say why the box was left alone, but as a settled outcome
+    // rather than as something outstanding.
+    if (NOT_APPLICABLE_FIELDS.has(canonical)) {
+      addResult(report, label, canonical, "filled",
+        "Left blank -- you've said you don't have one.", required);
+      return;
+    }
     if (required) _mark(f.ja_id, MARK_BLANK);
     addResult(report, label, canonical, "skipped_no_data", "Profile has no value for this field.", required);
     return;
@@ -558,6 +572,30 @@ function _chooseOption(profile, canonical, value, options) {
     const match = options.find((o) => semanticBool(o.text || "") === value);
     if (!match) return { skip: `No option matched '${value}'.` };
     return { value: match.value, detail: match.text || "" };
+  }
+
+  // A self-identification answer is matched with the qualifier-stripping
+  // rule rather than bestOption. Workday writes the choice as
+  // "Asian (Not Hispanic or Latino) (United States of America)", which
+  // bestOption scores at 0.42 against a saved "Asian" -- under its 0.5 bar,
+  // so the question came back required-and-blank on every Workday form even
+  // with the answer saved. Its containment bonus is also actively wrong on
+  // this wording: it reads the negation as the answer and picks Hispanic or
+  // Latino for someone who said Asian. Before the yes/no check below, so a
+  // Hispanic/Latino question offering Yes and No still finds its answer.
+  if (canonical === "gpa") {
+    const real = options.filter((o) => o.value !== "" && o.value !== null);
+    const at = bestGpaBracket(value, real.map((o) => o.text || ""));
+    if (at !== null) return { value: real[at].value, detail: real[at].text || "" };
+    // Not a bracketed list after all -- a plain "3.7" option, say. Fall
+    // through and let the ordinary matching have it.
+  }
+
+  if (SELF_ID_FIELDS.has(canonical)) {
+    const real = options.filter((o) => o.value !== "" && o.value !== null);
+    const at = bestSelfIdChoice(String(value), real.map((o) => o.text || ""));
+    if (at === null) return { skip: `No option matched '${value}'.` };
+    return { value: real[at].value, detail: real[at].text || "" };
   }
 
   const realOptions = options.length > 1 ? options.slice(1) : options;
@@ -645,7 +683,7 @@ async function _fillSelectLike(profile, report, f, el, canonical, value, label, 
 // with this time. A dropdown or radio group gets the option that matches it,
 // not the raw text, so the same saved "Yes" works on a form that spells it
 // "Yes, I did".
-function _fillRemembered(report, f, label, value, required) {
+async function _fillRemembered(report, f, label, value, required) {
   value = _scalar(value);
   if (value === null || value === "") {
     addResult(report, label, "learned", "skipped_no_data", "", required);
@@ -660,16 +698,56 @@ function _fillRemembered(report, f, label, value, required) {
   }
 
   if (f.tag === "select") {
-    const optionValue = bestOption(value, f.options || []);
+    // A Workday question is a <button aria-haspopup="listbox"> whose choices
+    // do not exist in the DOM until it is clicked, so f.options is empty at
+    // extraction time. The profile-matched path opens the widget first
+    // (_fillSelectLike); this one did not, read the empty list, and reported
+    // every remembered answer as unmatched -- "Remembered 'No', but no option
+    // matched it" on the very questions an earlier application had taught it.
+    let options = f.options || [];
+    let opened = null;
+    if (f.widget === "listbox_button") {
+      opened = await _openListbox(el);
+      if (!opened) {
+        _mark(f.ja_id, MARK_REVIEW);
+        addResult(report, label, "learned", "needs_review",
+          "Could not open this dropdown automatically -- pick an answer here yourself.", required);
+        return;
+      }
+      options = opened.options;
+      f.options = options;
+    } else if (f.widget === "icims") {
+      _openIcims(el);
+      options = f.options || [];
+    }
+
+    let optionValue = bestOption(value, options);
     if (optionValue === null || optionValue === undefined) {
+      // A remembered month against a list of month names, or the other way
+      // round. Only for a list that is actually months -- see bestMonthOption.
+      const real = options.filter((o) => o.value !== "" && o.value !== null);
+      const at = bestMonthOption(value, real.map((o) => o.text || ""), label);
+      if (at !== null) optionValue = real[at].value;
+    }
+    if (optionValue === null || optionValue === undefined) {
+      // Nothing may be left hanging open over the rest of the form.
+      if (opened) _closeListbox(el, opened);
       if (required) _mark(f.ja_id, MARK_BLANK);
       addResult(report, label, "learned", "skipped_no_match",
         `Remembered '${value}', but no option matched it.`, required);
       return;
     }
-    if (f.widget === "icims") {
-      _openIcims(el);
-      if (!_setIcimsValue(el, optionValue, _optionText(f.options || [], optionValue))) {
+
+    if (opened) {
+      if (!_clickListboxOption(el, opened, Number(optionValue))) {
+        _closeListbox(el, opened);
+        _mark(f.ja_id, MARK_REVIEW);
+        addResult(report, label, "learned", "needs_review",
+          "This dropdown didn't take the remembered answer -- set it here yourself.", required);
+        return;
+      }
+    } else if (f.widget === "icims") {
+      if (!_setIcimsValue(el, optionValue, _optionText(options, optionValue))) {
         _mark(f.ja_id, MARK_REVIEW);
         addResult(report, label, "learned", "needs_review",
           "This dropdown didn't take the remembered answer -- set it here yourself.", required);
@@ -679,7 +757,7 @@ function _fillRemembered(report, f, label, value, required) {
       _setSelectValue(el, optionValue);
     }
     _mark(f.ja_id, MARK_FILLED);
-    addResult(report, label, "learned", "filled", _optionText(f.options || [], optionValue), required);
+    addResult(report, label, "learned", "filled", _optionText(options, optionValue), required);
     return;
   }
 
@@ -1133,7 +1211,16 @@ function _isConsentLike(text) {
 // descriptor sent to the API and the local handles needed to apply what
 // comes back. Built here and recomputed on the way in, so an answer for
 // anything not on this list can be dropped rather than trusted.
-function _llmCandidates(report) {
+// opts.includeFilled: offer fields the fill already set, and carry what is
+// in them. The fill pass must not have those -- re-answering what is done
+// costs money and invites a worse answer -- but the chat is where someone
+// says "that date is wrong, fix it", and without them it could only reply
+// that the field was locked from its side. Which it did.
+//
+// Nothing about what may be answered moves: blocked(), the consent rules
+// and the radio gates below are untouched, and applyLlmAnswers re-checks
+// every one of them on the way back in.
+function _llmCandidates(report, opts) {
   const fields = report.fields || [];
   const routeSaved = !!report.opts.answerSensitive;
   // "Flagged for you to answer" is precisely the pile routing exists to
@@ -1146,6 +1233,7 @@ function _llmCandidates(report) {
     !(routeSaved && r.action === "needs_review");
   const answered = new Set(report.results.filter(settled).map((r) => r.ja_id));
 
+  const includeFilled = !!(opts && opts.includeFilled);
   const offer = (f, descriptor, jaIds) => ({ field: f, descriptor, jaIds });
   const out = [];
 
@@ -1181,8 +1269,8 @@ function _llmCandidates(report) {
     // is only ever offered once the applicant has said their saved consent
     // answers may be used for wordings the matcher didn't recognise.
     if (f.type === "checkbox" && !routeSaved) continue;
-    if (answered.has(f.ja_id)) continue;
-    if (f.has_value) continue;
+    if (!includeFilled && answered.has(f.ja_id)) continue;
+    if (!includeFilled && f.has_value) continue;
     if (!LLM_FILLABLE_TYPES.has(f.type) && f.tag !== "select" && f.type !== "checkbox") continue;
     if (blocked(f.label, f.group_label, f.context)) continue;
     if (!f.label && !f.group_label && !f.section) continue;
@@ -1197,6 +1285,9 @@ function _llmCandidates(report) {
         type: f.tag === "select" ? "select" : f.tag === "textarea" ? "textarea" : f.type,
         required: !!f.required,
         max_length: f.max_length || null,
+        // What is in the box now, so a correction can be asked for by what
+        // is wrong with it rather than by naming the field's internal id.
+        current: includeFilled ? _readableValue(_el(f.ja_id), f) || "" : "",
         options: f.type === "checkbox"
           ? ["Yes", "No"]
           : (f.options || []).map((o) => o.text).filter(Boolean),
@@ -1206,8 +1297,8 @@ function _llmCandidates(report) {
 
   for (const group of radioGroups.values()) {
     const head = group[0];
-    if (answered.has(head.ja_id)) continue;
-    if (group.some((o) => o.checked)) continue;
+    if (!includeFilled && answered.has(head.ja_id)) continue;
+    if (!includeFilled && group.some((o) => o.checked)) continue;
     const question = group.find((o) => o.group_label)?.group_label || "";
     const context = group.find((o) => o.context)?.context || "";
     // The options are part of the question. A disability self-ID group can be
@@ -1226,6 +1317,7 @@ function _llmCandidates(report) {
         type: "radio",
         required: group.some((o) => o.required),
         max_length: null,
+        current: includeFilled ? _checkedRadioLabel(report, head) || "" : "",
         options: group.map((o) => o.label || "").filter(Boolean),
       }, group.map((o) => o.ja_id))
     );
@@ -1234,8 +1326,8 @@ function _llmCandidates(report) {
   return out;
 }
 
-function llmFieldsFor(report) {
-  return _llmCandidates(report).map((c) => c.descriptor);
+function llmFieldsFor(report, opts) {
+  return _llmCandidates(report, opts).map((c) => c.descriptor);
 }
 
 async function _applyLlmSelect(f, el, value) {
@@ -1428,9 +1520,9 @@ function _savedAnswerAllows(profile, candidate, value) {
   return false;
 }
 
-async function applyLlmAnswers(report, answers, skipped, profile) {
+async function applyLlmAnswers(report, answers, skipped, profile, opts) {
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
-  const candidates = new Map(_llmCandidates(report).map((c) => [c.descriptor.ja_id, c]));
+  const candidates = new Map(_llmCandidates(report, opts).map((c) => [c.descriptor.ja_id, c]));
   let filled = 0;
 
   for (const [jaId, value] of Object.entries(answers || {})) {
@@ -1546,13 +1638,48 @@ function watchForCorrections(report, onLearn, onSuggest) {
     radioGroups.get(key).push(f);
   }
 
+  // One edit, recorded once. Two listeners can see the same change now --
+  // the one on the element and the delegated one -- and a page firing
+  // `change` twice was already enough on its own. Storing the same answer
+  // twice is harmless in itself; counting it as two forms having asked is
+  // not, because that count is what decides which answers survive the cap.
+  const alreadyStored = new Map();
+  const isRepeat = (slot, text) => {
+    if (alreadyStored.get(slot) === text) return true;
+    alreadyStored.set(slot, text);
+    return false;
+  };
+
   const remember = (label, value) => {
     const text = String(value == null ? "" : value).trim();
     if (!text || text.length > LEARNABLE_MAX_LENGTH) return;
-    onLearn({ [normalize(label)]: text });
+    const key = normalize(label);
+    if (isRepeat(`a:${key}`, text)) return;
+    onLearn({ [key]: text });
   };
 
   const watched = [];
+
+  // A listener lives on the element it was attached to. React and Angular
+  // replace elements rather than updating them, so on those forms every
+  // listener below is quietly thrown away on the next render and a
+  // correction typed afterwards teaches nothing -- silently, which is why
+  // this sat in the known limitations rather than being noticed.
+  //
+  // So the same handlers are also registered against something the page
+  // itself keeps stable across a render: the field's id or name. One pair of
+  // listeners on the document then catches the event wherever it comes from,
+  // including from an element that did not exist when this ran.
+  const delegated = new Map();
+  const keyOf = (el) => (el && (el.id || el.getAttribute("name"))) || "";
+  const byKey = (el, handler) => {
+    const key = keyOf(el);
+    // A radio group shares one name, so its options are told apart by id
+    // alone; without one there is nothing stable to find them by later.
+    if (!key) return;
+    if (el.type === "radio" && !el.id) return;
+    delegated.set(key, handler);
+  };
 
   // `change` is the reliable signal -- it fires when a box is left, and any
   // other tool filling a field programmatically has to dispatch it or React
@@ -1574,6 +1701,7 @@ function watchForCorrections(report, onLearn, onSuggest) {
   const suggest = (field, value) => {
     const text = String(value == null ? "" : value).trim();
     if (!text || !onSuggest) return;
+    if (isRepeat(`s:${field}`, text)) return;
     onSuggest({ [field]: text });
   };
 
@@ -1589,29 +1717,32 @@ function watchForCorrections(report, onLearn, onSuggest) {
     // being asked still applies to it.
     const sensitive = _sensitiveCanonicalFor(f, f.group_label || "");
     if (sensitive) {
-      watchBoth(el, () => {
-        if (f.type === "checkbox") return suggest(sensitive, el.checked ? "Yes" : "No");
+      const onSensitive = (node) => {
+        if (f.type === "checkbox") return suggest(sensitive, node.checked ? "Yes" : "No");
         if (f.tag === "select") {
-          const opt = el.options && el.options[el.selectedIndex];
-          return suggest(sensitive, opt ? opt.text : el.value);
+          const opt = node.options && node.options[node.selectedIndex];
+          return suggest(sensitive, opt ? opt.text : node.value);
         }
-        suggest(sensitive, el.value);
-      });
+        suggest(sensitive, node.value);
+      };
+      watchBoth(el, () => onSensitive(el));
+      byKey(el, onSensitive);
       continue;
     }
 
     const label = _learnableQuestion(f, "");
     if (!label) continue;
 
-    const handler = () => {
-      if (f.type === "checkbox") return remember(label, el.checked ? "Yes" : "No");
+    const handler = (node) => {
+      if (f.type === "checkbox") return remember(label, node.checked ? "Yes" : "No");
       if (f.tag === "select") {
-        const opt = el.options && el.options[el.selectedIndex];
-        return remember(label, opt ? opt.text : el.value);
+        const opt = node.options && node.options[node.selectedIndex];
+        return remember(label, opt ? opt.text : node.value);
       }
-      remember(label, el.value);
+      remember(label, node.value);
     };
-    watchBoth(el, handler);
+    watchBoth(el, () => handler(el));
+    byKey(el, handler);
   }
 
   for (const group of radioGroups.values()) {
@@ -1625,9 +1756,11 @@ function watchForCorrections(report, onLearn, onSuggest) {
       for (const option of group) {
         const el = _el(option.ja_id);
         if (!el) continue;
-        watchBoth(el, () => {
-          if (el.checked) suggest(sensitive, option.label || el.value);
-        });
+        const onOption = (node) => {
+          if (node.checked) suggest(sensitive, option.label || node.value);
+        };
+        watchBoth(el, () => onOption(el));
+        byKey(el, onOption);
       }
       continue;
     }
@@ -1637,16 +1770,37 @@ function watchForCorrections(report, onLearn, onSuggest) {
     for (const option of group) {
       const el = _el(option.ja_id);
       if (!el) continue;
-      const handler = () => {
-        if (el.checked) remember(label, option.label || el.value);
+      const handler = (node) => {
+        if (node.checked) remember(label, option.label || node.value);
       };
-      el.addEventListener("change", handler);
-      watched.push([el, handler]);
+      const bound = () => handler(el);
+      el.addEventListener("change", bound);
+      watched.push([el, bound]);
+      byKey(el, handler);
     }
   }
 
+  const fromEvent = (target) => {
+    if (!target || !target.tagName) return;
+    const handler = delegated.get(keyOf(target));
+    if (handler) handler(target);
+  };
+
+  const onChange = (e) => fromEvent(e.target);
+  let pageTimer = null;
+  const onInput = (e) => {
+    const target = e.target;
+    clearTimeout(pageTimer);
+    pageTimer = setTimeout(() => fromEvent(target), 700);
+  };
+  document.addEventListener("change", onChange, true);
+  document.addEventListener("input", onInput, true);
+
   return () => {
     for (const [el, handler, type] of watched) el.removeEventListener(type || "change", handler);
+    document.removeEventListener("change", onChange, true);
+    document.removeEventListener("input", onInput, true);
+    clearTimeout(pageTimer);
   };
 }
 
@@ -1704,6 +1858,8 @@ async function verifyFilled(report, delayMs = 350) {
   await _sleep(delayMs);
   const byId = new Map((report.fields || []).map((f) => [f.ja_id, f]));
   const lost = [];
+  // Re-set and still to be judged, once the page has had a moment with it.
+  const retried = [];
 
   for (const r of report.results) {
     if (r.action !== "filled" || !r.ja_id) continue;
@@ -1728,12 +1884,31 @@ async function verifyFilled(report, delayMs = 350) {
       } else if (el) {
         _setNativeValue(el, r.detail);
       }
-      recovered = !!_currentValue(el, f);
+      recovered = true;
     } catch (exc) {
       recovered = false;
     }
 
-    if (!recovered) {
+    // Whether it held is decided below, after the page has had the same
+    // moment to react that it was given the first time. Reading the value
+    // back on the line after setting it only proves the write landed: a page
+    // that clears the field on its next render passes that check and is
+    // reported as filled, and a green field that is actually empty is worse
+    // than a flagged one, because nobody looks at it again.
+    if (recovered) retried.push(r);
+    else {
+      r.action = "needs_review";
+      r.detail = `Set to '${r.detail}', but the page cleared it -- fill this one yourself.`;
+      _mark(r.ja_id, MARK_REVIEW);
+      lost.push(r.label || r.ja_id);
+    }
+  }
+
+  if (retried.length) {
+    await _sleep(delayMs);
+    for (const r of retried) {
+      const f = byId.get(r.ja_id);
+      if (_currentValue(_el(r.ja_id), f)) continue;
       r.action = "needs_review";
       r.detail = `Set to '${r.detail}', but the page cleared it -- fill this one yourself.`;
       _mark(r.ja_id, MARK_REVIEW);
@@ -1754,6 +1929,7 @@ function missedFields(report) {
     if (!["skipped_no_match", "skipped_no_data", "needs_review", "error"].includes(r.action)) {
       continue;
     }
+    if (NOT_APPLICABLE_FIELDS.has(r.canonical)) continue;
     const label = (r.label || "").trim();
     if (!label) continue;
     const f = byId.get(r.ja_id) || {};
@@ -1822,6 +1998,33 @@ function _checkedRadioLabel(report, f) {
     if (el && el.checked) return option.label || el.value || "";
   }
   return "";
+}
+
+// "Learn this form": the applicant has filled a form in themselves, and
+// presses it so the next identical one fills itself. Nothing is set on the
+// page -- this only reads what is in it.
+//
+// It builds a report in which nothing was filled, because that is what the
+// page is: every answer in it is the applicant's own. learnFromPrefilled
+// then applies unchanged, which is the point -- it already routes a
+// self-identification, criminal-history or consent answer to the profile
+// field for that question and never to the label-keyed answer store, and
+// that routing is the safety property (HANDOFF rule 5). A second copy of
+// this loop would be a second copy of that gate to keep in step.
+function learnFromPage(profile) {
+  const fields = extractFields();
+  const report = {
+    fields,
+    results: fields.map((f) => ({
+      ja_id: f.ja_id,
+      label: f.label || f.group_label || "",
+      canonical: null,
+      action: "skipped_no_match",
+      detail: "",
+      required: !!f.required,
+    })),
+  };
+  return learnFromPrefilled(report, profile);
 }
 
 function learnFromPrefilled(report, profile) {

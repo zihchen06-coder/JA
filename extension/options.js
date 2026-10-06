@@ -147,7 +147,7 @@ function buildBoolGrid() {
   grid.innerHTML = "";
   for (const field of BOOLEAN_FIELDS) {
     const wrap = document.createElement("div");
-    wrap.className = "field";
+    wrap.className = "field full seg-row";
     wrap.innerHTML = `
       <label>${BOOL_LABELS[field] || field}</label>
       <select data-bool="${field}">
@@ -155,7 +155,55 @@ function buildBoolGrid() {
         <option value="true">Yes</option>
         <option value="false">No</option>
       </select>`;
+    wrap.appendChild(segmentedFor(wrap.querySelector("select")));
     grid.appendChild(wrap);
+  }
+}
+
+// The <select> stays and stays the value: everything else on this page reads
+// these through [data-bool] / [data-f] and .value, and the Learned tab's
+// Add button leans on it being a SELECT so it can match a form's wording to
+// one of the choices. The buttons only drive it, and repaint when anything
+// else sets it.
+function segmentedFor(select) {
+  const row = document.createElement("div");
+  row.className = "segmented";
+
+  const paint = () => {
+    for (const b of row.querySelectorAll("button")) {
+      b.classList.toggle("on", b.dataset.value === select.value);
+    }
+  };
+
+  for (const opt of Array.from(select.options)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = opt.value === "" ? "seg-btn unset" : "seg-btn";
+    button.dataset.value = opt.value;
+    button.textContent = opt.text;
+    button.onclick = () => {
+      select.value = opt.value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      paint();
+    };
+    row.appendChild(button);
+  }
+
+  // Loading the profile, or accepting a suggestion from the Learned tab,
+  // both set the select directly.
+  select.addEventListener("change", paint);
+  // load() and the Learned tab's Add button both assign .value directly,
+  // which fires nothing -- so the buttons sat on "Not set" over a profile
+  // that was set. Anything that writes a value calls this afterwards.
+  select.__jaPaint = paint;
+  select.style.display = "none";
+  paint();
+  return row;
+}
+
+function repaintSegmented() {
+  for (const select of document.querySelectorAll("select")) {
+    if (select.__jaPaint) select.__jaPaint();
   }
 }
 
@@ -164,13 +212,26 @@ function buildSelfIdGrid() {
   grid.innerHTML = "";
   for (const field of SELF_ID_FIELDS) {
     const wrap = document.createElement("div");
-    wrap.className = "field";
-    const options = (SELF_ID_CHOICES[field] || [])
+    wrap.className = "field full seg-row";
+    const choices = SELF_ID_CHOICES[field] || [];
+    const name = SELF_ID_DISPLAY_NAMES[field] || field;
+
+    // Pronouns has no fixed set to choose from, and a row of buttons holding
+    // only "Not set" is worse than the box it replaced.
+    if (!choices.length) {
+      wrap.className = "field";
+      wrap.innerHTML = `<label>${name}</label><input data-f="${field}" placeholder="e.g. he/him">`;
+      grid.appendChild(wrap);
+      continue;
+    }
+
+    const options = choices
       .map((c) => `<option value="${c.replace(/"/g, "&quot;")}">${c}</option>`)
       .join("");
     wrap.innerHTML = `
-      <label>${SELF_ID_DISPLAY_NAMES[field] || field}</label>
+      <label>${name}</label>
       <select data-f="${field}"><option value="">Not set</option>${options}</select>`;
+    wrap.appendChild(segmentedFor(wrap.querySelector("select")));
     grid.appendChild(wrap);
   }
 }
@@ -287,6 +348,9 @@ function loadIntoForm() {
     const v = p[field];
     el.value = v === true ? "true" : v === false ? "false" : "";
   });
+  // Assigning .value fires nothing, so the buttons over these selects have
+  // to be told the profile just landed.
+  repaintSegmented();
 
   const eduList = document.getElementById("edu-list");
   eduList.innerHTML = "";
@@ -303,10 +367,13 @@ function loadIntoForm() {
   document.getElementById("s-auto-accounts").checked = !!(state.settings && state.settings.auto_create_accounts);
   document.getElementById("s-use-llm").checked = !!(state.settings && state.settings.use_llm);
   document.getElementById("s-tailor-cover").checked = !!(state.settings && state.settings.tailor_cover_letter);
-  document.getElementById("s-route-saved").checked = !!(state.settings && state.settings.route_saved_answers);
+  document.getElementById("s-route-saved").checked =
+    !state.settings || state.settings.route_saved_answers !== false;
   document.getElementById("s-watch-learn").checked = !state.settings || state.settings.watch_and_learn !== false;
   document.getElementById("s-show-panel").checked = !state.settings || state.settings.show_panel !== false;
-  document.getElementById("s-auto-fill").checked = !!(state.settings && state.settings.auto_fill_known_sites);
+  document.getElementById("s-auto-fill").checked =
+    !state.settings || state.settings.auto_fill_known_sites !== false;
+  document.getElementById("s-manual-fill").checked = !!(state.settings && state.settings.manual_fill);
   renderLearned();
   renderLearnedAnswers();
   renderSuggestions();
@@ -371,6 +438,7 @@ async function save() {
     watch_and_learn: document.getElementById("s-watch-learn").checked,
     show_panel: document.getElementById("s-show-panel").checked,
     auto_fill_known_sites: document.getElementById("s-auto-fill").checked,
+    manual_fill: document.getElementById("s-manual-fill").checked,
   };
   // Kept out of `profile` so it is never in anything exported, imported, or
   // sent to the API as part of the profile blob.
@@ -452,6 +520,105 @@ function initTabs() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  };
+
+  // Everything this browser holds, so the same setup can be picked up on
+  // another one. Distinct from "Export as JSON" above, which deliberately
+  // drops documents and credentials because it is meant to be pasted into a
+  // chat -- this is a device move and has to carry the resume with it.
+  const BACKUP_KEYS = [
+    "profile", "settings", "learned_aliases", "learned_answers",
+    "misses", "applications", "profile_suggestions", "migrations",
+  ];
+  // Kept out unless asked for. The file is ordinary text on a disk: anything
+  // that can read the file can read a saved site password out of it.
+  const BACKUP_SECRET_KEYS = ["credentials", "llm_api_key"];
+
+  const backupStatus = (text, cls) => {
+    const el = document.getElementById("backup-status");
+    el.textContent = text;
+    el.className = cls ? `note ${cls}` : "note";
+  };
+
+  document.getElementById("backup-export").onclick = async () => {
+    const withSecrets = document.getElementById("backup-secrets").checked;
+    const keys = withSecrets ? [...BACKUP_KEYS, ...BACKUP_SECRET_KEYS] : BACKUP_KEYS;
+    const data = await chrome.storage.local.get(keys);
+
+    const payload = {
+      ja_backup: 1,
+      saved_at: new Date().toISOString(),
+      includes_secrets: withSecrets,
+      data,
+    };
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" })
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ja-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    backupStatus(
+      withSecrets
+        ? "Downloaded, with your saved logins and API key in it -- delete the file once the other browser has it."
+        : "Downloaded. Saved logins and the API key were left out; tick the box above if you need them too.",
+      "ok"
+    );
+  };
+
+  document.getElementById("backup-import-btn").onclick = () =>
+    document.getElementById("backup-import").click();
+
+  document.getElementById("backup-import").onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+
+    let payload;
+    try {
+      payload = JSON.parse(await file.text());
+    } catch (exc) {
+      backupStatus(`That file isn't readable as JSON (${exc}).`, "err");
+      return;
+    }
+    // A profile export, a resume, or somebody's unrelated JSON would
+    // otherwise be written straight into storage as if it belonged.
+    if (!payload || payload.ja_backup !== 1 || !payload.data || typeof payload.data !== "object") {
+      backupStatus("That isn't a backup file from this extension.", "err");
+      return;
+    }
+
+    const known = [...BACKUP_KEYS, ...BACKUP_SECRET_KEYS];
+    const restoring = {};
+    for (const key of known) {
+      if (Object.prototype.hasOwnProperty.call(payload.data, key)) {
+        restoring[key] = payload.data[key];
+      }
+    }
+    const names = Object.keys(restoring);
+    if (!names.length) {
+      backupStatus("That backup has nothing in it to restore.", "err");
+      return;
+    }
+
+    const saved = payload.saved_at ? new Date(payload.saved_at).toLocaleString() : "an unknown date";
+    if (!confirm(
+      `Restore ${names.length} item(s) from the backup taken on ${saved}?\n\n` +
+      `This replaces what is in this browser for: ${names.join(", ")}.`
+    )) {
+      backupStatus("Left as it was.", "");
+      return;
+    }
+
+    await chrome.storage.local.set(restoring);
+    // The form on this page was drawn from the old storage, so re-read it
+    // rather than leaving the two disagreeing until the next save wipes the
+    // restore out.
+    backupStatus("Restored. Reloading this page\u2026", "ok");
+    setTimeout(() => location.reload(), 600);
   };
 
   const wireFileInput = (inputId, key, elId) => {
@@ -607,25 +774,35 @@ function renderLearned() {
 function renderLearnedAnswers() {
   const list = document.getElementById("answers-learned-list");
   const empty = document.getElementById("answers-learned-empty");
-  const entries = Object.entries(state.learnedAnswers || {}).sort();
+  // Most-asked first, the way the Gaps tab ranks: an answer eight forms have
+  // wanted is the one worth checking is still right.
+  const entries = Object.entries(state.learnedAnswers || {}).sort((a, b) => {
+    const n = (e) => (e && typeof e === "object" ? e.n || 0 : 0);
+    return n(b[1]) - n(a[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  });
   list.innerHTML = "";
   empty.style.display = entries.length ? "none" : "";
 
-  for (const [label, value] of entries) {
+  for (const [label, entry] of entries) {
+    const value = answerValueOf(entry);
+    const asked = entry && typeof entry === "object" ? entry.n || 0 : 0;
     const row = document.createElement("div");
     row.className = "cred-row";
     row.style.marginBottom = "8px";
     row.innerHTML = `
       <input readonly value="${esc(label)}">
-      <input data-answer="1" value="${esc(value)}">
-      <span></span>
+      <input data-answer="1" value="${esc(value === null ? "" : value)}">
+      <span class="note">${asked > 1 ? `asked on ${asked} forms` : ""}</span>
       <button class="danger" type="button">Forget</button>`;
     // Editable in place: a remembered answer you would rather phrase
     // differently is worth correcting once, not deleting and waiting to be
     // asked it again.
     row.querySelector("input[data-answer]").onchange = async (e) => {
-      state.learnedAnswers[label] = e.target.value;
+      // Corrected by hand, so the count starts over: whatever those earlier
+      // forms confirmed, it was not this answer.
+      state.learnedAnswers[label] = { v: e.target.value, n: 1, t: Date.now() };
       await chrome.storage.local.set({ learned_answers: state.learnedAnswers });
+      renderLearnedAnswers();
     };
     row.querySelector("button").onclick = async () => {
       delete state.learnedAnswers[label];
@@ -867,21 +1044,21 @@ function renderSuggestions() {
         // -- are stored as true/false, whatever the form phrased them as.
         const yes = /^(yes|y|true|checked|i (do |am |agree|consent|certify))/i.test(value.trim());
         boolInput.value = String(yes);
+        repaintSegmented();
       } else if (input) {
         // A self-ID dropdown only takes one of its own options, so match the
         // form's wording to the nearest choice this profile offers.
         if (input.tagName === "SELECT") {
-          const choice = Array.from(input.options).find(
-            (o) => o.value && (o.value === value || o.text.toLowerCase() === value.toLowerCase())
-          ) || Array.from(input.options).find(
-            (o) => o.value && o.text.toLowerCase().startsWith(value.toLowerCase().slice(0, 12))
-          );
+          const real = Array.from(input.options).filter((o) => o.value);
+          const at = bestSelfIdChoice(value, real.map((o) => o.text));
+          const choice = at === null ? null : real[at];
           if (!choice) {
             status.className = "err";
             status.textContent = `No matching choice for "${value}" — set it by hand.`;
             return;
           }
           input.value = choice.value;
+          repaintSegmented();
         } else {
           input.value = value;
         }
